@@ -13,12 +13,14 @@ export interface Settings {
   aiModel: AIModelId;
   compactView: boolean;
   showProgressBars: boolean;
+  blinkEffect: boolean;
 }
 
 const defaults: Settings = {
   aiModel: "google/gemini-2.0-flash",
   compactView: false,
   showProgressBars: true,
+  blinkEffect: true,
 };
 
 export function getSettings(): Settings {
@@ -30,6 +32,7 @@ export function getSettings(): Settings {
       aiModel: AI_MODELS.some((m) => m.value === parsed.aiModel) ? parsed.aiModel! : defaults.aiModel,
       compactView: parsed.compactView ?? defaults.compactView,
       showProgressBars: parsed.showProgressBars ?? defaults.showProgressBars,
+      blinkEffect: parsed.blinkEffect ?? defaults.blinkEffect,
     };
   } catch {
     return { ...defaults };

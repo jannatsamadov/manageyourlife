@@ -68,6 +68,10 @@ export default function SettingsPage() {
             <Label htmlFor="progress">Show progress bars on tasks</Label>
             <Switch id="progress" checked={settings.showProgressBars} onCheckedChange={(v) => update({ showProgressBars: v })} />
           </div>
+          <div className="flex items-center justify-between">
+            <Label htmlFor="blink">Deadline blink effect</Label>
+            <Switch id="blink" checked={settings.blinkEffect} onCheckedChange={(v) => update({ blinkEffect: v })} />
+          </div>
         </div>
       </div>
     </div>

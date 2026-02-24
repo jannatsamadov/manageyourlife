@@ -37,16 +37,20 @@ function formatDayLabel(dateStr: string): string {
   return new Date(dateStr + "T12:00:00").toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" });
 }
 
-/** Progress: full_time = estimated hours, remaining = (deadline - today) * 8. Red overlay = (full - remaining) / full */
+/**
+ * full_time = 100 * estimated_hours
+ * remaining = (deadline - today) * 8h
+ * progress = (full_time - remaining) / full_time
+ */
 function getTaskProgress(task: Task): number {
-  const today = new Date().toISOString().slice(0, 10);
-  const fullTimeHours = (task.estimatedTime ?? 60) / 60;
+  if (!task.estimatedTime) return 0;
+  const todayDate = new Date(new Date().toISOString().slice(0, 10));
   const deadline = new Date(task.date);
-  const todayDate = new Date(today);
   const daysUntil = Math.ceil((deadline.getTime() - todayDate.getTime()) / 86400000);
-  const remainingHours = Math.max(0, daysUntil) * 8;
-  if (remainingHours >= fullTimeHours) return 0;
-  return Math.min(1, (fullTimeHours - remainingHours) / fullTimeHours);
+  const fullTime = (task.estimatedTime / 60) * 100;
+  const remaining = Math.max(0, daysUntil) * 8;
+  if (remaining >= fullTime) return 0;
+  return Math.min(1, (fullTime - remaining) / fullTime);
 }
 
 function isTaskOverdue(task: Task): boolean {
@@ -60,7 +64,7 @@ export default function DailyPlan() {
   const [newEst, setNewEst] = useState("");
 
   const today = new Date().toISOString().slice(0, 10);
-  const { showProgressBars } = getSettings();
+  const { showProgressBars, blinkEffect } = getSettings();
 
   const dayCount = 14;
   const visibleDates = useMemo(() => {
@@ -225,10 +229,13 @@ export default function DailyPlan() {
                               overdue && "task-card-overdue"
                             )}
                           >
-                            {showProgressBars && progressPct > 0 && progressPct < 1 && (
+                            {showProgressBars && progressPct > 0 && task.status !== "complete" && (
                               <div
-                                className="task-progress-red absolute inset-0 pointer-events-none rounded-lg"
-                                style={{ ["--progress-pct" as string]: `${progressPct * 100}%` }}
+                                className={cn("task-progress-red absolute inset-0 pointer-events-none rounded-lg", blinkEffect && "task-progress-blink")}
+                                style={{
+                                  ["--progress-pct" as string]: `${Math.min(progressPct, 1) * 100}%`,
+                                  ["--blink-duration" as string]: progressPct >= 0.75 ? `${Math.max(0.6, 3.6 - (progressPct - 0.75) * 12)}s` : "3.6s",
+                                }}
                               />
                             )}
                             {task.status !== "complete" && (

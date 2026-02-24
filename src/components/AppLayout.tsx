@@ -7,8 +7,8 @@ import ChatPanel from "@/components/ChatPanel";
 
 const navItems = [
   { title: "Daily Plan", path: "/", icon: LayoutDashboard },
-  { title: "Strategy", path: "/strategy", icon: Target },
   { title: "Schedule", path: "/schedule", icon: Calendar },
+  { title: "Strategy", path: "/strategy", icon: Target },
   { title: "Settings", path: "/settings", icon: Settings },
 ];
 

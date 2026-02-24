@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import { ChevronLeft, ChevronRight, Clock, Plus, Trash2, ExternalLink, GripVertical } from "lucide-react";
-import { useAppState, type TaskPriority } from "@/context/AppContext";
+import { useAppState, type TaskPriority, type Task } from "@/context/AppContext";
+import { getSettings } from "@/lib/settings";
 import { cn } from "@/lib/utils";
 import {
   Tooltip,
@@ -42,6 +43,17 @@ const priorityColors: Record<TaskPriority, string> = {
   low: "bg-info/10 text-info",
 };
 
+function getTaskProgress(task: Task): number {
+  if (!task.estimatedTime) return 0;
+  const todayDate = new Date(new Date().toISOString().slice(0, 10));
+  const deadline = new Date(task.date);
+  const daysUntil = Math.ceil((deadline.getTime() - todayDate.getTime()) / 86400000);
+  const fullTime = (task.estimatedTime / 60) * 100;
+  const remaining = Math.max(0, daysUntil) * 8;
+  if (remaining >= fullTime) return 0;
+  return Math.min(1, (fullTime - remaining) / fullTime);
+}
+
 export default function SchedulePlanning() {
   const { tasks, updateTask, addTask, deleteTask } = useAppState();
   const [view, setView] = useState<View>("month");
@@ -56,6 +68,7 @@ export default function SchedulePlanning() {
     priority: "medium" as TaskPriority,
   });
 
+  const { showProgressBars, blinkEffect } = getSettings();
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
   const today = new Date().toISOString().slice(0, 10);
@@ -274,34 +287,46 @@ export default function SchedulePlanning() {
                 <p className="text-sm text-muted-foreground">No upcoming tasks. Add one above and drag to the calendar to reschedule.</p>
               </div>
             )}
-            {upcomingTasks.map((task) => (
-              <Tooltip key={task.id}>
-                <TooltipTrigger asChild>
-                  <div
-                    draggable
-                    onDragStart={(e) => handleDragStart(e, task.id)}
-                    className="group flex items-center gap-3 rounded-lg border border-border bg-card p-3 cursor-grab active:cursor-grabbing hover:border-primary/30 transition-colors"
-                  >
-                    <GripVertical className="h-4 w-4 text-muted-foreground/60 shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-medium truncate">{task.title}</span>
-                        <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-medium", priorityColors[task.priority])}>{task.priority}</span>
-                        {task.estimatedTime && <span className="text-[10px] text-muted-foreground">Est: {formatEstimated(task.estimatedTime)}</span>}
+            {upcomingTasks.map((task) => {
+              const progressPct = getTaskProgress(task);
+              return (
+                <Tooltip key={task.id}>
+                  <TooltipTrigger asChild>
+                    <div
+                      draggable
+                      onDragStart={(e) => handleDragStart(e, task.id)}
+                      className="group relative flex items-center gap-3 rounded-lg border border-border bg-card p-3 cursor-grab active:cursor-grabbing hover:border-primary/30 transition-colors overflow-hidden"
+                    >
+                      {showProgressBars && progressPct > 0 && task.status !== "complete" && (
+                        <div
+                          className={cn("task-progress-red absolute inset-0 pointer-events-none rounded-lg", blinkEffect && "task-progress-blink")}
+                          style={{
+                            ["--progress-pct" as string]: `${Math.min(progressPct, 1) * 100}%`,
+                            ["--blink-duration" as string]: progressPct >= 0.75 ? `${Math.max(0.6, 3.6 - (progressPct - 0.75) * 12)}s` : "3.6s",
+                          }}
+                        />
+                      )}
+                      <GripVertical className="relative h-4 w-4 text-muted-foreground/60 shrink-0 z-[1]" />
+                      <div className="relative flex-1 min-w-0 z-[1]">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-medium truncate">{task.title}</span>
+                          <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-medium", priorityColors[task.priority])}>{task.priority}</span>
+                          {task.estimatedTime && <span className="text-[10px] text-muted-foreground">Est: {formatEstimated(task.estimatedTime)}</span>}
+                        </div>
+                        <div className="mt-0.5 flex items-center gap-3 text-[10px] text-muted-foreground">
+                          <span className="font-mono">{task.date}</span>
+                          {task.link && <a href={task.link} target="_blank" rel="noopener" className="flex items-center gap-0.5 text-primary hover:underline" onClick={(e) => e.stopPropagation()}><ExternalLink className="h-3 w-3" />Link</a>}
+                        </div>
                       </div>
-                      <div className="mt-0.5 flex items-center gap-3 text-[10px] text-muted-foreground">
-                        <span className="font-mono">{task.date}</span>
-                        {task.link && <a href={task.link} target="_blank" rel="noopener" className="flex items-center gap-0.5 text-primary hover:underline" onClick={(e) => e.stopPropagation()}><ExternalLink className="h-3 w-3" />Link</a>}
-                      </div>
+                      <button onClick={() => deleteTask(task.id)} className="relative rounded p-1.5 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-destructive z-[1]">
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
                     </div>
-                    <button onClick={() => deleteTask(task.id)} className="rounded p-1.5 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-destructive">
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                </TooltipTrigger>
-                {task.description && <TooltipContent side="bottom" className="max-w-xs text-sm">{task.description}</TooltipContent>}
-              </Tooltip>
-            ))}
+                  </TooltipTrigger>
+                  {task.description && <TooltipContent side="bottom" className="max-w-xs text-sm">{task.description}</TooltipContent>}
+                </Tooltip>
+              );
+            })}
           </div>
         </section>
       </div>
