@@ -1,0 +1,106 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 220 20% 7%;
+    --foreground: 210 20% 92%;
+
+    --card: 220 18% 10%;
+    --card-foreground: 210 20% 92%;
+
+    --popover: 220 18% 12%;
+    --popover-foreground: 210 20% 92%;
+
+    --primary: 160 84% 39%;
+    --primary-foreground: 160 84% 6%;
+
+    --secondary: 220 16% 14%;
+    --secondary-foreground: 210 20% 80%;
+
+    --muted: 220 14% 16%;
+    --muted-foreground: 215 12% 50%;
+
+    --accent: 160 84% 39%;
+    --accent-foreground: 160 84% 6%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 220 14% 18%;
+    --input: 220 14% 18%;
+    --ring: 160 84% 39%;
+
+    --radius: 0.5rem;
+
+    --sidebar-background: 220 20% 6%;
+    --sidebar-foreground: 210 20% 70%;
+    --sidebar-primary: 160 84% 39%;
+    --sidebar-primary-foreground: 160 84% 6%;
+    --sidebar-accent: 220 16% 12%;
+    --sidebar-accent-foreground: 210 20% 92%;
+    --sidebar-border: 220 14% 14%;
+    --sidebar-ring: 160 84% 39%;
+
+    --warning: 38 92% 50%;
+    --warning-foreground: 38 92% 10%;
+    --success: 160 84% 39%;
+    --success-foreground: 160 84% 6%;
+    --info: 217 91% 60%;
+    --info-foreground: 217 91% 10%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-family: 'Inter', sans-serif;
+  }
+
+  .font-mono {
+    font-family: 'JetBrains Mono', monospace;
+  }
+}
+
+@layer utilities {
+  .text-gradient {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-primary to-emerald-400;
+  }
+
+  @keyframes breathing {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+  }
+
+  .animate-breathing {
+    animation: breathing 2s ease-in-out infinite;
+  }
+
+  .glass-card {
+    @apply bg-card/80 backdrop-blur-sm border border-border/50 rounded-lg;
+  }
+
+  .task-card-active {
+    @apply bg-primary/10 border-primary/30 animate-breathing;
+  }
+
+  .task-card-complete {
+    @apply bg-primary/20 border-primary/50;
+  }
+
+  .task-card-overdue {
+    @apply bg-destructive/20 border-destructive/50;
+  }
+
+  .task-progress-red {
+    /* Red transparent overlay from left, width = --progress-pct */
+    background: linear-gradient(to right, hsl(var(--destructive) / 0.35) 0%, hsl(var(--destructive) / 0.35) var(--progress-pct, 0%), transparent var(--progress-pct, 0%));
+  }
+}
