@@ -7,17 +7,14 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-const SYSTEM_PROMPT = `You are a personal productivity assistant for the app "Stratify". Your job is to help the user capture tasks and opportunities from their input.
+const SYSTEM_PROMPT = `You are a productivity assistant for "Stratify". You help the user create tasks.
 
-RULES:
-1. Analyze the user's message to determine if it's a "task" (direct action / quick to-do) or an "opportunity" (external event with a deadline, application, or form).
-2. Extract: title, description, estimated_time (in minutes, guess if not provided), deadline (YYYY-MM-DD if found), and link (URL if found).
-3. If the input has a deadline or mentions an external event/application/form, classify it as "opportunity".
-4. If it's a direct action or quick to-do, classify it as "task".
-5. If you cannot determine a deadline for an opportunity, set needs_deadline to true.
-6. If a link/URL is in the message, extract it into the link field.
-7. BULK ADD: When the user provides MULTIPLE tasks in one message (e.g. "Add: buy milk, call mom, finish report" or a numbered/bulleted list), use create_tasks to add them all at once. Do NOT use create_task repeatedly for each item.
-8. Always respond by calling the appropriate tool.`;
+CRITICAL RULES:
+1. When the user wants to add ONE task, call create_task.
+2. When the user wants to add MULTIPLE tasks (list, comma-separated, numbered, etc.), you MUST call create_tasks with an array. NEVER call create_task multiple times.
+3. Extract: title, description (optional), estimated_time (minutes, guess if not given), date (YYYY-MM-DD if mentioned, otherwise omit), link (URL if found), priority (high/medium/low, default medium).
+4. ALWAYS call a tool when the user wants to add tasks. NEVER respond with text only when tasks should be created.
+5. For general questions or chat, respond normally without calling tools.`;
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -40,7 +37,6 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Get user from token
     const token = authHeader.replace("Bearer ", "");
     const anonClient = createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY")!);
     const { data: { user }, error: userError } = await anonClient.auth.getUser(token);
@@ -51,7 +47,7 @@ serve(async (req) => {
       });
     }
 
-    const { message, history, model: requestedModel } = await req.json();
+    const { message, history, model } = await req.json();
 
     const messages = [
       { role: "system", content: SYSTEM_PROMPT },
@@ -63,25 +59,8 @@ serve(async (req) => {
       {
         type: "function",
         function: {
-          name: "create_task",
-          description: "Create a single daily task for the user. Use only when adding ONE task.",
-          parameters: {
-            type: "object",
-            properties: {
-              title: { type: "string", description: "Short task title" },
-              description: { type: "string", description: "Brief description" },
-              estimated_time: { type: "number", description: "Estimated minutes" },
-            },
-            required: ["title", "description", "estimated_time"],
-            additionalProperties: false,
-          },
-        },
-      },
-      {
-        type: "function",
-        function: {
           name: "create_tasks",
-          description: "Create multiple daily tasks at once. Use when the user provides 2 or more tasks in one message (lists, bullet points, comma-separated items, etc.).",
+          description: "Create one or more tasks at once. Use this for bulk task creation.",
           parameters: {
             type: "object",
             properties: {
@@ -90,11 +69,14 @@ serve(async (req) => {
                 items: {
                   type: "object",
                   properties: {
-                    title: { type: "string", description: "Short task title" },
+                    title: { type: "string", description: "Task title" },
                     description: { type: "string", description: "Brief description" },
                     estimated_time: { type: "number", description: "Estimated minutes" },
+                    date: { type: "string", description: "Date in YYYY-MM-DD format" },
+                    link: { type: "string", description: "Related URL if any" },
+                    priority: { type: "string", enum: ["high", "medium", "low"], description: "Priority level" },
                   },
-                  required: ["title", "description", "estimated_time"],
+                  required: ["title"],
                 },
                 description: "Array of tasks to create",
               },
@@ -107,42 +89,26 @@ serve(async (req) => {
       {
         type: "function",
         function: {
-          name: "create_opportunity",
-          description: "Create an opportunity with a deadline",
+          name: "create_task",
+          description: "Create a single task",
           parameters: {
             type: "object",
             properties: {
-              name: { type: "string", description: "Opportunity name" },
+              title: { type: "string", description: "Task title" },
               description: { type: "string", description: "Brief description" },
               estimated_time: { type: "number", description: "Estimated minutes" },
-              deadline: { type: "string", description: "Deadline in YYYY-MM-DD format" },
+              date: { type: "string", description: "Date in YYYY-MM-DD format" },
               link: { type: "string", description: "Related URL if any" },
               priority: { type: "string", enum: ["high", "medium", "low"], description: "Priority level" },
             },
-            required: ["name", "description", "estimated_time", "priority"],
-            additionalProperties: false,
-          },
-        },
-      },
-      {
-        type: "function",
-        function: {
-          name: "ask_for_deadline",
-          description: "Ask the user if there is a specific deadline when one wasn't provided for an opportunity-like item",
-          parameters: {
-            type: "object",
-            properties: {
-              item_summary: { type: "string", description: "Summary of the item to ask about" },
-            },
-            required: ["item_summary"],
+            required: ["title"],
             additionalProperties: false,
           },
         },
       },
     ];
 
-    const defaultModel = "google/gemini-2.0-flash";
-    const model = requestedModel && typeof requestedModel === "string" ? requestedModel : defaultModel;
+    const aiModel = model || "google/gemini-2.0-flash";
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
@@ -151,7 +117,7 @@ serve(async (req) => {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model,
+        model: aiModel,
         messages,
         tools,
         tool_choice: "auto",
@@ -167,7 +133,7 @@ serve(async (req) => {
         });
       }
       if (status === 402) {
-        return new Response(JSON.stringify({ error: "AI credits exhausted. Please add credits in Settings." }), {
+        return new Response(JSON.stringify({ error: "AI credits exhausted." }), {
           status: 402,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
@@ -179,126 +145,71 @@ serve(async (req) => {
 
     const aiResult = await response.json();
     const choice = aiResult.choices?.[0];
-
     if (!choice) throw new Error("No response from AI");
 
-    // Handle tool calls
     const toolCalls = choice.message?.tool_calls;
     if (toolCalls && toolCalls.length > 0) {
-      const call = toolCalls[0];
-      const args = JSON.parse(call.function.arguments);
+      const today = new Date().toISOString().split("T")[0];
+      const results: string[] = [];
+      let totalCreated = 0;
 
-      if (call.function.name === "create_task") {
-        const today = new Date().toISOString().split("T")[0];
-        const { error } = await supabase.from("tasks").insert({
-          user_id: user.id,
-          title: args.title,
-          description: args.description || "",
-          estimated_time: args.estimated_time || null,
-          status: "idle",
-          date: today,
-        });
+      for (const call of toolCalls) {
+        const args = JSON.parse(call.function.arguments);
 
-        if (error) {
-          console.error("DB insert error:", error);
-          return new Response(JSON.stringify({
-            reply: `I tried to add "${args.title}" but got an error: ${error.message}`,
-            action: "error",
-          }), {
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-          });
-        }
-
-        return new Response(JSON.stringify({
-          reply: `Done! I've added "${args.title}" to your **Daily Plan** with an estimated time of **${args.estimated_time} minutes**.`,
-          action: "task_created",
-          data: args,
-        }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-
-      if (call.function.name === "create_tasks") {
-        const taskList = Array.isArray(args.tasks) ? args.tasks : [];
-        const today = new Date().toISOString().split("T")[0];
-        const inserted: string[] = [];
-        const errors: string[] = [];
-
-        for (const t of taskList.slice(0, 20)) {
-          const title = t?.title;
-          const desc = t?.description ?? "";
-          const est = t?.estimated_time ?? 30;
-          if (!title || typeof title !== "string") continue;
+        if (call.function.name === "create_task") {
           const { error } = await supabase.from("tasks").insert({
             user_id: user.id,
-            title: String(title).trim(),
-            description: String(desc),
-            estimated_time: typeof est === "number" ? est : 30,
+            title: args.title,
+            description: args.description || "",
+            estimated_time: args.estimated_time || null,
             status: "idle",
-            date: today,
+            date: args.date || today,
+            link: args.link || "",
+            priority: args.priority || "medium",
           });
-          if (error) errors.push(`${title}: ${error.message}`);
-          else inserted.push(title);
+          if (error) {
+            results.push(`Failed "${args.title}": ${error.message}`);
+          } else {
+            results.push(`"${args.title}"`);
+            totalCreated++;
+          }
         }
 
-        const reply =
-          inserted.length > 0
-            ? `Done! I've added **${inserted.length}** task(s) to your Daily Plan: ${inserted.map((t) => `"${t}"`).join(", ")}.`
-            : "I couldn't add any tasks.";
-        const withErrors = errors.length > 0 ? ` Some failed: ${errors.join("; ")}.` : "";
-
-        return new Response(JSON.stringify({
-          reply: reply + withErrors,
-          action: inserted.length > 0 ? "tasks_created" : "error",
-          data: { inserted, errors },
-        }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-
-      if (call.function.name === "create_opportunity") {
-        const deadline = args.deadline || new Date(Date.now() + 30 * 86400000).toISOString().split("T")[0];
-        const { error } = await supabase.from("opportunities").insert({
-          user_id: user.id,
-          name: args.name,
-          description: args.description || "",
-          estimated_time: args.estimated_time || null,
-          deadline,
-          link: args.link || "",
-          priority: args.priority || "medium",
-        });
-
-        if (error) {
-          console.error("DB insert error:", error);
-          return new Response(JSON.stringify({
-            reply: `I tried to add "${args.name}" but got an error: ${error.message}`,
-            action: "error",
-          }), {
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-          });
+        if (call.function.name === "create_tasks") {
+          const taskList = args.tasks || [];
+          for (const t of taskList) {
+            const { error } = await supabase.from("tasks").insert({
+              user_id: user.id,
+              title: t.title,
+              description: t.description || "",
+              estimated_time: t.estimated_time || null,
+              status: "idle",
+              date: t.date || today,
+              link: t.link || "",
+              priority: t.priority || "medium",
+            });
+            if (error) {
+              results.push(`Failed "${t.title}": ${error.message}`);
+            } else {
+              results.push(`"${t.title}"`);
+              totalCreated++;
+            }
+          }
         }
-
-        return new Response(JSON.stringify({
-          reply: `Done! I've added "${args.name}" to your **Opportunities** with an estimated time of **${args.estimated_time} minutes** and deadline **${deadline}**.`,
-          action: "opportunity_created",
-          data: { ...args, deadline },
-        }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
       }
 
-      if (call.function.name === "ask_for_deadline") {
-        return new Response(JSON.stringify({
-          reply: `I noticed "${args.item_summary}" might be an opportunity. Is there a specific deadline for this, or should I leave it open?`,
-          action: "ask_deadline",
-          data: args,
-        }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
+      const reply = totalCreated === 1
+        ? `Added ${results[0]} to your plan.`
+        : `Added ${totalCreated} tasks: ${results.join(", ")}`;
+
+      return new Response(JSON.stringify({
+        reply,
+        action: totalCreated === 1 ? "task_created" : "tasks_created",
+      }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
-    // Fallback: plain text response
     const text = choice.message?.content || "I'm not sure what to do with that. Could you rephrase?";
     return new Response(JSON.stringify({ reply: text, action: "chat" }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
