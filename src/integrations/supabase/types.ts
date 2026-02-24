@@ -54,11 +54,16 @@ export type Database = {
         Row: {
           actual_end: string | null
           actual_start: string | null
+          category: string
           created_at: string
           date: string
           description: string
           estimated_time: number | null
+          execution_date: string | null
           id: string
+          link: string
+          position: number
+          priority: string
           status: string
           title: string
           user_id: string
@@ -66,11 +71,16 @@ export type Database = {
         Insert: {
           actual_end?: string | null
           actual_start?: string | null
+          category?: string
           created_at?: string
           date?: string
           description?: string
           estimated_time?: number | null
+          execution_date?: string | null
           id?: string
+          link?: string
+          position?: number
+          priority?: string
           status?: string
           title: string
           user_id: string
@@ -78,11 +88,16 @@ export type Database = {
         Update: {
           actual_end?: string | null
           actual_start?: string | null
+          category?: string
           created_at?: string
           date?: string
           description?: string
           estimated_time?: number | null
+          execution_date?: string | null
           id?: string
+          link?: string
+          position?: number
+          priority?: string
           status?: string
           title?: string
           user_id?: string

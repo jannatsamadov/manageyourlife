@@ -95,6 +95,9 @@ export default function DailyPlan() {
       startTime: null,
       endTime: null,
       date: today,
+      position: 0,
+      link: "",
+      priority: "medium",
     });
     setNewTask("");
     setNewEst("");
