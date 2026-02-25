@@ -108,7 +108,7 @@ serve(async (req) => {
       },
     ];
 
-    const aiModel = model || "google/gemini-2.0-flash";
+    const aiModel = model || "google/gemini-3-flash-preview";
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
