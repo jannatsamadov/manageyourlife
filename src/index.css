@@ -116,4 +116,23 @@
   .task-progress-blink {
     animation: progress-blink var(--blink-duration, 3.6s) ease-in-out infinite;
   }
+
+  .chat-scroll::-webkit-scrollbar {
+    width: 4px;
+  }
+  .chat-scroll::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .chat-scroll::-webkit-scrollbar-thumb {
+    background: hsl(var(--border));
+    border-radius: 9999px;
+  }
+  .chat-scroll::-webkit-scrollbar-button {
+    display: none;
+    height: 0;
+  }
+  .chat-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border)) transparent;
+  }
 }

@@ -5,7 +5,6 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAppState } from "@/context/AppContext";
 import { getSettings } from "@/lib/settings";
 import { toast } from "@/hooks/use-toast";
-import { ScrollArea } from "@/components/ui/scroll-area";
 
 interface ChatMessage {
   role: "user" | "assistant";
@@ -24,15 +23,12 @@ export default function ChatPanel() {
   const panelRef = useRef<HTMLDivElement>(null);
   const fabRef = useRef<HTMLButtonElement>(null);
 
-  const { setTasks, setOpportunities } = useAppState();
+  const { setTasks } = useAppState();
 
   const refreshData = async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
-    const [tasksRes, oppsRes] = await Promise.all([
-      supabase.from("tasks").select("*").eq("user_id", user.id).order("created_at", { ascending: true }),
-      supabase.from("opportunities").select("*").eq("user_id", user.id).order("created_at", { ascending: true }),
-    ]);
+    const tasksRes = await supabase.from("tasks").select("*").eq("user_id", user.id).order("created_at", { ascending: true });
     if (tasksRes.data) {
       setTasks(tasksRes.data.map((row: any) => ({
         id: row.id,
@@ -43,20 +39,10 @@ export default function ChatPanel() {
         startTime: row.actual_start ? new Date(row.actual_start).getTime() : null,
         endTime: row.actual_end ? new Date(row.actual_end).getTime() : null,
         date: row.date,
+        deadline: row.deadline ?? "",
         position: row.position ?? 0,
         link: row.link ?? "",
         priority: (row.priority as "high" | "medium" | "low") ?? "medium",
-      })));
-    }
-    if (oppsRes.data) {
-      setOpportunities(oppsRes.data.map((row: any) => ({
-        id: row.id,
-        name: row.name,
-        description: row.description || "",
-        estimatedTime: row.estimated_time,
-        deadline: row.deadline,
-        link: row.link || "",
-        priority: row.priority as "high" | "medium" | "low",
       })));
     }
   };
@@ -91,6 +77,7 @@ export default function ChatPanel() {
 
     setMessages((prev) => [...prev, userMsg]);
     setInput("");
+    if (inputRef.current) inputRef.current.style.height = "auto";
     setLoading(true);
 
     try {
@@ -161,7 +148,7 @@ export default function ChatPanel() {
             <span className="text-sm font-semibold text-foreground">AI Assistant</span>
           </div>
 
-          <ScrollArea className="flex-1 p-4" ref={scrollRef}>
+          <div className="flex-1 overflow-y-auto p-4 chat-scroll" ref={scrollRef}>
             <div className="flex flex-col gap-3">
               {messages.map((msg, i) => (
                 <div
@@ -183,17 +170,22 @@ export default function ChatPanel() {
                 </div>
               )}
             </div>
-          </ScrollArea>
+          </div>
 
-          <div className="flex items-center gap-2 border-t border-border px-3 py-2.5">
-            <label className="flex cursor-pointer items-center justify-center text-muted-foreground hover:text-foreground transition-colors">
+          <div className="flex items-end gap-2 border-t border-border px-3 py-2.5">
+            <label className="flex cursor-pointer items-center justify-center text-muted-foreground hover:text-foreground transition-colors pb-2">
               <Plus className="h-5 w-5" />
               <input type="file" className="hidden" />
             </label>
             <textarea
               ref={inputRef}
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={(e) => {
+                setInput(e.target.value);
+                const el = e.target;
+                el.style.height = "auto";
+                el.style.height = Math.min(el.scrollHeight, 160) + "px";
+              }}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
@@ -202,14 +194,14 @@ export default function ChatPanel() {
               }}
               placeholder="Message... (Shift+Enter for new line)"
               rows={1}
-              className="flex-1 min-h-[36px] max-h-32 resize-none bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground py-2"
+              className="flex-1 min-h-[36px] max-h-40 resize-none bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground py-2"
             />
             <button
               onClick={sendMessage}
               disabled={loading || !input.trim()}
-              className="flex items-center justify-center text-muted-foreground hover:text-primary transition-colors disabled:opacity-40"
+              className="flex items-center justify-center text-muted-foreground hover:text-primary transition-colors disabled:opacity-40 pb-2"
             >
-              <Send className="h-4.5 w-4.5" />
+              <Send className="h-4 w-4" />
             </button>
           </div>
         </div>

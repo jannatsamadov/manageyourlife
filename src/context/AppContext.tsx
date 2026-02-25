@@ -14,6 +14,7 @@ export interface Task {
   startTime: number | null;
   endTime: number | null;
   date: string;
+  deadline: string;
   position: number;
   link: string;
   priority: TaskPriority;
@@ -112,6 +113,7 @@ function dbTaskToLocal(row: any): Task {
     startTime: row.actual_start ? new Date(row.actual_start).getTime() : null,
     endTime: row.actual_end ? new Date(row.actual_end).getTime() : null,
     date: row.date,
+    deadline: row.deadline ?? "",
     position: row.position ?? 0,
     link: row.link ?? "",
     priority: (row.priority as TaskPriority) ?? "medium",
@@ -182,6 +184,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       actual_start: task.startTime ? new Date(task.startTime).toISOString() : null,
       actual_end: task.endTime ? new Date(task.endTime).toISOString() : null,
       date: task.date,
+      deadline: task.deadline ?? "",
       link: task.link ?? "",
       priority: task.priority ?? "medium",
     } as any).select().single();
@@ -211,6 +214,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (updates.description !== undefined) dbUpdates.description = updates.description;
     if (updates.estimatedTime !== undefined) dbUpdates.estimated_time = updates.estimatedTime;
     if (updates.date !== undefined) dbUpdates.date = updates.date;
+    if (updates.deadline !== undefined) dbUpdates.deadline = updates.deadline;
     if (updates.position !== undefined) dbUpdates.position = updates.position;
     if (updates.link !== undefined) dbUpdates.link = updates.link;
     if (updates.priority !== undefined) dbUpdates.priority = updates.priority;

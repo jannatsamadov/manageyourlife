@@ -1,6 +1,6 @@
-import { useState, useMemo } from "react";
-import { Plus, Trash2, Play, CheckCircle2, Clock, Timer, Loader2, GripVertical } from "lucide-react";
-import { useAppState, Task } from "@/context/AppContext";
+import { useState, useMemo, useRef, useEffect } from "react";
+import { Trash2, Play, CheckCircle2, Timer, Loader2, GripVertical, X, ExternalLink, Save } from "lucide-react";
+import { useAppState, Task, type TaskPriority } from "@/context/AppContext";
 import { getSettings } from "@/lib/settings";
 import { cn } from "@/lib/utils";
 import {
@@ -37,15 +37,12 @@ function formatDayLabel(dateStr: string): string {
   return new Date(dateStr + "T12:00:00").toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" });
 }
 
-/**
- * full_time = 100 * estimated_hours
- * remaining = (deadline - today) * 8h
- * progress = (full_time - remaining) / full_time
- */
 function getTaskProgress(task: Task): number {
   if (!task.estimatedTime) return 0;
+  const dl = task.deadline || task.date;
+  if (!dl) return 0;
   const todayDate = new Date(new Date().toISOString().slice(0, 10));
-  const deadline = new Date(task.date);
+  const deadline = new Date(dl);
   const daysUntil = Math.ceil((deadline.getTime() - todayDate.getTime()) / 86400000);
   const fullTime = (task.estimatedTime / 60) * 100;
   const remaining = Math.max(0, daysUntil) * 8;
@@ -55,13 +52,32 @@ function getTaskProgress(task: Task): number {
 
 function isTaskOverdue(task: Task): boolean {
   const today = new Date().toISOString().slice(0, 10);
-  return task.date < today && task.status !== "complete";
+  const dl = task.deadline || task.date;
+  return !!dl && dl < today && task.status !== "complete";
+}
+
+const priorityColors: Record<TaskPriority, string> = {
+  high: "bg-destructive/15 text-destructive",
+  medium: "bg-warning/15 text-warning",
+  low: "bg-info/15 text-info",
+};
+
+interface EditForm {
+  title: string;
+  description: string;
+  estimatedTime: string;
+  date: string;
+  deadline: string;
+  link: string;
+  priority: TaskPriority;
+  status: Task["status"];
 }
 
 export default function DailyPlan() {
-  const { tasks, loading, addTask, deleteTask, updateTask, reorderTasks } = useAppState();
-  const [newTask, setNewTask] = useState("");
-  const [newEst, setNewEst] = useState("");
+  const { tasks, loading, deleteTask, updateTask, reorderTasks } = useAppState();
+  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  const [editForm, setEditForm] = useState<EditForm | null>(null);
+  const popupRef = useRef<HTMLDivElement>(null);
 
   const today = new Date().toISOString().slice(0, 10);
   const { showProgressBars, blinkEffect } = getSettings();
@@ -85,22 +101,54 @@ export default function DailyPlan() {
     return map;
   }, [tasks, visibleDates]);
 
-  const handleAdd = async () => {
-    if (!newTask.trim()) return;
-    await addTask({
-      title: newTask.trim(),
-      description: "",
-      estimatedTime: newEst ? parseInt(newEst) : null,
-      status: "idle",
-      startTime: null,
-      endTime: null,
-      date: today,
-      position: 0,
-      link: "",
-      priority: "medium",
+  useEffect(() => {
+    if (!selectedTask) return;
+    const handler = (e: MouseEvent) => {
+      if (popupRef.current && !popupRef.current.contains(e.target as Node)) {
+        setSelectedTask(null);
+        setEditForm(null);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [selectedTask]);
+
+  const openTaskPopup = (task: Task) => {
+    const fresh = tasks.find((t) => t.id === task.id) || task;
+    setSelectedTask(fresh);
+    setEditForm({
+      title: fresh.title,
+      description: fresh.description,
+      estimatedTime: fresh.estimatedTime ? String(fresh.estimatedTime) : "",
+      date: fresh.date,
+      deadline: fresh.deadline || "",
+      link: fresh.link || "",
+      priority: fresh.priority || "medium",
+      status: fresh.status,
     });
-    setNewTask("");
-    setNewEst("");
+  };
+
+  const saveEdit = async () => {
+    if (!selectedTask || !editForm) return;
+    const updates: Partial<Task> = {};
+    if (editForm.title.trim() && editForm.title !== selectedTask.title) updates.title = editForm.title.trim();
+    if (editForm.description !== selectedTask.description) updates.description = editForm.description;
+    const newEst = editForm.estimatedTime ? parseInt(editForm.estimatedTime) : null;
+    if (newEst !== selectedTask.estimatedTime) updates.estimatedTime = newEst;
+    if (editForm.date !== selectedTask.date) updates.date = editForm.date;
+    if (editForm.deadline !== (selectedTask.deadline || "")) updates.deadline = editForm.deadline;
+    if (editForm.link !== (selectedTask.link || "")) updates.link = editForm.link;
+    if (editForm.priority !== (selectedTask.priority || "medium")) updates.priority = editForm.priority;
+    if (editForm.status !== selectedTask.status) {
+      updates.status = editForm.status;
+      if (editForm.status === "active" && selectedTask.status === "idle") updates.startTime = Date.now();
+      if (editForm.status === "complete" && selectedTask.status !== "complete") updates.endTime = Date.now();
+    }
+    if (Object.keys(updates).length > 0) {
+      await updateTask(selectedTask.id, updates);
+    }
+    setSelectedTask(null);
+    setEditForm(null);
   };
 
   const startTask = (id: string) => updateTask(id, { status: "active", startTime: Date.now() });
@@ -132,6 +180,12 @@ export default function DailyPlan() {
     e.dataTransfer.dropEffect = "move";
   };
 
+  const handleCardDoubleClick = (task: Task) => {
+    if (task.link) {
+      window.open(task.link, "_blank", "noopener");
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -143,7 +197,7 @@ export default function DailyPlan() {
   const todayTasks = tasksByDate[today] || [];
 
   return (
-    <TooltipProvider delayDuration={300}>
+    <TooltipProvider delayDuration={400}>
       <div className="mx-auto max-w-3xl space-y-6 animate-fade-in">
         <div className="flex items-center justify-between">
           <div>
@@ -156,60 +210,29 @@ export default function DailyPlan() {
           </div>
         </div>
 
-        {/* Compact Add task - single row */}
-        <div className="flex gap-2">
-          <input
-            value={newTask}
-            onChange={(e) => setNewTask(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleAdd()}
-            placeholder="Add task..."
-            className="flex-1 rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
-          />
-          <input
-            type="number"
-            value={newEst}
-            onChange={(e) => setNewEst(e.target.value)}
-            placeholder="min"
-            min="1"
-            className="w-16 rounded-lg border border-border bg-card px-2 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
-          />
-          <button
-            onClick={handleAdd}
-            className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
-          >
-            <Plus className="h-4 w-4" />
-            Add
-          </button>
-        </div>
-
-        {/* Multi-day task list with boundaries */}
         <div className="space-y-8">
           {visibleDates.map((dateStr) => {
             const dayTasks = tasksByDate[dateStr] || [];
+            const isToday = dateStr === today;
+            if (dayTasks.length === 0 && !isToday) return null;
             return (
               <section key={dateStr}>
-                <div className="mb-2 flex items-center gap-2 border-b border-border pb-2">
-                  <h3 className={cn(
-                    "text-sm font-semibold",
-                    dateStr === today ? "text-primary" : "text-muted-foreground"
-                  )}>
-                    {formatDayLabel(dateStr)}
-                  </h3>
-                  {dayTasks.length > 0 && (
-                    <span className="text-xs text-muted-foreground">
-                      {dayTasks.filter((t) => t.status === "complete").length}/{dayTasks.length}
-                    </span>
-                  )}
-                </div>
+                {!isToday && (
+                  <div className="mb-2 flex items-center gap-2 border-b border-border pb-2">
+                    <h3 className="text-sm font-semibold text-muted-foreground">
+                      {formatDayLabel(dateStr)}
+                    </h3>
+                    {dayTasks.length > 0 && (
+                      <span className="text-xs text-muted-foreground">
+                        {dayTasks.filter((t) => t.status === "complete").length}/{dayTasks.length}
+                      </span>
+                    )}
+                  </div>
+                )}
                 <div className="space-y-2">
-                  {dayTasks.length === 0 && dateStr === today && (
+                  {dayTasks.length === 0 && isToday && (
                     <div className="rounded-lg border border-dashed border-border py-8 text-center">
-                      <p className="text-sm text-muted-foreground">No tasks yet. Add one above.</p>
-                    </div>
-                  )}
-                  {dayTasks.length === 0 && dateStr !== today && (
-                    <div className="rounded-lg border border-dashed border-border/50 py-4 text-center">
-                      <p className="text-xs text-muted-foreground/70">No tasks</p>
+                      <p className="text-sm text-muted-foreground">No tasks for today. Add tasks from the Schedule page.</p>
                     </div>
                   )}
                   {dayTasks.map((task) => {
@@ -218,78 +241,86 @@ export default function DailyPlan() {
                     return (
                       <Tooltip key={task.id}>
                         <TooltipTrigger asChild>
+                      <div
+                        draggable={task.status !== "complete"}
+                        onDragStart={(e) => task.status !== "complete" && handleReorderStart(e, task.id, dateStr)}
+                        onDrop={(e) => task.status !== "complete" && handleReorderDrop(e, task.id, dateStr)}
+                        onDragOver={handleReorderOver}
+                        onClick={() => openTaskPopup(task)}
+                        onDoubleClick={() => handleCardDoubleClick(task)}
+                        className={cn(
+                          "group relative flex items-center gap-3 rounded-lg border p-3 transition-all overflow-hidden select-none",
+                          task.status !== "complete" && "cursor-grab active:cursor-grabbing",
+                          task.status === "idle" && !overdue && "border-border bg-card",
+                          task.status === "active" && !overdue && "task-card-active",
+                          task.status === "complete" && "task-card-complete",
+                          overdue && "task-card-overdue"
+                        )}
+                      >
+                        {showProgressBars && progressPct > 0 && task.status !== "complete" && (
                           <div
-                            draggable={task.status !== "complete"}
-                            onDragStart={(e) => task.status !== "complete" && handleReorderStart(e, task.id, dateStr)}
-                            onDrop={(e) => task.status !== "complete" && handleReorderDrop(e, task.id, dateStr)}
-                            onDragOver={handleReorderOver}
-                            className={cn(
-                              "group relative flex items-center gap-3 rounded-lg border p-3 transition-all overflow-hidden",
-                              task.status !== "complete" && "cursor-grab active:cursor-grabbing",
-                              task.status === "idle" && !overdue && "border-border bg-card",
-                              task.status === "active" && !overdue && "task-card-active",
-                              task.status === "complete" && "task-card-complete",
-                              overdue && "task-card-overdue"
+                            className={cn("task-progress-red absolute inset-0 pointer-events-none rounded-lg", blinkEffect && "task-progress-blink")}
+                            style={{
+                              ["--progress-pct" as string]: `${Math.min(progressPct, 1) * 100}%`,
+                              ["--blink-duration" as string]: progressPct >= 0.75 ? `${Math.max(0.6, 3.6 - (progressPct - 0.75) * 12)}s` : "3.6s",
+                            }}
+                          />
+                        )}
+                        {task.status !== "complete" && (
+                          <GripVertical className="relative h-4 w-4 text-muted-foreground/60 shrink-0 z-[1]" />
+                        )}
+                        <div className="relative flex-1 min-w-0 z-[1]">
+                          <div className="flex items-center gap-2">
+                            <p className={cn(
+                              "font-medium truncate",
+                              task.status === "complete" && "line-through text-muted-foreground"
+                            )}>
+                              {task.title}
+                            </p>
+                            <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-medium shrink-0", priorityColors[task.priority || "medium"])}>
+                              {task.priority || "medium"}
+                            </span>
+                            {task.link && (
+                              <ExternalLink className="h-3 w-3 text-primary shrink-0" />
                             )}
-                          >
-                            {showProgressBars && progressPct > 0 && task.status !== "complete" && (
-                              <div
-                                className={cn("task-progress-red absolute inset-0 pointer-events-none rounded-lg", blinkEffect && "task-progress-blink")}
-                                style={{
-                                  ["--progress-pct" as string]: `${Math.min(progressPct, 1) * 100}%`,
-                                  ["--blink-duration" as string]: progressPct >= 0.75 ? `${Math.max(0.6, 3.6 - (progressPct - 0.75) * 12)}s` : "3.6s",
-                                }}
-                              />
-                            )}
-                            {task.status !== "complete" && (
-                              <GripVertical className="relative h-4 w-4 text-muted-foreground/60 shrink-0 z-[1]" />
-                            )}
-                            <div className="relative flex-1 min-w-0 z-[1]">
-                              <div className="flex items-center gap-2">
-                                <p className={cn(
-                                  "font-medium truncate",
-                                  task.status === "complete" && "line-through text-muted-foreground"
-                                )}>
-                                  {task.title}
-                                </p>
-                                {task.estimatedTime && (
-                                  <span className="inline-flex items-center gap-0.5 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground shrink-0">
-                                    <Timer className="h-2.5 w-2.5" />
-                                    {formatEstimated(task.estimatedTime)}
-                                  </span>
-                                )}
-                              </div>
-                              {(task.startTime || task.endTime) && (
-                                <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground font-mono">
-                                  {task.startTime && <span>Started {formatTime(task.startTime)}</span>}
-                                  {task.endTime && <span>Ended {formatTime(task.endTime)}</span>}
-                                  {task.startTime && task.endTime && (
-                                    <span className="text-primary">{formatDuration(task.endTime - task.startTime)}</span>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                            <div className="relative flex items-center gap-1 z-[1]">
-                              {task.status === "idle" && (
-                                <button onClick={() => startTask(task.id)} className="flex items-center gap-1 rounded bg-primary/10 px-2 py-1 text-[10px] font-medium text-primary hover:bg-primary/20">
-                                  <Play className="h-2.5 w-2.5" /> Start
-                                </button>
-                              )}
-                              {task.status === "active" && (
-                                <button onClick={() => completeTask(task.id)} className="flex items-center gap-1 rounded bg-primary px-2 py-1 text-[10px] font-medium text-primary-foreground hover:bg-primary/90">
-                                  <CheckCircle2 className="h-2.5 w-2.5" /> Done
-                                </button>
-                              )}
-                              {task.status !== "active" && (
-                                <button onClick={() => deleteTask(task.id)} className="rounded p-1 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-destructive">
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                </button>
-                              )}
-                            </div>
                           </div>
+                          {(task.startTime || task.endTime) && (
+                            <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground font-mono">
+                              {task.startTime && <span>Started {formatTime(task.startTime)}</span>}
+                              {task.endTime && <span>Ended {formatTime(task.endTime)}</span>}
+                              {task.startTime && task.endTime && (
+                                <span className="text-primary">{formatDuration(task.endTime - task.startTime)}</span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                        <div className="relative flex items-center gap-1.5 z-[1]">
+                          {task.estimatedTime && (
+                            <span className="inline-flex items-center gap-0.5 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground shrink-0">
+                              <Timer className="h-2.5 w-2.5" />
+                              {formatEstimated(task.estimatedTime)}
+                            </span>
+                          )}
+                          {task.status === "idle" && (
+                            <button onClick={(e) => { e.stopPropagation(); startTask(task.id); }} className="flex items-center gap-1 rounded bg-primary/10 px-2 py-1 text-[10px] font-medium text-primary hover:bg-primary/20">
+                              <Play className="h-2.5 w-2.5" /> Start
+                            </button>
+                          )}
+                          {task.status === "active" && (
+                            <button onClick={(e) => { e.stopPropagation(); completeTask(task.id); }} className="flex items-center gap-1 rounded bg-primary px-2 py-1 text-[10px] font-medium text-primary-foreground hover:bg-primary/90">
+                              <CheckCircle2 className="h-2.5 w-2.5" /> Done
+                            </button>
+                          )}
+                          {task.status !== "active" && (
+                            <button onClick={(e) => { e.stopPropagation(); deleteTask(task.id); }} className="rounded p-1 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-destructive">
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
                         </TooltipTrigger>
                         {task.description && (
-                          <TooltipContent side="bottom" className="max-w-xs text-sm">
+                          <TooltipContent side="bottom" className="max-w-xs text-sm whitespace-pre-wrap">
                             {task.description}
                           </TooltipContent>
                         )}
@@ -302,6 +333,121 @@ export default function DailyPlan() {
           })}
         </div>
       </div>
+
+      {selectedTask && editForm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/60 backdrop-blur-sm">
+          <div ref={popupRef} className="w-full max-w-md rounded-xl border border-border bg-card shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between border-b border-border px-5 py-3">
+              <h3 className="text-base font-semibold text-foreground">Edit Task</h3>
+              <button onClick={() => { setSelectedTask(null); setEditForm(null); }} className="text-muted-foreground hover:text-foreground shrink-0">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="px-5 py-4 space-y-3">
+              <input
+                value={editForm.title}
+                onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
+                placeholder="Title"
+                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+              <textarea
+                value={editForm.description}
+                onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
+                placeholder="Description (supports plain text, markdown later)"
+                rows={4}
+                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">Scheduled Date</label>
+                  <input
+                    type="date"
+                    value={editForm.date}
+                    onChange={(e) => setEditForm({ ...editForm, date: e.target.value })}
+                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm [color-scheme:dark] focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">Deadline</label>
+                  <input
+                    type="date"
+                    value={editForm.deadline}
+                    onChange={(e) => setEditForm({ ...editForm, deadline: e.target.value })}
+                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm [color-scheme:dark] focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">Estimated (min)</label>
+                  <input
+                    type="number"
+                    value={editForm.estimatedTime}
+                    onChange={(e) => setEditForm({ ...editForm, estimatedTime: e.target.value })}
+                    placeholder="minutes"
+                    min="1"
+                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">Status</label>
+                  <select
+                    value={editForm.status}
+                    onChange={(e) => setEditForm({ ...editForm, status: e.target.value as Task["status"] })}
+                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+                  >
+                    <option value="idle">Idle</option>
+                    <option value="active">Active</option>
+                    <option value="complete">Complete</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">Priority</label>
+                  <select
+                    value={editForm.priority}
+                    onChange={(e) => setEditForm({ ...editForm, priority: e.target.value as TaskPriority })}
+                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+                  >
+                    <option value="high">High</option>
+                    <option value="medium">Medium</option>
+                    <option value="low">Low</option>
+                  </select>
+                </div>
+              </div>
+              <input
+                value={editForm.link}
+                onChange={(e) => setEditForm({ ...editForm, link: e.target.value })}
+                placeholder="Link (optional)"
+                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+
+              {selectedTask.startTime && (
+                <div className="text-xs text-muted-foreground font-mono space-y-0.5 pt-1 border-t border-border">
+                  <p>Started: {new Date(selectedTask.startTime).toLocaleString()}</p>
+                  {selectedTask.endTime && <p>Ended: {new Date(selectedTask.endTime).toLocaleString()}</p>}
+                  {selectedTask.startTime && selectedTask.endTime && (
+                    <p className="text-primary">Duration: {formatDuration(selectedTask.endTime - selectedTask.startTime)}</p>
+                  )}
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  onClick={() => { setSelectedTask(null); setEditForm(null); }}
+                  className="rounded-md px-4 py-2 text-sm text-muted-foreground hover:text-foreground hover:bg-muted"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={saveEdit}
+                  className="flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+                >
+                  <Save className="h-3.5 w-3.5" />
+                  Save
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </TooltipProvider>
   );
 }

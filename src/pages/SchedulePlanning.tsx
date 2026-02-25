@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, useCallback } from "react";
 import { ChevronLeft, ChevronRight, Clock, Plus, Trash2, ExternalLink, GripVertical } from "lucide-react";
 import { useAppState, type TaskPriority, type Task } from "@/context/AppContext";
 import { getSettings } from "@/lib/settings";
@@ -45,8 +45,10 @@ const priorityColors: Record<TaskPriority, string> = {
 
 function getTaskProgress(task: Task): number {
   if (!task.estimatedTime) return 0;
+  const dl = task.deadline || task.date;
+  if (!dl) return 0;
   const todayDate = new Date(new Date().toISOString().slice(0, 10));
-  const deadline = new Date(task.date);
+  const deadline = new Date(dl);
   const daysUntil = Math.ceil((deadline.getTime() - todayDate.getTime()) / 86400000);
   const fullTime = (task.estimatedTime / 60) * 100;
   const remaining = Math.max(0, daysUntil) * 8;
@@ -63,10 +65,11 @@ export default function SchedulePlanning() {
     title: "",
     description: "",
     estimatedTime: "",
-    date: "",
+    deadline: "",
     link: "",
     priority: "medium" as TaskPriority,
   });
+  const dragNavTimer = useRef<ReturnType<typeof setTimeout>>();
 
   const { showProgressBars, blinkEffect } = getSettings();
   const year = currentDate.getFullYear();
@@ -83,9 +86,9 @@ export default function SchedulePlanning() {
     return map;
   }, [tasks]);
 
-  const upcomingTasks = useMemo(
-    () => tasks.filter((t) => t.date >= today && t.status !== "complete").sort((a, b) => a.date.localeCompare(b.date) || a.position - b.position),
-    [tasks, today]
+  const unscheduledTasks = useMemo(
+    () => tasks.filter((t) => !t.date && t.status !== "complete").sort((a, b) => (a.deadline || "z").localeCompare(b.deadline || "z") || a.position - b.position),
+    [tasks]
   );
 
   const handleDragStart = (e: React.DragEvent, id: string) => {
@@ -95,6 +98,7 @@ export default function SchedulePlanning() {
 
   const handleDrop = (e: React.DragEvent, targetDate: string) => {
     e.preventDefault();
+    clearTimeout(dragNavTimer.current);
     const id = e.dataTransfer.getData("application/schedule-id");
     if (!id) return;
     updateTask(id, { date: targetDate });
@@ -105,11 +109,32 @@ export default function SchedulePlanning() {
     e.dataTransfer.dropEffect = "move";
   };
 
-  const navigateMonth = (dir: number) => setCurrentDate(new Date(year, month + dir, 1));
-  const navigateWeek = (dir: number) => {
-    const d = new Date(currentDate);
-    d.setDate(d.getDate() + dir * 7);
-    setCurrentDate(d);
+  const navigateMonth = useCallback((dir: number) => {
+    setCurrentDate((prev) => new Date(prev.getFullYear(), prev.getMonth() + dir, 1));
+  }, []);
+
+  const navigateWeek = useCallback((dir: number) => {
+    setCurrentDate((prev) => {
+      const d = new Date(prev);
+      d.setDate(d.getDate() + dir * 7);
+      return d;
+    });
+  }, []);
+
+  const handleEdgeDragOver = (e: React.DragEvent, dir: number) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    if (dragNavTimer.current) return;
+    dragNavTimer.current = setTimeout(() => {
+      if (view === "month") navigateMonth(dir);
+      else navigateWeek(dir);
+      dragNavTimer.current = undefined;
+    }, 600);
+  };
+
+  const handleEdgeDragLeave = () => {
+    clearTimeout(dragNavTimer.current);
+    dragNavTimer.current = undefined;
   };
 
   const handleAddTask = async () => {
@@ -121,13 +146,18 @@ export default function SchedulePlanning() {
       status: "idle",
       startTime: null,
       endTime: null,
-      date: form.date || today,
+      date: "",
+      deadline: form.deadline,
       position: 0,
       link: form.link,
       priority: form.priority,
     });
-    setForm({ title: "", description: "", estimatedTime: "", date: "", link: "", priority: "medium" });
+    setForm({ title: "", description: "", estimatedTime: "", deadline: "", link: "", priority: "medium" });
     setShowForm(false);
+  };
+
+  const handleUnschedule = (id: string) => {
+    updateTask(id, { date: "" });
   };
 
   const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -135,7 +165,6 @@ export default function SchedulePlanning() {
   return (
     <TooltipProvider delayDuration={300}>
       <div className="mx-auto max-w-5xl space-y-8 animate-fade-in">
-        {/* Calendar */}
         <section>
           <h2 className="text-xl font-bold text-foreground mb-4">Schedule</h2>
           <div className="space-y-4">
@@ -164,7 +193,10 @@ export default function SchedulePlanning() {
             </div>
 
             {view === "month" && (
-              <div className="glass-card overflow-hidden">
+              <div className="relative glass-card overflow-hidden">
+                {/* Edge zones for drag navigation */}
+                <div className="absolute left-0 top-0 bottom-0 w-8 z-10" onDragOver={(e) => handleEdgeDragOver(e, -1)} onDragLeave={handleEdgeDragLeave} />
+                <div className="absolute right-0 top-0 bottom-0 w-8 z-10" onDragOver={(e) => handleEdgeDragOver(e, 1)} onDragLeave={handleEdgeDragLeave} />
                 <div className="grid grid-cols-7">
                   {dayNames.map((d) => (
                     <div key={d} className="border-b border-border px-2 py-1.5 text-center text-xs font-medium text-muted-foreground">{d}</div>
@@ -172,7 +204,7 @@ export default function SchedulePlanning() {
                 </div>
                 <div className="grid grid-cols-7">
                   {Array.from({ length: getFirstDayOfMonth(year, month) }).map((_, i) => (
-                    <div key={`e-${i}`} className="min-h-[90px] border-b border-r border-border" />
+                    <div key={`e-${i}`} className="min-h-[90px] border-b border-r border-border" onDrop={(e) => { e.preventDefault(); }} onDragOver={handleDragOver} />
                   ))}
                   {Array.from({ length: getDaysInMonth(year, month) }).map((_, i) => {
                     const day = i + 1;
@@ -206,7 +238,9 @@ export default function SchedulePlanning() {
             )}
 
             {view === "week" && (
-              <div className="glass-card overflow-hidden">
+              <div className="relative glass-card overflow-hidden">
+                <div className="absolute left-0 top-0 bottom-0 w-8 z-10" onDragOver={(e) => handleEdgeDragOver(e, -1)} onDragLeave={handleEdgeDragLeave} />
+                <div className="absolute right-0 top-0 bottom-0 w-8 z-10" onDragOver={(e) => handleEdgeDragOver(e, 1)} onDragLeave={handleEdgeDragLeave} />
                 <div className="grid grid-cols-7">
                   {getWeekDates(currentDate).map((date) => {
                     const dateStr = date.toISOString().slice(0, 10);
@@ -245,12 +279,11 @@ export default function SchedulePlanning() {
           </div>
         </section>
 
-        {/* Upcoming Tasks + Create */}
         <section className="glass-card p-4">
           <div className="flex items-center justify-between mb-4">
             <div>
               <h3 className="text-lg font-semibold text-foreground">Upcoming</h3>
-              <p className="text-xs text-muted-foreground">Create tasks below, drag to calendar to reschedule</p>
+              <p className="text-xs text-muted-foreground">Create tasks, drag to calendar to schedule</p>
             </div>
             <button
               onClick={() => setShowForm(!showForm)}
@@ -265,7 +298,10 @@ export default function SchedulePlanning() {
             <div className="mb-4 p-4 rounded-lg border border-border bg-muted/20 space-y-3">
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <input value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} placeholder="Task title *" className="rounded border border-border bg-background px-3 py-2 text-sm" />
-                <input type="date" value={form.date} onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))} className="rounded border border-border bg-background px-3 py-2 text-sm [color-scheme:dark]" />
+                <div>
+                  <label className="text-[10px] text-muted-foreground">Deadline</label>
+                  <input type="date" value={form.deadline} onChange={(e) => setForm((f) => ({ ...f, deadline: e.target.value }))} className="w-full rounded border border-border bg-background px-3 py-2 text-sm [color-scheme:dark]" />
+                </div>
                 <input type="number" value={form.estimatedTime} onChange={(e) => setForm((f) => ({ ...f, estimatedTime: e.target.value }))} placeholder="Estimated minutes" min="1" className="rounded border border-border bg-background px-3 py-2 text-sm" />
                 <select value={form.priority} onChange={(e) => setForm((f) => ({ ...f, priority: e.target.value as TaskPriority }))} className="rounded border border-border bg-background px-3 py-2 text-sm">
                   <option value="high">High Priority</option>
@@ -282,12 +318,12 @@ export default function SchedulePlanning() {
           )}
 
           <div className="space-y-2">
-            {upcomingTasks.length === 0 && (
+            {unscheduledTasks.length === 0 && (
               <div className="rounded-lg border border-dashed border-border py-8 text-center">
-                <p className="text-sm text-muted-foreground">No upcoming tasks. Add one above and drag to the calendar to reschedule.</p>
+                <p className="text-sm text-muted-foreground">No unscheduled tasks. Add one above, then drag to calendar.</p>
               </div>
             )}
-            {upcomingTasks.map((task) => {
+            {unscheduledTasks.map((task) => {
               const progressPct = getTaskProgress(task);
               return (
                 <Tooltip key={task.id}>
@@ -314,7 +350,7 @@ export default function SchedulePlanning() {
                           {task.estimatedTime && <span className="text-[10px] text-muted-foreground">Est: {formatEstimated(task.estimatedTime)}</span>}
                         </div>
                         <div className="mt-0.5 flex items-center gap-3 text-[10px] text-muted-foreground">
-                          <span className="font-mono">{task.date}</span>
+                          {task.deadline && <span className="font-mono">Deadline: {task.deadline}</span>}
                           {task.link && <a href={task.link} target="_blank" rel="noopener" className="flex items-center gap-0.5 text-primary hover:underline" onClick={(e) => e.stopPropagation()}><ExternalLink className="h-3 w-3" />Link</a>}
                         </div>
                       </div>

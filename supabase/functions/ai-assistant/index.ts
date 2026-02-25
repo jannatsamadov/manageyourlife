@@ -11,10 +11,17 @@ const SYSTEM_PROMPT = `You are a productivity assistant for "Stratify". You help
 
 CRITICAL RULES:
 1. When the user wants to add ONE task, call create_task.
-2. When the user wants to add MULTIPLE tasks (list, comma-separated, numbered, etc.), you MUST call create_tasks with an array. NEVER call create_task multiple times.
-3. Extract: title, description (optional), estimated_time (minutes, guess if not given), date (YYYY-MM-DD if mentioned, otherwise omit), link (URL if found), priority (high/medium/low, default medium).
-4. ALWAYS call a tool when the user wants to add tasks. NEVER respond with text only when tasks should be created.
-5. For general questions or chat, respond normally without calling tools.`;
+2. When the user wants to add MULTIPLE tasks (list, comma-separated, numbered, etc.), you MUST call create_tasks with an array.
+3. ALWAYS call a tool when the user wants to add tasks. NEVER respond with text only when tasks should be created.
+4. For general questions or chat, respond normally without calling tools.
+
+FIELD RULES - YOU MUST FOLLOW THESE:
+- title: REQUIRED. Short clear task name.
+- description: REQUIRED. Write 1-2 sentences explaining the task. NEVER leave empty. If user didn't provide details, generate a reasonable description.
+- estimated_time: REQUIRED. Estimated minutes to complete. ALWAYS provide a number. If user didn't specify, GUESS a reasonable estimate (e.g. "read article" = 15, "write report" = 60, "quick email" = 5, "study chapter" = 45).
+- deadline: Deadline in YYYY-MM-DD. If user mentions "today", "tomorrow", "next monday" etc, convert to date. If not mentioned, omit.
+- link: URL if user provided one. Otherwise omit.
+- priority: "high", "medium", or "low". Default "medium". If user says "important"/"urgent" use "high", if "minor"/"whenever" use "low".`;
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -72,7 +79,7 @@ serve(async (req) => {
                     title: { type: "string", description: "Task title" },
                     description: { type: "string", description: "Brief description" },
                     estimated_time: { type: "number", description: "Estimated minutes" },
-                    date: { type: "string", description: "Date in YYYY-MM-DD format" },
+                    deadline: { type: "string", description: "Deadline in YYYY-MM-DD format" },
                     link: { type: "string", description: "Related URL if any" },
                     priority: { type: "string", enum: ["high", "medium", "low"], description: "Priority level" },
                   },
@@ -97,7 +104,7 @@ serve(async (req) => {
               title: { type: "string", description: "Task title" },
               description: { type: "string", description: "Brief description" },
               estimated_time: { type: "number", description: "Estimated minutes" },
-              date: { type: "string", description: "Date in YYYY-MM-DD format" },
+              deadline: { type: "string", description: "Deadline in YYYY-MM-DD format" },
               link: { type: "string", description: "Related URL if any" },
               priority: { type: "string", enum: ["high", "medium", "low"], description: "Priority level" },
             },
@@ -163,7 +170,8 @@ serve(async (req) => {
             description: args.description || "",
             estimated_time: args.estimated_time || null,
             status: "idle",
-            date: args.date || today,
+            date: "",
+            deadline: args.deadline || "",
             link: args.link || "",
             priority: args.priority || "medium",
           });
@@ -184,7 +192,8 @@ serve(async (req) => {
               description: t.description || "",
               estimated_time: t.estimated_time || null,
               status: "idle",
-              date: t.date || today,
+              date: "",
+              deadline: t.deadline || "",
               link: t.link || "",
               priority: t.priority || "medium",
             });
