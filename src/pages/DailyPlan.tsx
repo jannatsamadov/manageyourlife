@@ -95,11 +95,18 @@ export default function DailyPlan() {
     const map: Record<string, Task[]> = {};
     visibleDates.forEach((d) => { map[d] = []; });
     [...tasks]
-      .filter((t) => visibleDates.includes(t.date))
-      .sort((a, b) => a.date.localeCompare(b.date) || (a.position ?? 0) - (b.position ?? 0))
-      .forEach((t) => map[t.date].push(t));
+      .filter((t) => {
+        if (t.status === "complete") return visibleDates.includes(t.date);
+        if (!t.date || t.date < today) return true;
+        return visibleDates.includes(t.date);
+      })
+      .sort((a, b) => (a.date || today).localeCompare(b.date || today) || (a.position ?? 0) - (b.position ?? 0))
+      .forEach((t) => {
+        const key = (!t.date || t.date < today) && t.status !== "complete" ? today : t.date;
+        map[key]?.push(t);
+      });
     return map;
-  }, [tasks, visibleDates]);
+  }, [tasks, visibleDates, today]);
 
   useEffect(() => {
     if (!selectedTask) return;
@@ -277,12 +284,14 @@ export default function DailyPlan() {
                             )}>
                               {task.title}
                             </p>
+                            {task.link && (
+                              <a href={task.link} target="_blank" rel="noopener" onClick={(e) => e.stopPropagation()} className="shrink-0 text-primary hover:text-primary/80">
+                                <ExternalLink className="h-3 w-3" />
+                              </a>
+                            )}
                             <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-medium shrink-0", priorityColors[task.priority || "medium"])}>
                               {task.priority || "medium"}
                             </span>
-                            {task.link && (
-                              <ExternalLink className="h-3 w-3 text-primary shrink-0" />
-                            )}
                           </div>
                           {(task.startTime || task.endTime) && (
                             <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground font-mono">

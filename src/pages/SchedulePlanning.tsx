@@ -86,8 +86,11 @@ export default function SchedulePlanning() {
     return map;
   }, [tasks]);
 
-  const unscheduledTasks = useMemo(
-    () => tasks.filter((t) => !t.date && t.status !== "complete").sort((a, b) => (a.deadline || "z").localeCompare(b.deadline || "z") || a.position - b.position),
+  const upcomingTasks = useMemo(
+    () => tasks
+      .filter((t) => t.status !== "complete")
+      .sort((a, b) => (a.deadline || "z").localeCompare(b.deadline || "z") || (a.date || "z").localeCompare(b.date || "z") || a.position - b.position)
+      .slice(0, 100),
     [tasks]
   );
 
@@ -166,7 +169,6 @@ export default function SchedulePlanning() {
     <TooltipProvider delayDuration={300}>
       <div className="mx-auto max-w-5xl space-y-8 animate-fade-in">
         <section>
-          <h2 className="text-xl font-bold text-foreground mb-4">Schedule</h2>
           <div className="space-y-4">
             <div className="flex items-center justify-between flex-wrap gap-4">
               <div className="flex items-center gap-2">
@@ -222,7 +224,7 @@ export default function SchedulePlanning() {
                               onDragStart={(e) => handleDragStart(e, ev.id)}
                               className={cn(
                                 "truncate rounded px-1 py-0.5 text-[10px] font-medium cursor-grab active:cursor-grabbing",
-                                ev.link ? priorityColors[ev.priority] : "bg-primary/10 text-primary"
+                                priorityColors[ev.priority]
                               )}
                             >
                               {ev.title}
@@ -260,7 +262,7 @@ export default function SchedulePlanning() {
                               onDragStart={(e) => handleDragStart(e, ev.id)}
                               className={cn(
                                 "rounded px-1.5 py-1 text-[10px] cursor-grab active:cursor-grabbing",
-                                ev.link ? priorityColors[ev.priority] : "bg-primary/10 text-primary"
+                                priorityColors[ev.priority]
                               )}
                             >
                               <div className="flex items-center gap-0.5">
@@ -318,12 +320,12 @@ export default function SchedulePlanning() {
           )}
 
           <div className="space-y-2">
-            {unscheduledTasks.length === 0 && (
+            {upcomingTasks.length === 0 && (
               <div className="rounded-lg border border-dashed border-border py-8 text-center">
-                <p className="text-sm text-muted-foreground">No unscheduled tasks. Add one above, then drag to calendar.</p>
+                <p className="text-sm text-muted-foreground">No tasks yet. Add one above.</p>
               </div>
             )}
-            {unscheduledTasks.map((task) => {
+            {upcomingTasks.map((task) => {
               const progressPct = getTaskProgress(task);
               return (
                 <Tooltip key={task.id}>
@@ -351,6 +353,7 @@ export default function SchedulePlanning() {
                         </div>
                         <div className="mt-0.5 flex items-center gap-3 text-[10px] text-muted-foreground">
                           {task.deadline && <span className="font-mono">Deadline: {task.deadline}</span>}
+                          {task.date && <span className="font-mono text-primary">Scheduled: {task.date}</span>}
                           {task.link && <a href={task.link} target="_blank" rel="noopener" className="flex items-center gap-0.5 text-primary hover:underline" onClick={(e) => e.stopPropagation()}><ExternalLink className="h-3 w-3" />Link</a>}
                         </div>
                       </div>
