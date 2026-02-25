@@ -1,10 +1,10 @@
 const STORAGE_KEY = "stratify_settings";
 
 export const AI_MODELS = [
-  { value: "google/gemini-2.0-flash", label: "Gemini 2.0 Flash" },
-  { value: "google/gemini-flash-latest", label: "Gemini Flash (Latest)" },
   { value: "google/gemini-3-flash-preview", label: "Gemini 3 Flash (Preview)" },
-  { value: "openai/gpt-4o-mini", label: "GPT-4o Mini" },
+  { value: "google/gemini-2.5-flash", label: "Gemini 2.5 Flash" },
+  { value: "google/gemini-2.5-pro", label: "Gemini 2.5 Pro" },
+  { value: "openai/gpt-5-mini", label: "GPT-5 Mini" },
 ] as const;
 
 export type AIModelId = (typeof AI_MODELS)[number]["value"];
@@ -17,7 +17,7 @@ export interface Settings {
 }
 
 const defaults: Settings = {
-  aiModel: "google/gemini-2.0-flash",
+  aiModel: "google/gemini-3-flash-preview",
   compactView: false,
   showProgressBars: true,
   blinkEffect: true,
