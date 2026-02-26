@@ -96,13 +96,13 @@ export default function DailyPlan() {
     visibleDates.forEach((d) => { map[d] = []; });
     [...tasks]
       .filter((t) => {
-        if (t.status === "complete") return visibleDates.includes(t.date);
-        if (!t.date || t.date < today) return true;
+        if (!t.date) return false;
+        if (t.status !== "complete" && t.date < today) return true;
         return visibleDates.includes(t.date);
       })
-      .sort((a, b) => (a.date || today).localeCompare(b.date || today) || (a.position ?? 0) - (b.position ?? 0))
+      .sort((a, b) => a.date.localeCompare(b.date) || (a.position ?? 0) - (b.position ?? 0))
       .forEach((t) => {
-        const key = (!t.date || t.date < today) && t.status !== "complete" ? today : t.date;
+        const key = t.date < today && t.status !== "complete" ? today : t.date;
         map[key]?.push(t);
       });
     return map;

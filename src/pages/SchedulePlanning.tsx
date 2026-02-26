@@ -1,7 +1,9 @@
 import { useState, useMemo, useRef, useCallback } from "react";
-import { ChevronLeft, ChevronRight, Clock, Plus, Trash2, ExternalLink, GripVertical, CalendarX } from "lucide-react";
+import { ChevronLeft, ChevronRight, Clock, Plus, Trash2, ExternalLink, GripVertical, CalendarX, RefreshCw, Loader2 } from "lucide-react";
 import { useAppState, type TaskPriority, type Task } from "@/context/AppContext";
 import { getSettings } from "@/lib/settings";
+import { isGCalConnected, createEvent, listEvents } from "@/lib/gcal";
+import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import {
   Tooltip,
@@ -77,6 +79,31 @@ export default function SchedulePlanning() {
     priority: "medium" as TaskPriority,
   });
   const dragNavTimer = useRef<ReturnType<typeof setTimeout>>();
+  const [syncing, setSyncing] = useState(false);
+
+  const syncToGCal = async () => {
+    if (!isGCalConnected()) {
+      toast({ title: "Not connected", description: "Connect Google Calendar in Settings first", variant: "destructive" });
+      return;
+    }
+    setSyncing(true);
+    let created = 0;
+    let errors = 0;
+    const scheduled = tasks.filter((t) => !!t.date && t.status !== "complete");
+    for (const task of scheduled) {
+      try {
+        await createEvent({ title: task.title, description: task.description, date: task.date, estimatedTime: task.estimatedTime });
+        created++;
+      } catch {
+        errors++;
+      }
+    }
+    setSyncing(false);
+    toast({
+      title: "Sync complete",
+      description: `${created} events pushed to Google Calendar${errors ? `, ${errors} failed` : ""}`,
+    });
+  };
 
   const { showProgressBars, blinkEffect } = getSettings();
   const year = currentDate.getFullYear();
@@ -197,12 +224,23 @@ export default function SchedulePlanning() {
                   </button>
                 </div>
               </div>
-              <div className="flex rounded-lg border border-border overflow-hidden">
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={syncToGCal}
+                  disabled={syncing}
+                  className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:border-primary/30 transition-colors disabled:opacity-50"
+                  title="Sync to Google Calendar"
+                >
+                  {syncing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                  Sync
+                </button>
+                <div className="flex rounded-lg border border-border overflow-hidden">
                 {(["month", "week"] as View[]).map((v) => (
                   <button key={v} onClick={() => setView(v)} className={cn("px-3 py-1.5 text-xs font-medium capitalize", view === v ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground")}>
                     {v}
                   </button>
                 ))}
+                </div>
               </div>
             </div>
 
