@@ -39,8 +39,8 @@ function formatDayLabel(dateStr: string): string {
 
 function getTaskProgress(task: Task): number {
   if (!task.estimatedTime) return 0;
-  const dl = task.deadline || task.date;
-  if (!dl) return 0;
+  if (!task.deadline) return 0;
+  const dl = task.deadline;
   const todayDate = new Date(new Date().toISOString().slice(0, 10));
   const deadline = new Date(dl);
   const daysUntil = Math.ceil((deadline.getTime() - todayDate.getTime()) / 86400000);
@@ -51,9 +51,9 @@ function getTaskProgress(task: Task): number {
 }
 
 function isTaskOverdue(task: Task): boolean {
+  if (!task.deadline) return false;
   const today = new Date().toISOString().slice(0, 10);
-  const dl = task.deadline || task.date;
-  return !!dl && dl < today && task.status !== "complete";
+  return task.deadline < today && task.status !== "complete";
 }
 
 const priorityColors: Record<TaskPriority, string> = {
@@ -161,25 +161,44 @@ export default function DailyPlan() {
   const startTask = (id: string) => updateTask(id, { status: "active", startTime: Date.now() });
   const completeTask = (id: string) => updateTask(id, { status: "complete", endTime: Date.now() });
 
-  const handleReorderStart = (e: React.DragEvent, taskId: string, date: string) => {
+  const handleReorderStart = (e: React.DragEvent, taskId: string) => {
     e.dataTransfer.setData("application/task-id", taskId);
-    e.dataTransfer.setData("application/task-date", date);
     e.dataTransfer.effectAllowed = "move";
   };
 
-  const handleReorderDrop = (e: React.DragEvent, targetTaskId: string, date: string) => {
+  const handleDropOnTask = (e: React.DragEvent, targetTaskId: string, targetDate: string) => {
     e.preventDefault();
     const sourceId = e.dataTransfer.getData("application/task-id");
-    const sourceDate = e.dataTransfer.getData("application/task-date");
-    if (!sourceId || sourceDate !== date || sourceId === targetTaskId) return;
-    const dayTasks = tasksByDate[date];
-    const sourceIdx = dayTasks.findIndex((t) => t.id === sourceId);
-    const targetIdx = dayTasks.findIndex((t) => t.id === targetTaskId);
-    if (sourceIdx < 0 || targetIdx < 0) return;
-    const reordered = [...dayTasks];
-    const [removed] = reordered.splice(sourceIdx, 1);
-    reordered.splice(targetIdx, 0, removed);
-    reorderTasks(date, reordered.map((t) => t.id));
+    if (!sourceId) return;
+    const sourceTask = tasks.find((t) => t.id === sourceId);
+    if (!sourceTask) return;
+    const sourceDate = sourceTask.date || today;
+
+    if (sourceDate === targetDate) {
+      if (sourceId === targetTaskId) return;
+      const dayTasks = tasksByDate[targetDate];
+      const sourceIdx = dayTasks.findIndex((t) => t.id === sourceId);
+      const targetIdx = dayTasks.findIndex((t) => t.id === targetTaskId);
+      if (sourceIdx < 0 || targetIdx < 0) return;
+      const reordered = [...dayTasks];
+      const [removed] = reordered.splice(sourceIdx, 1);
+      reordered.splice(targetIdx, 0, removed);
+      reorderTasks(targetDate, reordered.map((t) => t.id));
+    } else {
+      updateTask(sourceId, { date: targetDate });
+    }
+  };
+
+  const handleDropOnDay = (e: React.DragEvent, targetDate: string) => {
+    e.preventDefault();
+    const sourceId = e.dataTransfer.getData("application/task-id");
+    if (!sourceId) return;
+    const sourceTask = tasks.find((t) => t.id === sourceId);
+    if (!sourceTask) return;
+    const sourceDate = sourceTask.date || today;
+    if (sourceDate !== targetDate) {
+      updateTask(sourceId, { date: targetDate });
+    }
   };
 
   const handleReorderOver = (e: React.DragEvent) => {
@@ -223,7 +242,7 @@ export default function DailyPlan() {
             const isToday = dateStr === today;
             if (dayTasks.length === 0 && !isToday) return null;
             return (
-              <section key={dateStr}>
+              <section key={dateStr} onDrop={(e) => handleDropOnDay(e, dateStr)} onDragOver={handleReorderOver}>
                 {!isToday && (
                   <div className="mb-2 flex items-center gap-2 border-b border-border pb-2">
                     <h3 className="text-sm font-semibold text-muted-foreground">
@@ -250,8 +269,8 @@ export default function DailyPlan() {
                         <TooltipTrigger asChild>
                       <div
                         draggable={task.status !== "complete"}
-                        onDragStart={(e) => task.status !== "complete" && handleReorderStart(e, task.id, dateStr)}
-                        onDrop={(e) => task.status !== "complete" && handleReorderDrop(e, task.id, dateStr)}
+                        onDragStart={(e) => task.status !== "complete" && handleReorderStart(e, task.id)}
+                        onDrop={(e) => { e.stopPropagation(); task.status !== "complete" && handleDropOnTask(e, task.id, dateStr); }}
                         onDragOver={handleReorderOver}
                         onClick={() => openTaskPopup(task)}
                         onDoubleClick={() => handleCardDoubleClick(task)}
@@ -367,15 +386,6 @@ export default function DailyPlan() {
                 className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-primary"
               />
               <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">Scheduled Date</label>
-                  <input
-                    type="date"
-                    value={editForm.date}
-                    onChange={(e) => setEditForm({ ...editForm, date: e.target.value })}
-                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm [color-scheme:dark] focus:outline-none focus:ring-1 focus:ring-primary"
-                  />
-                </div>
                 <div>
                   <label className="text-xs text-muted-foreground mb-1 block">Deadline</label>
                   <input

@@ -10,6 +10,7 @@ import DailyPlan from "@/pages/DailyPlan";
 import Strategy from "@/pages/Strategy";
 import SchedulePlanning from "@/pages/SchedulePlanning";
 import SettingsPage from "@/pages/Settings";
+import Notes from "@/pages/Notes";
 import Auth from "@/pages/Auth";
 import NotFound from "./pages/NotFound";
 import { Loader2 } from "lucide-react";
@@ -41,6 +42,7 @@ const AppRoutes = () => (
                   <Route path="/" element={<DailyPlan />} />
                   <Route path="/strategy" element={<Strategy />} />
                   <Route path="/schedule" element={<SchedulePlanning />} />
+                  <Route path="/notes" element={<Notes />} />
                   <Route path="/settings" element={<SettingsPage />} />
                   <Route path="*" element={<NotFound />} />
                 </Routes>

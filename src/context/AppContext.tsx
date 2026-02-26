@@ -183,8 +183,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       status: task.status,
       actual_start: task.startTime ? new Date(task.startTime).toISOString() : null,
       actual_end: task.endTime ? new Date(task.endTime).toISOString() : null,
-      date: task.date,
-      deadline: task.deadline ?? "",
+      date: task.date || null,
+      deadline: task.deadline || "",
       link: task.link ?? "",
       priority: task.priority ?? "medium",
     } as any).select().single();
@@ -213,8 +213,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (updates.title !== undefined) dbUpdates.title = updates.title;
     if (updates.description !== undefined) dbUpdates.description = updates.description;
     if (updates.estimatedTime !== undefined) dbUpdates.estimated_time = updates.estimatedTime;
-    if (updates.date !== undefined) dbUpdates.date = updates.date;
-    if (updates.deadline !== undefined) dbUpdates.deadline = updates.deadline;
+    if (updates.date !== undefined) dbUpdates.date = updates.date || null;
+    if (updates.deadline !== undefined) dbUpdates.deadline = updates.deadline || "";
     if (updates.position !== undefined) dbUpdates.position = updates.position;
     if (updates.link !== undefined) dbUpdates.link = updates.link;
     if (updates.priority !== undefined) dbUpdates.priority = updates.priority;

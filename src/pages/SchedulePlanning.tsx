@@ -1,5 +1,5 @@
 import { useState, useMemo, useRef, useCallback } from "react";
-import { ChevronLeft, ChevronRight, Clock, Plus, Trash2, ExternalLink, GripVertical } from "lucide-react";
+import { ChevronLeft, ChevronRight, Clock, Plus, Trash2, ExternalLink, GripVertical, CalendarX } from "lucide-react";
 import { useAppState, type TaskPriority, type Task } from "@/context/AppContext";
 import { getSettings } from "@/lib/settings";
 import { cn } from "@/lib/utils";
@@ -43,10 +43,17 @@ const priorityColors: Record<TaskPriority, string> = {
   low: "bg-info/10 text-info",
 };
 
+function calendarEventColor(status: Task["status"], deadline: string): string {
+  if (status === "complete") return "bg-primary/15 text-primary";
+  if (status === "active") return "bg-primary/20 text-primary animate-pulse";
+  if (deadline && deadline < new Date().toISOString().slice(0, 10)) return "bg-destructive/15 text-destructive";
+  return "bg-primary/10 text-primary";
+}
+
 function getTaskProgress(task: Task): number {
   if (!task.estimatedTime) return 0;
-  const dl = task.deadline || task.date;
-  if (!dl) return 0;
+  if (!task.deadline) return 0;
+  const dl = task.deadline;
   const todayDate = new Date(new Date().toISOString().slice(0, 10));
   const deadline = new Date(dl);
   const daysUntil = Math.ceil((deadline.getTime() - todayDate.getTime()) / 86400000);
@@ -77,20 +84,29 @@ export default function SchedulePlanning() {
   const today = new Date().toISOString().slice(0, 10);
 
   const calendarEvents = useMemo(() => {
-    const map: Record<string, { id: string; title: string; priority: TaskPriority; link: string }[]> = {};
+    const map: Record<string, { id: string; title: string; status: Task["status"]; deadline: string }[]> = {};
     tasks.forEach((t) => {
       if (!t.date) return;
       if (!map[t.date]) map[t.date] = [];
-      map[t.date].push({ id: t.id, title: t.title, priority: t.priority, link: t.link });
+      map[t.date].push({ id: t.id, title: t.title, status: t.status, deadline: t.deadline });
     });
     return map;
   }, [tasks]);
 
-  const upcomingTasks = useMemo(
+  const [scheduledLimit, setScheduledLimit] = useState(10);
+  const [unscheduledLimit, setUnscheduledLimit] = useState(10);
+
+  const scheduledTasks = useMemo(
     () => tasks
-      .filter((t) => t.status !== "complete")
-      .sort((a, b) => (a.deadline || "z").localeCompare(b.deadline || "z") || (a.date || "z").localeCompare(b.date || "z") || a.position - b.position)
-      .slice(0, 100),
+      .filter((t) => !!t.date && t.status !== "complete")
+      .sort((a, b) => a.date.localeCompare(b.date) || a.position - b.position),
+    [tasks]
+  );
+
+  const unscheduledTasks = useMemo(
+    () => tasks
+      .filter((t) => !t.date && t.status !== "complete")
+      .sort((a, b) => (a.deadline || "z").localeCompare(b.deadline || "z") || a.position - b.position),
     [tasks]
   );
 
@@ -159,10 +175,6 @@ export default function SchedulePlanning() {
     setShowForm(false);
   };
 
-  const handleUnschedule = (id: string) => {
-    updateTask(id, { date: "" });
-  };
-
   const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
   return (
@@ -224,7 +236,7 @@ export default function SchedulePlanning() {
                               onDragStart={(e) => handleDragStart(e, ev.id)}
                               className={cn(
                                 "truncate rounded px-1 py-0.5 text-[10px] font-medium cursor-grab active:cursor-grabbing",
-                                priorityColors[ev.priority]
+                                calendarEventColor(ev.status, ev.deadline)
                               )}
                             >
                               {ev.title}
@@ -262,7 +274,7 @@ export default function SchedulePlanning() {
                               onDragStart={(e) => handleDragStart(e, ev.id)}
                               className={cn(
                                 "rounded px-1.5 py-1 text-[10px] cursor-grab active:cursor-grabbing",
-                                priorityColors[ev.priority]
+                                calendarEventColor(ev.status, ev.deadline)
                               )}
                             >
                               <div className="flex items-center gap-0.5">
@@ -281,10 +293,11 @@ export default function SchedulePlanning() {
           </div>
         </section>
 
+        {/* Add Task */}
         <section className="glass-card p-4">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h3 className="text-lg font-semibold text-foreground">Upcoming</h3>
+              <h3 className="text-lg font-semibold text-foreground">Tasks</h3>
               <p className="text-xs text-muted-foreground">Create tasks, drag to calendar to schedule</p>
             </div>
             <button
@@ -318,14 +331,18 @@ export default function SchedulePlanning() {
               </button>
             </div>
           )}
+        </section>
 
+        {/* Scheduled Tasks */}
+        <section className="glass-card p-4">
+          <h3 className="text-base font-semibold text-foreground mb-3">
+            Scheduled <span className="text-xs text-muted-foreground font-normal ml-1">({scheduledTasks.length})</span>
+          </h3>
           <div className="space-y-2">
-            {upcomingTasks.length === 0 && (
-              <div className="rounded-lg border border-dashed border-border py-8 text-center">
-                <p className="text-sm text-muted-foreground">No tasks yet. Add one above.</p>
-              </div>
+            {scheduledTasks.length === 0 && (
+              <p className="text-xs text-muted-foreground py-4 text-center">No scheduled tasks. Drag tasks from below to the calendar.</p>
             )}
-            {upcomingTasks.map((task) => {
+            {scheduledTasks.slice(0, scheduledLimit).map((task) => {
               const progressPct = getTaskProgress(task);
               return (
                 <Tooltip key={task.id}>
@@ -335,7 +352,73 @@ export default function SchedulePlanning() {
                       onDragStart={(e) => handleDragStart(e, task.id)}
                       className="group relative flex items-center gap-3 rounded-lg border border-border bg-card p-3 cursor-grab active:cursor-grabbing hover:border-primary/30 transition-colors overflow-hidden"
                     >
-                      {showProgressBars && progressPct > 0 && task.status !== "complete" && (
+                      {showProgressBars && progressPct > 0 && (
+                        <div
+                          className={cn("task-progress-red absolute inset-0 pointer-events-none rounded-lg", blinkEffect && "task-progress-blink")}
+                          style={{
+                            ["--progress-pct" as string]: `${Math.min(progressPct, 1) * 100}%`,
+                            ["--blink-duration" as string]: progressPct >= 0.75 ? `${Math.max(0.6, 3.6 - (progressPct - 0.75) * 12)}s` : "3.6s",
+                          }}
+                        />
+                      )}
+                      <GripVertical className="relative h-4 w-4 text-muted-foreground/60 shrink-0 z-[1]" />
+                      <div className="relative flex-1 min-w-0 z-[1]">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-medium truncate">{task.title}</span>
+                          <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-medium", priorityColors[task.priority])}>{task.priority}</span>
+                          {task.estimatedTime && <span className="text-[10px] text-muted-foreground">Est: {formatEstimated(task.estimatedTime)}</span>}
+                        </div>
+                        <div className="mt-0.5 flex items-center gap-3 text-[10px] text-muted-foreground">
+                          <span className="font-mono text-primary">{task.date}</span>
+                          {task.deadline && <span className="font-mono">Deadline: {task.deadline}</span>}
+                          {task.link && <a href={task.link} target="_blank" rel="noopener" className="flex items-center gap-0.5 text-primary hover:underline" onClick={(e) => e.stopPropagation()}><ExternalLink className="h-3 w-3" />Link</a>}
+                        </div>
+                      </div>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button onClick={() => updateTask(task.id, { date: "" })} className="relative rounded p-1.5 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-warning z-[1]">
+                            <CalendarX className="h-3.5 w-3.5" />
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent side="left" className="text-xs">Unschedule</TooltipContent>
+                      </Tooltip>
+                      <button onClick={() => deleteTask(task.id)} className="relative rounded p-1.5 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-destructive z-[1]">
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </TooltipTrigger>
+                  {task.description && <TooltipContent side="bottom" className="max-w-xs text-sm">{task.description}</TooltipContent>}
+                </Tooltip>
+              );
+            })}
+            {scheduledTasks.length > scheduledLimit && (
+              <button onClick={() => setScheduledLimit((l) => l + 10)} className="w-full rounded-lg border border-dashed border-border py-2 text-xs text-muted-foreground hover:text-foreground hover:border-primary/30 transition-colors">
+                See more ({scheduledTasks.length - scheduledLimit} remaining)
+              </button>
+            )}
+          </div>
+        </section>
+
+        {/* Unscheduled Tasks */}
+        <section className="glass-card p-4">
+          <h3 className="text-base font-semibold text-foreground mb-3">
+            Unscheduled <span className="text-xs text-muted-foreground font-normal ml-1">({unscheduledTasks.length})</span>
+          </h3>
+          <div className="space-y-2">
+            {unscheduledTasks.length === 0 && (
+              <p className="text-xs text-muted-foreground py-4 text-center">All tasks are scheduled.</p>
+            )}
+            {unscheduledTasks.slice(0, unscheduledLimit).map((task) => {
+              const progressPct = getTaskProgress(task);
+              return (
+                <Tooltip key={task.id}>
+                  <TooltipTrigger asChild>
+                    <div
+                      draggable
+                      onDragStart={(e) => handleDragStart(e, task.id)}
+                      className="group relative flex items-center gap-3 rounded-lg border border-border bg-card p-3 cursor-grab active:cursor-grabbing hover:border-primary/30 transition-colors overflow-hidden"
+                    >
+                      {showProgressBars && progressPct > 0 && (
                         <div
                           className={cn("task-progress-red absolute inset-0 pointer-events-none rounded-lg", blinkEffect && "task-progress-blink")}
                           style={{
@@ -353,7 +436,6 @@ export default function SchedulePlanning() {
                         </div>
                         <div className="mt-0.5 flex items-center gap-3 text-[10px] text-muted-foreground">
                           {task.deadline && <span className="font-mono">Deadline: {task.deadline}</span>}
-                          {task.date && <span className="font-mono text-primary">Scheduled: {task.date}</span>}
                           {task.link && <a href={task.link} target="_blank" rel="noopener" className="flex items-center gap-0.5 text-primary hover:underline" onClick={(e) => e.stopPropagation()}><ExternalLink className="h-3 w-3" />Link</a>}
                         </div>
                       </div>
@@ -366,6 +448,11 @@ export default function SchedulePlanning() {
                 </Tooltip>
               );
             })}
+            {unscheduledTasks.length > unscheduledLimit && (
+              <button onClick={() => setUnscheduledLimit((l) => l + 10)} className="w-full rounded-lg border border-dashed border-border py-2 text-xs text-muted-foreground hover:text-foreground hover:border-primary/30 transition-colors">
+                See more ({unscheduledTasks.length - unscheduledLimit} remaining)
+              </button>
+            )}
           </div>
         </section>
       </div>
