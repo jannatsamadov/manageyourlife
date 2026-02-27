@@ -1,8 +1,8 @@
 import { useState, useMemo, useRef, useCallback } from "react";
-import { ChevronLeft, ChevronRight, Clock, Plus, Trash2, ExternalLink, GripVertical, CalendarX, RefreshCw, Loader2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, Clock, Plus, Trash2, ExternalLink, GripVertical, CalendarX, RefreshCw, Loader2, RotateCcw, X } from "lucide-react";
 import { useAppState, type TaskPriority, type Task } from "@/context/AppContext";
 import { getSettings } from "@/lib/settings";
-import { isGCalConnected, createEvent, listEvents } from "@/lib/gcal";
+import { isGCalAvailable, createEvent } from "@/lib/gcal";
 import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import {
@@ -66,7 +66,7 @@ function getTaskProgress(task: Task): number {
 }
 
 export default function SchedulePlanning() {
-  const { tasks, updateTask, addTask, deleteTask } = useAppState();
+  const { tasks, updateTask, addTask, deleteTask, permanentDeleteTask } = useAppState();
   const [view, setView] = useState<View>("month");
   const [currentDate, setCurrentDate] = useState(new Date());
   const [showForm, setShowForm] = useState(false);
@@ -82,8 +82,9 @@ export default function SchedulePlanning() {
   const [syncing, setSyncing] = useState(false);
 
   const syncToGCal = async () => {
-    if (!isGCalConnected()) {
-      toast({ title: "Not connected", description: "Connect Google Calendar in Settings first", variant: "destructive" });
+    const ok = await isGCalAvailable();
+    if (!ok) {
+      toast({ title: "Not connected", description: "Sign in with Google to enable calendar sync", variant: "destructive" });
       return;
     }
     setSyncing(true);
@@ -120,21 +121,35 @@ export default function SchedulePlanning() {
     return map;
   }, [tasks]);
 
-  const [scheduledLimit, setScheduledLimit] = useState(10);
-  const [unscheduledLimit, setUnscheduledLimit] = useState(10);
+  const [scheduledLimit, setScheduledLimit] = useState(3);
+  const [unscheduledLimit, setUnscheduledLimit] = useState(3);
+  const [abandonedLimit, setAbandonedLimit] = useState(3);
+  const [selectedDay, setSelectedDay] = useState<string | null>(null);
 
   const scheduledTasks = useMemo(
     () => tasks
-      .filter((t) => !!t.date && t.status !== "complete")
+      .filter((t) => !!t.date && t.status !== "complete" && t.status !== "abandoned")
       .sort((a, b) => a.date.localeCompare(b.date) || a.position - b.position),
     [tasks]
   );
 
   const unscheduledTasks = useMemo(
     () => tasks
-      .filter((t) => !t.date && t.status !== "complete")
+      .filter((t) => !t.date && t.status !== "complete" && t.status !== "abandoned")
       .sort((a, b) => (a.deadline || "z").localeCompare(b.deadline || "z") || a.position - b.position),
     [tasks]
+  );
+
+  const abandonedTasks = useMemo(
+    () => tasks
+      .filter((t) => t.status === "abandoned")
+      .sort((a, b) => (b.deadline || "").localeCompare(a.deadline || "")),
+    [tasks]
+  );
+
+  const selectedDayTasks = useMemo(
+    () => selectedDay ? tasks.filter((t) => t.date === selectedDay).sort((a, b) => a.position - b.position) : [],
+    [tasks, selectedDay]
   );
 
   const handleDragStart = (e: React.DragEvent, id: string) => {
@@ -264,7 +279,7 @@ export default function SchedulePlanning() {
                     const dayEvents = calendarEvents[dateStr] || [];
                     const isToday = dateStr === today;
                     return (
-                      <div key={day} className="min-h-[90px] border-b border-r border-border p-1.5" onDrop={(e) => handleDrop(e, dateStr)} onDragOver={handleDragOver}>
+                      <div key={day} className="min-h-[90px] border-b border-r border-border p-1.5 cursor-pointer hover:bg-muted/30 transition-colors" onDrop={(e) => handleDrop(e, dateStr)} onDragOver={handleDragOver} onClick={() => setSelectedDay(dateStr)}>
                         <span className={cn("inline-flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-medium", isToday ? "bg-primary text-primary-foreground" : "text-muted-foreground")}>{day}</span>
                         <div className="mt-0.5 space-y-0.5">
                           {dayEvents.slice(0, 3).map((ev) => (
@@ -299,7 +314,7 @@ export default function SchedulePlanning() {
                     const dayEvents = calendarEvents[dateStr] || [];
                     const isToday = dateStr === today;
                     return (
-                      <div key={dateStr} className="border-r border-border last:border-r-0" onDrop={(e) => handleDrop(e, dateStr)} onDragOver={handleDragOver}>
+                      <div key={dateStr} className="border-r border-border last:border-r-0 cursor-pointer hover:bg-muted/30 transition-colors" onDrop={(e) => handleDrop(e, dateStr)} onDragOver={handleDragOver} onClick={() => setSelectedDay(dateStr)}>
                         <div className={cn("border-b border-border px-2 py-2 text-center", isToday && "bg-primary/5")}>
                           <p className="text-[10px] text-muted-foreground">{dayNames[date.getDay()]}</p>
                           <p className={cn("mt-0.5 inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold", isToday ? "bg-primary text-primary-foreground" : "text-foreground")}>{date.getDate()}</p>
@@ -430,7 +445,7 @@ export default function SchedulePlanning() {
               );
             })}
             {scheduledTasks.length > scheduledLimit && (
-              <button onClick={() => setScheduledLimit((l) => l + 10)} className="w-full rounded-lg border border-dashed border-border py-2 text-xs text-muted-foreground hover:text-foreground hover:border-primary/30 transition-colors">
+              <button onClick={() => setScheduledLimit((l) => l + 5)} className="w-full rounded-lg border border-dashed border-border py-2 text-xs text-muted-foreground hover:text-foreground hover:border-primary/30 transition-colors">
                 See more ({scheduledTasks.length - scheduledLimit} remaining)
               </button>
             )}
@@ -487,12 +502,91 @@ export default function SchedulePlanning() {
               );
             })}
             {unscheduledTasks.length > unscheduledLimit && (
-              <button onClick={() => setUnscheduledLimit((l) => l + 10)} className="w-full rounded-lg border border-dashed border-border py-2 text-xs text-muted-foreground hover:text-foreground hover:border-primary/30 transition-colors">
+              <button onClick={() => setUnscheduledLimit((l) => l + 5)} className="w-full rounded-lg border border-dashed border-border py-2 text-xs text-muted-foreground hover:text-foreground hover:border-primary/30 transition-colors">
                 See more ({unscheduledTasks.length - unscheduledLimit} remaining)
               </button>
             )}
           </div>
         </section>
+
+        {/* Abandoned Tasks */}
+        {abandonedTasks.length > 0 && (
+          <section className="glass-card p-4">
+            <h3 className="text-base font-semibold text-muted-foreground mb-3">
+              Abandoned <span className="text-xs text-muted-foreground font-normal ml-1">({abandonedTasks.length})</span>
+            </h3>
+            <div className="space-y-2">
+              {abandonedTasks.slice(0, abandonedLimit).map((task) => (
+                <div key={task.id} className="group flex items-center gap-3 rounded-lg border border-border bg-card/50 p-3 opacity-60 hover:opacity-100 transition-opacity">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-medium truncate line-through">{task.title}</span>
+                      <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-medium", priorityColors[task.priority])}>{task.priority}</span>
+                    </div>
+                    <div className="mt-0.5 flex items-center gap-3 text-[10px] text-muted-foreground">
+                      {task.deadline && <span className="font-mono">Deadline: {task.deadline}</span>}
+                    </div>
+                  </div>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button onClick={() => updateTask(task.id, { status: "idle" })} className="rounded p-1.5 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-primary">
+                        <RotateCcw className="h-3.5 w-3.5" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="left" className="text-xs">Restore</TooltipContent>
+                  </Tooltip>
+                  <button onClick={() => permanentDeleteTask(task.id)} className="rounded p-1.5 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-destructive">
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ))}
+              {abandonedTasks.length > abandonedLimit && (
+                <button onClick={() => setAbandonedLimit((l) => l + 5)} className="w-full rounded-lg border border-dashed border-border py-2 text-xs text-muted-foreground hover:text-foreground hover:border-primary/30 transition-colors">
+                  See more ({abandonedTasks.length - abandonedLimit} remaining)
+                </button>
+              )}
+            </div>
+          </section>
+        )}
+
+        {/* Day popup */}
+        {selectedDay && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setSelectedDay(null)}>
+            <div className="w-full max-w-md rounded-xl bg-card border border-border shadow-xl p-5 space-y-4 animate-fade-in" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-semibold text-foreground">
+                  {new Date(selectedDay + "T12:00:00").toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}
+                </h3>
+                <button onClick={() => setSelectedDay(null)} className="rounded p-1 text-muted-foreground hover:text-foreground">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              {selectedDayTasks.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-6">No tasks on this day</p>
+              ) : (
+                <div className="space-y-2 max-h-[60vh] overflow-y-auto">
+                  {selectedDayTasks.map((task) => (
+                    <div key={task.id} className="flex items-start gap-3 rounded-lg border border-border bg-muted/20 p-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-medium text-sm">{task.title}</span>
+                          <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-medium", priorityColors[task.priority])}>{task.priority}</span>
+                          {task.estimatedTime && <span className="text-[10px] text-muted-foreground">Est: {formatEstimated(task.estimatedTime)}</span>}
+                        </div>
+                        {task.description && <p className="mt-1 text-xs text-muted-foreground">{task.description}</p>}
+                        <div className="mt-1 flex items-center gap-3 text-[10px] text-muted-foreground">
+                          {task.deadline && <span className="font-mono">Deadline: {task.deadline}</span>}
+                          <span className="capitalize">Status: {task.status}</span>
+                          {task.link && <a href={task.link} target="_blank" rel="noopener" className="flex items-center gap-0.5 text-primary hover:underline"><ExternalLink className="h-3 w-3" />Link</a>}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </TooltipProvider>
   );

@@ -10,7 +10,7 @@ export interface Task {
   title: string;
   description: string;
   estimatedTime: number | null;
-  status: "idle" | "active" | "complete";
+  status: "idle" | "active" | "complete" | "abandoned";
   startTime: number | null;
   endTime: number | null;
   date: string;
@@ -59,6 +59,7 @@ interface AppState {
   loading: boolean;
   addTask: (task: Omit<Task, "id"> & Partial<Pick<Task, "link" | "priority">>) => Promise<void>;
   deleteTask: (id: string) => Promise<void>;
+  permanentDeleteTask: (id: string) => Promise<void>;
   updateTask: (id: string, updates: Partial<Task>) => Promise<void>;
   addOpportunity: (opp: Omit<Opportunity, "id">) => Promise<void>;
   updateOpportunity: (id: string, updates: Partial<Opportunity>) => Promise<void>;
@@ -197,6 +198,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [user]);
 
   const deleteTask = useCallback(async (id: string) => {
+    const { error } = await supabase.from("tasks").update({ status: "abandoned" }).eq("id", id);
+    if (error) {
+      toast({ title: "Failed to abandon task", description: error.message, variant: "destructive" });
+    } else {
+      setTasks((prev) => prev.map((t) => t.id === id ? { ...t, status: "abandoned" as const } : t));
+    }
+  }, []);
+
+  const permanentDeleteTask = useCallback(async (id: string) => {
     const { error } = await supabase.from("tasks").delete().eq("id", id);
     if (error) {
       toast({ title: "Failed to delete task", description: error.message, variant: "destructive" });
@@ -293,7 +303,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <AppContext.Provider value={{ tasks, setTasks, strategy, setStrategy, opportunities, setOpportunities, loading, addTask, deleteTask, updateTask, addOpportunity, updateOpportunity, deleteOpportunity, reorderTasks }}>
+    <AppContext.Provider value={{ tasks, setTasks, strategy, setStrategy, opportunities, setOpportunities, loading, addTask, deleteTask, permanentDeleteTask, updateTask, addOpportunity, updateOpportunity, deleteOpportunity, reorderTasks }}>
       {children}
     </AppContext.Provider>
   );

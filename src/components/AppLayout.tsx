@@ -26,14 +26,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     <TooltipProvider delayDuration={200}>
       <div className="flex min-h-screen bg-background">
         <aside className="fixed inset-y-0 left-0 z-50 flex w-14 lg:w-64 flex-col border-r border-border bg-sidebar">
-          <div className="flex h-16 items-center gap-3 border-b border-border px-3 lg:px-6">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary">
-              <Target className="h-4 w-4 text-primary-foreground" />
-            </div>
-            <span className="hidden lg:block text-lg font-semibold text-foreground">Stratify</span>
-          </div>
-
-          <nav className="flex-1 space-y-1 p-2 lg:p-4">
+          <nav className="flex-1 space-y-1 p-2 lg:p-4 pt-4">
             {navItems.map((item) => (
               <Tooltip key={item.path}>
                 <TooltipTrigger asChild>
@@ -76,12 +69,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </aside>
 
         <div className="flex flex-1 flex-col pl-14 lg:pl-64">
-          <header className="flex h-16 items-center gap-4 border-b border-border px-6 lg:px-8">
-            <h1 className="text-lg font-semibold text-foreground">
-              {navItems.find((i) => i.path === location.pathname)?.title || "Stratify"}
-            </h1>
-          </header>
-
           <main className="flex-1 overflow-y-auto p-4 lg:p-8">
             {children}
           </main>

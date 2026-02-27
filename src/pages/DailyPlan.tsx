@@ -96,7 +96,7 @@ export default function DailyPlan() {
     visibleDates.forEach((d) => { map[d] = []; });
     [...tasks]
       .filter((t) => {
-        if (!t.date) return false;
+        if (!t.date || t.status === "abandoned") return false;
         if (t.status !== "complete" && t.date < today) return true;
         return visibleDates.includes(t.date);
       })
