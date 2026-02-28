@@ -287,7 +287,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (idx >= 0 && t.date === date) return { ...t, position: idx };
         return t;
       }).sort((a, b) => {
-        if (a.date !== b.date) return a.date.localeCompare(b.date);
+        if (a.date !== b.date) return (a.date || "").localeCompare(b.date || "");
         return (a.position ?? 0) - (b.position ?? 0);
       })
     );
