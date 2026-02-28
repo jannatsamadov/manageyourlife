@@ -14,6 +14,33 @@ export type Database = {
   }
   public: {
     Tables: {
+      notes: {
+        Row: {
+          content: string
+          created_at: string
+          id: string
+          title: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          content?: string
+          created_at?: string
+          id?: string
+          title?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          content?: string
+          created_at?: string
+          id?: string
+          title?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       opportunities: {
         Row: {
           created_at: string
@@ -56,7 +83,8 @@ export type Database = {
           actual_start: string | null
           category: string
           created_at: string
-          date: string
+          date: string | null
+          deadline: string
           description: string
           estimated_time: number | null
           execution_date: string | null
@@ -73,7 +101,8 @@ export type Database = {
           actual_start?: string | null
           category?: string
           created_at?: string
-          date?: string
+          date?: string | null
+          deadline?: string
           description?: string
           estimated_time?: number | null
           execution_date?: string | null
@@ -90,7 +119,8 @@ export type Database = {
           actual_start?: string | null
           category?: string
           created_at?: string
-          date?: string
+          date?: string | null
+          deadline?: string
           description?: string
           estimated_time?: number | null
           execution_date?: string | null
