@@ -129,7 +129,7 @@ export default function SchedulePlanning() {
   const scheduledTasks = useMemo(
     () => tasks
       .filter((t) => !!t.date && t.status !== "complete" && t.status !== "abandoned")
-      .sort((a, b) => a.date.localeCompare(b.date) || a.position - b.position),
+      .sort((a, b) => (a.date || "").localeCompare(b.date || "") || a.position - b.position),
     [tasks]
   );
 
