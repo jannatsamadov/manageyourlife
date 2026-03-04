@@ -11,6 +11,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import TaskEditPopup from "@/components/TaskEditPopup";
 
 type View = "month" | "week";
 
@@ -70,6 +71,7 @@ export default function SchedulePlanning() {
   const [view, setView] = useState<View>("month");
   const [currentDate, setCurrentDate] = useState(new Date());
   const [showForm, setShowForm] = useState(false);
+  const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [form, setForm] = useState({
     title: "",
     description: "",
@@ -217,6 +219,11 @@ export default function SchedulePlanning() {
     setShowForm(false);
   };
 
+  const openEditPopup = (taskId: string) => {
+    const task = tasks.find((t) => t.id === taskId);
+    if (task) setEditingTask(task);
+  };
+
   const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
   return (
@@ -261,7 +268,6 @@ export default function SchedulePlanning() {
 
             {view === "month" && (
               <div className="relative glass-card overflow-hidden">
-                {/* Edge zones for drag navigation */}
                 <div className="absolute left-0 top-0 bottom-0 w-8 z-10" onDragOver={(e) => handleEdgeDragOver(e, -1)} onDragLeave={handleEdgeDragLeave} />
                 <div className="absolute right-0 top-0 bottom-0 w-8 z-10" onDragOver={(e) => handleEdgeDragOver(e, 1)} onDragLeave={handleEdgeDragLeave} />
                 <div className="grid grid-cols-7">
@@ -287,8 +293,9 @@ export default function SchedulePlanning() {
                               key={ev.id}
                               draggable
                               onDragStart={(e) => handleDragStart(e, ev.id)}
+                              onClick={(e) => { e.stopPropagation(); openEditPopup(ev.id); }}
                               className={cn(
-                                "truncate rounded px-1 py-0.5 text-[10px] font-medium cursor-grab active:cursor-grabbing",
+                                "truncate rounded px-1 py-0.5 text-[10px] font-medium cursor-grab active:cursor-grabbing hover:ring-1 hover:ring-primary/40",
                                 calendarEventColor(ev.status, ev.deadline)
                               )}
                             >
@@ -325,8 +332,9 @@ export default function SchedulePlanning() {
                               key={ev.id}
                               draggable
                               onDragStart={(e) => handleDragStart(e, ev.id)}
+                              onClick={(e) => { e.stopPropagation(); openEditPopup(ev.id); }}
                               className={cn(
-                                "rounded px-1.5 py-1 text-[10px] cursor-grab active:cursor-grabbing",
+                                "rounded px-1.5 py-1 text-[10px] cursor-grab active:cursor-grabbing hover:ring-1 hover:ring-primary/40",
                                 calendarEventColor(ev.status, ev.deadline)
                               )}
                             >
@@ -403,6 +411,7 @@ export default function SchedulePlanning() {
                     <div
                       draggable
                       onDragStart={(e) => handleDragStart(e, task.id)}
+                      onClick={() => openEditPopup(task.id)}
                       className="group relative flex items-center gap-3 rounded-lg border border-border bg-card p-3 cursor-grab active:cursor-grabbing hover:border-primary/30 transition-colors overflow-hidden"
                     >
                       {showProgressBars && progressPct > 0 && (
@@ -429,13 +438,13 @@ export default function SchedulePlanning() {
                       </div>
                       <Tooltip>
                         <TooltipTrigger asChild>
-                          <button onClick={() => updateTask(task.id, { date: "" })} className="relative rounded p-1.5 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-warning z-[1]">
+                          <button onClick={(e) => { e.stopPropagation(); updateTask(task.id, { date: "" }); }} className="relative rounded p-1.5 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-warning z-[1]">
                             <CalendarX className="h-3.5 w-3.5" />
                           </button>
                         </TooltipTrigger>
                         <TooltipContent side="left" className="text-xs">Unschedule</TooltipContent>
                       </Tooltip>
-                      <button onClick={() => deleteTask(task.id)} className="relative rounded p-1.5 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-destructive z-[1]">
+                      <button onClick={(e) => { e.stopPropagation(); deleteTask(task.id); }} className="relative rounded p-1.5 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-destructive z-[1]">
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
                     </div>
@@ -469,6 +478,7 @@ export default function SchedulePlanning() {
                     <div
                       draggable
                       onDragStart={(e) => handleDragStart(e, task.id)}
+                      onClick={() => openEditPopup(task.id)}
                       className="group relative flex items-center gap-3 rounded-lg border border-border bg-card p-3 cursor-grab active:cursor-grabbing hover:border-primary/30 transition-colors overflow-hidden"
                     >
                       {showProgressBars && progressPct > 0 && (
@@ -492,7 +502,7 @@ export default function SchedulePlanning() {
                           {task.link && <a href={task.link} target="_blank" rel="noopener" className="flex items-center gap-0.5 text-primary hover:underline" onClick={(e) => e.stopPropagation()}><ExternalLink className="h-3 w-3" />Link</a>}
                         </div>
                       </div>
-                      <button onClick={() => deleteTask(task.id)} className="relative rounded p-1.5 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-destructive z-[1]">
+                      <button onClick={(e) => { e.stopPropagation(); deleteTask(task.id); }} className="relative rounded p-1.5 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-destructive z-[1]">
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
                     </div>
@@ -566,7 +576,11 @@ export default function SchedulePlanning() {
               ) : (
                 <div className="space-y-2 max-h-[60vh] overflow-y-auto">
                   {selectedDayTasks.map((task) => (
-                    <div key={task.id} className="flex items-start gap-3 rounded-lg border border-border bg-muted/20 p-3">
+                    <div
+                      key={task.id}
+                      onClick={() => { setSelectedDay(null); openEditPopup(task.id); }}
+                      className="flex items-start gap-3 rounded-lg border border-border bg-muted/20 p-3 cursor-pointer hover:border-primary/30 transition-colors"
+                    >
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-medium text-sm">{task.title}</span>
@@ -577,7 +591,7 @@ export default function SchedulePlanning() {
                         <div className="mt-1 flex items-center gap-3 text-[10px] text-muted-foreground">
                           {task.deadline && <span className="font-mono">Deadline: {task.deadline}</span>}
                           <span className="capitalize">Status: {task.status}</span>
-                          {task.link && <a href={task.link} target="_blank" rel="noopener" className="flex items-center gap-0.5 text-primary hover:underline"><ExternalLink className="h-3 w-3" />Link</a>}
+                          {task.link && <a href={task.link} target="_blank" rel="noopener" className="flex items-center gap-0.5 text-primary hover:underline" onClick={(e) => e.stopPropagation()}><ExternalLink className="h-3 w-3" />Link</a>}
                         </div>
                       </div>
                     </div>
@@ -586,6 +600,14 @@ export default function SchedulePlanning() {
               )}
             </div>
           </div>
+        )}
+
+        {/* Edit popup */}
+        {editingTask && (
+          <TaskEditPopup
+            task={editingTask}
+            onClose={() => setEditingTask(null)}
+          />
         )}
       </div>
     </TooltipProvider>
