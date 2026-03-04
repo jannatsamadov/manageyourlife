@@ -1,5 +1,5 @@
-import { useState, useMemo, useRef, useEffect } from "react";
-import { Trash2, Play, CheckCircle2, Timer, Loader2, GripVertical, X, ExternalLink, Save } from "lucide-react";
+import { useState, useMemo } from "react";
+import { Trash2, Play, CheckCircle2, Timer, Loader2, GripVertical, ExternalLink } from "lucide-react";
 import { useAppState, Task, type TaskPriority } from "@/context/AppContext";
 import { getSettings } from "@/lib/settings";
 import { cn } from "@/lib/utils";
@@ -9,6 +9,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import TaskEditPopup from "@/components/TaskEditPopup";
 
 function formatDuration(ms: number): string {
   const seconds = Math.floor(ms / 1000);
@@ -62,22 +63,9 @@ const priorityColors: Record<TaskPriority, string> = {
   low: "bg-info/15 text-info",
 };
 
-interface EditForm {
-  title: string;
-  description: string;
-  estimatedTime: string;
-  date: string;
-  deadline: string;
-  link: string;
-  priority: TaskPriority;
-  status: Task["status"];
-}
-
 export default function DailyPlan() {
   const { tasks, loading, deleteTask, updateTask, reorderTasks } = useAppState();
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
-  const [editForm, setEditForm] = useState<EditForm | null>(null);
-  const popupRef = useRef<HTMLDivElement>(null);
 
   const today = new Date().toISOString().slice(0, 10);
   const { showProgressBars, blinkEffect } = getSettings();
@@ -100,7 +88,7 @@ export default function DailyPlan() {
         if (t.status !== "complete" && t.date < today) return true;
         return visibleDates.includes(t.date);
       })
-      .sort((a, b) => a.date.localeCompare(b.date) || (a.position ?? 0) - (b.position ?? 0))
+      .sort((a, b) => (a.date || "").localeCompare(b.date || "") || (a.position ?? 0) - (b.position ?? 0))
       .forEach((t) => {
         const key = t.date < today && t.status !== "complete" ? today : t.date;
         map[key]?.push(t);
@@ -108,54 +96,9 @@ export default function DailyPlan() {
     return map;
   }, [tasks, visibleDates, today]);
 
-  useEffect(() => {
-    if (!selectedTask) return;
-    const handler = (e: MouseEvent) => {
-      if (popupRef.current && !popupRef.current.contains(e.target as Node)) {
-        setSelectedTask(null);
-        setEditForm(null);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [selectedTask]);
-
   const openTaskPopup = (task: Task) => {
     const fresh = tasks.find((t) => t.id === task.id) || task;
     setSelectedTask(fresh);
-    setEditForm({
-      title: fresh.title,
-      description: fresh.description,
-      estimatedTime: fresh.estimatedTime ? String(fresh.estimatedTime) : "",
-      date: fresh.date,
-      deadline: fresh.deadline || "",
-      link: fresh.link || "",
-      priority: fresh.priority || "medium",
-      status: fresh.status,
-    });
-  };
-
-  const saveEdit = async () => {
-    if (!selectedTask || !editForm) return;
-    const updates: Partial<Task> = {};
-    if (editForm.title.trim() && editForm.title !== selectedTask.title) updates.title = editForm.title.trim();
-    if (editForm.description !== selectedTask.description) updates.description = editForm.description;
-    const newEst = editForm.estimatedTime ? parseInt(editForm.estimatedTime) : null;
-    if (newEst !== selectedTask.estimatedTime) updates.estimatedTime = newEst;
-    if (editForm.date !== selectedTask.date) updates.date = editForm.date;
-    if (editForm.deadline !== (selectedTask.deadline || "")) updates.deadline = editForm.deadline;
-    if (editForm.link !== (selectedTask.link || "")) updates.link = editForm.link;
-    if (editForm.priority !== (selectedTask.priority || "medium")) updates.priority = editForm.priority;
-    if (editForm.status !== selectedTask.status) {
-      updates.status = editForm.status;
-      if (editForm.status === "active" && selectedTask.status === "idle") updates.startTime = Date.now();
-      if (editForm.status === "complete" && selectedTask.status !== "complete") updates.endTime = Date.now();
-    }
-    if (Object.keys(updates).length > 0) {
-      await updateTask(selectedTask.id, updates);
-    }
-    setSelectedTask(null);
-    setEditForm(null);
   };
 
   const startTask = (id: string) => updateTask(id, { status: "active", startTime: Date.now() });
@@ -362,110 +305,11 @@ export default function DailyPlan() {
         </div>
       </div>
 
-      {selectedTask && editForm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/60 backdrop-blur-sm">
-          <div ref={popupRef} className="w-full max-w-md rounded-xl border border-border bg-card shadow-2xl animate-in fade-in zoom-in-95 duration-200">
-            <div className="flex items-center justify-between border-b border-border px-5 py-3">
-              <h3 className="text-base font-semibold text-foreground">Edit Task</h3>
-              <button onClick={() => { setSelectedTask(null); setEditForm(null); }} className="text-muted-foreground hover:text-foreground shrink-0">
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-            <div className="px-5 py-4 space-y-3">
-              <input
-                value={editForm.title}
-                onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
-                placeholder="Title"
-                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
-              />
-              <textarea
-                value={editForm.description}
-                onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
-                placeholder="Description (supports plain text, markdown later)"
-                rows={4}
-                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-primary"
-              />
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">Deadline</label>
-                  <input
-                    type="date"
-                    value={editForm.deadline}
-                    onChange={(e) => setEditForm({ ...editForm, deadline: e.target.value })}
-                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm [color-scheme:dark] focus:outline-none focus:ring-1 focus:ring-primary"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">Estimated (min)</label>
-                  <input
-                    type="number"
-                    value={editForm.estimatedTime}
-                    onChange={(e) => setEditForm({ ...editForm, estimatedTime: e.target.value })}
-                    placeholder="minutes"
-                    min="1"
-                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">Status</label>
-                  <select
-                    value={editForm.status}
-                    onChange={(e) => setEditForm({ ...editForm, status: e.target.value as Task["status"] })}
-                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
-                  >
-                    <option value="idle">Idle</option>
-                    <option value="active">Active</option>
-                    <option value="complete">Complete</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">Priority</label>
-                  <select
-                    value={editForm.priority}
-                    onChange={(e) => setEditForm({ ...editForm, priority: e.target.value as TaskPriority })}
-                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
-                  >
-                    <option value="high">High</option>
-                    <option value="medium">Medium</option>
-                    <option value="low">Low</option>
-                  </select>
-                </div>
-              </div>
-              <input
-                value={editForm.link}
-                onChange={(e) => setEditForm({ ...editForm, link: e.target.value })}
-                placeholder="Link (optional)"
-                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
-              />
-
-              {selectedTask.startTime && (
-                <div className="text-xs text-muted-foreground font-mono space-y-0.5 pt-1 border-t border-border">
-                  <p>Started: {new Date(selectedTask.startTime).toLocaleString()}</p>
-                  {selectedTask.endTime && <p>Ended: {new Date(selectedTask.endTime).toLocaleString()}</p>}
-                  {selectedTask.startTime && selectedTask.endTime && (
-                    <p className="text-primary">Duration: {formatDuration(selectedTask.endTime - selectedTask.startTime)}</p>
-                  )}
-                </div>
-              )}
-
-              <div className="flex justify-end gap-2 pt-2">
-                <button
-                  onClick={() => { setSelectedTask(null); setEditForm(null); }}
-                  className="rounded-md px-4 py-2 text-sm text-muted-foreground hover:text-foreground hover:bg-muted"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={saveEdit}
-                  className="flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-                >
-                  <Save className="h-3.5 w-3.5" />
-                  Save
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+      {selectedTask && (
+        <TaskEditPopup
+          task={selectedTask}
+          onClose={() => setSelectedTask(null)}
+        />
       )}
     </TooltipProvider>
   );
