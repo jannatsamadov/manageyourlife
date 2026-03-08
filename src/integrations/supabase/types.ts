@@ -77,6 +77,57 @@ export type Database = {
         }
         Relationships: []
       }
+      subtasks: {
+        Row: {
+          completed: boolean
+          created_at: string
+          id: string
+          note_id: string | null
+          parent_task_id: string | null
+          position: number
+          title: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          completed?: boolean
+          created_at?: string
+          id?: string
+          note_id?: string | null
+          parent_task_id?: string | null
+          position?: number
+          title: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          completed?: boolean
+          created_at?: string
+          id?: string
+          note_id?: string | null
+          parent_task_id?: string | null
+          position?: number
+          title?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "subtasks_note_id_fkey"
+            columns: ["note_id"]
+            isOneToOne: false
+            referencedRelation: "notes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "subtasks_parent_task_id_fkey"
+            columns: ["parent_task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       tasks: {
         Row: {
           actual_end: string | null
@@ -90,6 +141,7 @@ export type Database = {
           execution_date: string | null
           id: string
           link: string
+          linked_note_id: string | null
           position: number
           priority: string
           status: string
@@ -108,6 +160,7 @@ export type Database = {
           execution_date?: string | null
           id?: string
           link?: string
+          linked_note_id?: string | null
           position?: number
           priority?: string
           status?: string
@@ -126,13 +179,22 @@ export type Database = {
           execution_date?: string | null
           id?: string
           link?: string
+          linked_note_id?: string | null
           position?: number
           priority?: string
           status?: string
           title?: string
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "tasks_linked_note_id_fkey"
+            columns: ["linked_note_id"]
+            isOneToOne: false
+            referencedRelation: "notes"
+            referencedColumns: ["id"]
+          },
+        ]
       }
     }
     Views: {
