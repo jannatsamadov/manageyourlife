@@ -1,6 +1,8 @@
-import { useState, useRef, useEffect, useMemo } from "react";
-import { X, Save, AlertTriangle } from "lucide-react";
+import { useState, useRef, useEffect, useMemo, useCallback } from "react";
+import { X, Save, AlertTriangle, Trash2, Plus, CheckSquare } from "lucide-react";
 import { Task, TaskPriority, useAppState } from "@/context/AppContext";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/context/AuthContext";
 import { cn } from "@/lib/utils";
 
 function formatDuration(ms: number): string {
@@ -10,6 +12,13 @@ function formatDuration(ms: number): string {
   if (hours > 0) return `${hours}h ${minutes % 60}m`;
   if (minutes > 0) return `${minutes}m ${seconds % 60}s`;
   return `${seconds}s`;
+}
+
+interface Subtask {
+  id: string;
+  title: string;
+  completed: boolean;
+  position: number;
 }
 
 interface EditForm {
@@ -30,7 +39,10 @@ interface TaskEditPopupProps {
 
 export default function TaskEditPopup({ task, onClose }: TaskEditPopupProps) {
   const { tasks, updateTask } = useAppState();
+  const { user } = useAuth();
   const popupRef = useRef<HTMLDivElement>(null);
+  const [subtasks, setSubtasks] = useState<Subtask[]>([]);
+  const [newSubtask, setNewSubtask] = useState("");
 
   const [editForm, setEditForm] = useState<EditForm>({
     title: task.title,
@@ -43,12 +55,24 @@ export default function TaskEditPopup({ task, onClose }: TaskEditPopupProps) {
     status: task.status,
   });
 
-  // Conflict detection: check if target date exceeds 8h
+  // Fetch subtasks
+  useEffect(() => {
+    const fetchSubtasks = async () => {
+      const { data } = await (supabase
+        .from("subtasks" as any)
+        .select("*")
+        .eq("parent_task_id", task.id)
+        .order("position", { ascending: true }) as any);
+      if (data) setSubtasks(data.map((s: any) => ({ id: s.id, title: s.title, completed: s.completed, position: s.position })));
+    };
+    fetchSubtasks();
+  }, [task.id]);
+
+  // Conflict detection
   const conflict = useMemo(() => {
     if (!editForm.date) return null;
-    const targetDate = editForm.date;
     const otherTasks = tasks.filter(
-      (t) => t.date === targetDate && t.id !== task.id && t.status !== "abandoned" && t.status !== "complete"
+      (t) => t.date === editForm.date && t.id !== task.id && t.status !== "abandoned" && t.status !== "complete"
     );
     const totalMins = otherTasks.reduce((sum, t) => sum + (t.estimatedTime || 0), 0);
     const thisMins = editForm.estimatedTime ? parseInt(editForm.estimatedTime) || 0 : 0;
@@ -61,13 +85,36 @@ export default function TaskEditPopup({ task, onClose }: TaskEditPopupProps) {
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (popupRef.current && !popupRef.current.contains(e.target as Node)) {
-        onClose();
-      }
+      if (popupRef.current && !popupRef.current.contains(e.target as Node)) onClose();
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, [onClose]);
+
+  const toggleSubtask = useCallback(async (id: string, completed: boolean) => {
+    await (supabase.from("subtasks" as any).update({ completed } as any).eq("id", id) as any);
+    setSubtasks((prev) => prev.map((s) => s.id === id ? { ...s, completed } : s));
+  }, []);
+
+  const deleteSubtask = useCallback(async (id: string) => {
+    await (supabase.from("subtasks" as any).delete().eq("id", id) as any);
+    setSubtasks((prev) => prev.filter((s) => s.id !== id));
+  }, []);
+
+  const addSubtask = useCallback(async () => {
+    if (!newSubtask.trim() || !user) return;
+    const { data } = await (supabase.from("subtasks" as any).insert({
+      user_id: user.id,
+      parent_task_id: task.id,
+      title: newSubtask.trim(),
+      completed: false,
+      position: subtasks.length,
+    } as any).select().single() as any);
+    if (data) {
+      setSubtasks((prev) => [...prev, { id: data.id, title: data.title, completed: data.completed, position: data.position }]);
+      setNewSubtask("");
+    }
+  }, [newSubtask, user, task.id, subtasks.length]);
 
   const saveEdit = async () => {
     const updates: Partial<Task> = {};
@@ -102,7 +149,7 @@ export default function TaskEditPopup({ task, onClose }: TaskEditPopupProps) {
             <X className="h-4 w-4" />
           </button>
         </div>
-        <div className="px-5 py-4 space-y-3 max-h-[75vh] overflow-y-auto">
+        <div className="px-5 py-4 space-y-3 max-h-[75vh] overflow-y-auto chat-scroll">
           <input
             value={editForm.title}
             onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
@@ -185,6 +232,48 @@ export default function TaskEditPopup({ task, onClose }: TaskEditPopupProps) {
               <span>Conflict detected: {conflict}</span>
             </div>
           )}
+
+          {/* Subtasks Section */}
+          <div className="border-t border-border pt-3">
+            <div className="flex items-center gap-2 mb-2">
+              <CheckSquare className="h-3.5 w-3.5 text-muted-foreground" />
+              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Subtasks</span>
+              {subtasks.length > 0 && (
+                <span className="text-[10px] text-muted-foreground ml-auto font-mono">
+                  {subtasks.filter(s => s.completed).length}/{subtasks.length}
+                </span>
+              )}
+            </div>
+            {subtasks.map((st) => (
+              <div key={st.id} className="flex items-center gap-2 py-1 group">
+                <input
+                  type="checkbox"
+                  checked={st.completed}
+                  onChange={() => toggleSubtask(st.id, !st.completed)}
+                  className="accent-primary h-3.5 w-3.5 shrink-0"
+                />
+                <span className={cn("text-sm flex-1", st.completed && "line-through text-muted-foreground")}>{st.title}</span>
+                <button
+                  onClick={() => deleteSubtask(st.id)}
+                  className="rounded p-0.5 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-destructive shrink-0"
+                >
+                  <Trash2 className="h-3 w-3" />
+                </button>
+              </div>
+            ))}
+            <div className="flex items-center gap-2 mt-1">
+              <input
+                value={newSubtask}
+                onChange={(e) => setNewSubtask(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && addSubtask()}
+                placeholder="Add subtask..."
+                className="flex-1 rounded-md border border-border bg-background px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+              <button onClick={addSubtask} className="rounded p-1 text-muted-foreground hover:text-primary">
+                <Plus className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
 
           {/* Time info */}
           {task.startTime && (
