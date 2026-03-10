@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/tooltip";
 
 const navItems = [
-  { title: "Tasks", path: "/", icon: LayoutDashboard },
+  { title: "Daily Plan", path: "/", icon: LayoutDashboard },
   { title: "Schedule", path: "/schedule", icon: Calendar },
   { title: "Strategy", path: "/strategy", icon: Target },
   { title: "Notes", path: "/notes", icon: StickyNote },
