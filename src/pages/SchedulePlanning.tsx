@@ -1,5 +1,5 @@
 import { useState, useMemo, useRef, useCallback } from "react";
-import { ChevronLeft, ChevronRight, Clock, Plus, Trash2, ExternalLink, GripVertical, CalendarX, RefreshCw, Loader2, RotateCcw, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Clock, Trash2, ExternalLink, GripVertical, Play, CheckCircle2, Timer, RefreshCw, Loader2, X } from "lucide-react";
 import { useAppState, type TaskPriority, type Task } from "@/context/AppContext";
 import { getSettings } from "@/lib/settings";
 import { isGCalAvailable, createEvent } from "@/lib/gcal";
@@ -40,6 +40,19 @@ function formatEstimated(mins: number | null): string {
   return `${mins}m`;
 }
 
+function formatDuration(ms: number): string {
+  const seconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+  if (hours > 0) return `${hours}h ${minutes % 60}m`;
+  if (minutes > 0) return `${minutes}m ${seconds % 60}s`;
+  return `${seconds}s`;
+}
+
+function formatTime(ts: number): string {
+  return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
 const priorityColors: Record<TaskPriority, string> = {
   high: "bg-destructive/10 text-destructive",
   medium: "bg-warning/10 text-warning",
@@ -53,35 +66,25 @@ function calendarEventColor(status: Task["status"], deadline: string): string {
   return "bg-primary/10 text-primary";
 }
 
-function getTaskProgress(task: Task): number {
-  if (!task.estimatedTime) return 0;
-  if (!task.deadline) return 0;
-  const dl = task.deadline;
-  const todayDate = new Date(new Date().toISOString().slice(0, 10));
-  const deadline = new Date(dl);
-  const daysUntil = Math.ceil((deadline.getTime() - todayDate.getTime()) / 86400000);
-  const fullTime = (task.estimatedTime / 60) * 100;
-  const remaining = Math.max(0, daysUntil) * 8;
-  if (remaining >= fullTime) return 0;
-  return Math.min(1, (fullTime - remaining) / fullTime);
+function isTaskOverdue(task: Task): boolean {
+  if (!task.deadline) return false;
+  const today = new Date().toISOString().slice(0, 10);
+  return task.deadline < today && task.status !== "complete";
 }
 
 export default function SchedulePlanning() {
-  const { tasks, updateTask, addTask, deleteTask, permanentDeleteTask } = useAppState();
+  const { tasks, updateTask, deleteTask, reorderTasks } = useAppState();
   const [view, setView] = useState<View>("month");
   const [currentDate, setCurrentDate] = useState(new Date());
-  const [showForm, setShowForm] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
-  const [form, setForm] = useState({
-    title: "",
-    description: "",
-    estimatedTime: "",
-    deadline: "",
-    link: "",
-    priority: "medium" as TaskPriority,
-  });
+  const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const dragNavTimer = useRef<ReturnType<typeof setTimeout>>();
   const [syncing, setSyncing] = useState(false);
+
+  const { showProgressBars, blinkEffect } = getSettings();
+  const year = currentDate.getFullYear();
+  const month = currentDate.getMonth();
+  const today = new Date().toISOString().slice(0, 10);
 
   const syncToGCal = async () => {
     const ok = await isGCalAvailable();
@@ -108,11 +111,6 @@ export default function SchedulePlanning() {
     });
   };
 
-  const { showProgressBars, blinkEffect } = getSettings();
-  const year = currentDate.getFullYear();
-  const month = currentDate.getMonth();
-  const today = new Date().toISOString().slice(0, 10);
-
   const calendarEvents = useMemo(() => {
     const map: Record<string, { id: string; title: string; status: Task["status"]; deadline: string }[]> = {};
     tasks.forEach((t) => {
@@ -122,32 +120,6 @@ export default function SchedulePlanning() {
     });
     return map;
   }, [tasks]);
-
-  const [scheduledLimit, setScheduledLimit] = useState(3);
-  const [unscheduledLimit, setUnscheduledLimit] = useState(3);
-  const [abandonedLimit, setAbandonedLimit] = useState(3);
-  const [selectedDay, setSelectedDay] = useState<string | null>(null);
-
-  const scheduledTasks = useMemo(
-    () => tasks
-      .filter((t) => !!t.date && t.status !== "complete" && t.status !== "abandoned")
-      .sort((a, b) => (a.date || "").localeCompare(b.date || "") || a.position - b.position),
-    [tasks]
-  );
-
-  const unscheduledTasks = useMemo(
-    () => tasks
-      .filter((t) => !t.date && t.status !== "complete" && t.status !== "abandoned")
-      .sort((a, b) => (a.deadline || "z").localeCompare(b.deadline || "z") || a.position - b.position),
-    [tasks]
-  );
-
-  const abandonedTasks = useMemo(
-    () => tasks
-      .filter((t) => t.status === "abandoned")
-      .sort((a, b) => (b.deadline || "").localeCompare(a.deadline || "")),
-    [tasks]
-  );
 
   const selectedDayTasks = useMemo(
     () => selectedDay ? tasks.filter((t) => t.date === selectedDay).sort((a, b) => a.position - b.position) : [],
@@ -200,35 +172,44 @@ export default function SchedulePlanning() {
     dragNavTimer.current = undefined;
   };
 
-  const handleAddTask = async () => {
-    if (!form.title.trim()) return;
-    await addTask({
-      title: form.title.trim(),
-      description: form.description,
-      estimatedTime: form.estimatedTime ? parseInt(form.estimatedTime) : null,
-      status: "idle",
-      startTime: null,
-      endTime: null,
-      date: "",
-      deadline: form.deadline,
-      position: 0,
-      link: form.link,
-      priority: form.priority,
-    });
-    setForm({ title: "", description: "", estimatedTime: "", deadline: "", link: "", priority: "medium" });
-    setShowForm(false);
-  };
-
   const openEditPopup = (taskId: string) => {
     const task = tasks.find((t) => t.id === taskId);
     if (task) setEditingTask(task);
+  };
+
+  const startTask = (id: string) => updateTask(id, { status: "active", startTime: Date.now() });
+  const completeTask = (id: string) => updateTask(id, { status: "complete", endTime: Date.now() });
+
+  const handleReorderStart = (e: React.DragEvent, taskId: string) => {
+    e.dataTransfer.setData("application/task-id", taskId);
+    e.dataTransfer.effectAllowed = "move";
+  };
+
+  const handleDropOnTask = (e: React.DragEvent, targetTaskId: string, targetDate: string) => {
+    e.preventDefault();
+    const sourceId = e.dataTransfer.getData("application/task-id");
+    if (!sourceId || sourceId === targetTaskId) return;
+    const dayTasks = selectedDayTasks;
+    const sourceIdx = dayTasks.findIndex((t) => t.id === sourceId);
+    const targetIdx = dayTasks.findIndex((t) => t.id === targetTaskId);
+    if (sourceIdx < 0 || targetIdx < 0) return;
+    const reordered = [...dayTasks];
+    const [removed] = reordered.splice(sourceIdx, 1);
+    reordered.splice(targetIdx, 0, removed);
+    reorderTasks(targetDate, reordered.map((t) => t.id));
+  };
+
+  const handleReorderOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
   };
 
   const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
   return (
     <TooltipProvider delayDuration={300}>
-      <div className="mx-auto max-w-5xl space-y-8 animate-fade-in">
+      <div className="mx-auto max-w-5xl space-y-6 animate-fade-in">
+        {/* Calendar */}
         <section>
           <div className="space-y-4">
             <div className="flex items-center justify-between flex-wrap gap-4">
@@ -257,11 +238,11 @@ export default function SchedulePlanning() {
                   Sync
                 </button>
                 <div className="flex rounded-lg border border-border overflow-hidden">
-                {(["month", "week"] as View[]).map((v) => (
-                  <button key={v} onClick={() => setView(v)} className={cn("px-3 py-1.5 text-xs font-medium capitalize", view === v ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground")}>
-                    {v}
-                  </button>
-                ))}
+                  {(["month", "week"] as View[]).map((v) => (
+                    <button key={v} onClick={() => setView(v)} className={cn("px-3 py-1.5 text-xs font-medium capitalize", view === v ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground")}>
+                      {v}
+                    </button>
+                  ))}
                 </div>
               </div>
             </div>
@@ -294,10 +275,7 @@ export default function SchedulePlanning() {
                               draggable
                               onDragStart={(e) => handleDragStart(e, ev.id)}
                               onClick={(e) => { e.stopPropagation(); openEditPopup(ev.id); }}
-                              className={cn(
-                                "truncate rounded px-1 py-0.5 text-[10px] font-medium cursor-grab active:cursor-grabbing hover:ring-1 hover:ring-primary/40",
-                                calendarEventColor(ev.status, ev.deadline)
-                              )}
+                              className={cn("truncate rounded px-1 py-0.5 text-[10px] font-medium cursor-grab active:cursor-grabbing hover:ring-1 hover:ring-primary/40", calendarEventColor(ev.status, ev.deadline))}
                             >
                               {ev.title}
                             </div>
@@ -333,10 +311,7 @@ export default function SchedulePlanning() {
                               draggable
                               onDragStart={(e) => handleDragStart(e, ev.id)}
                               onClick={(e) => { e.stopPropagation(); openEditPopup(ev.id); }}
-                              className={cn(
-                                "rounded px-1.5 py-1 text-[10px] cursor-grab active:cursor-grabbing hover:ring-1 hover:ring-primary/40",
-                                calendarEventColor(ev.status, ev.deadline)
-                              )}
+                              className={cn("rounded px-1.5 py-1 text-[10px] cursor-grab active:cursor-grabbing hover:ring-1 hover:ring-primary/40", calendarEventColor(ev.status, ev.deadline))}
                             >
                               <div className="flex items-center gap-0.5">
                                 <Clock className="h-2.5 w-2.5 flex-shrink-0" />
@@ -354,219 +329,19 @@ export default function SchedulePlanning() {
           </div>
         </section>
 
-        {/* Add Task */}
-        <section className="glass-card p-4">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h3 className="text-lg font-semibold text-foreground">Tasks</h3>
-              <p className="text-xs text-muted-foreground">Create tasks, drag to calendar to schedule</p>
-            </div>
-            <button
-              onClick={() => setShowForm(!showForm)}
-              className="flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-            >
-              <Plus className="h-4 w-4" />
-              Add Task
-            </button>
-          </div>
-
-          {showForm && (
-            <div className="mb-4 p-4 rounded-lg border border-border bg-muted/20 space-y-3">
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <input value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} placeholder="Task title *" className="rounded border border-border bg-background px-3 py-2 text-sm" />
-                <div>
-                  <label className="text-[10px] text-muted-foreground">Deadline</label>
-                  <input type="date" value={form.deadline} onChange={(e) => setForm((f) => ({ ...f, deadline: e.target.value }))} className="w-full rounded border border-border bg-background px-3 py-2 text-sm [color-scheme:dark]" />
-                </div>
-                <input type="number" value={form.estimatedTime} onChange={(e) => setForm((f) => ({ ...f, estimatedTime: e.target.value }))} placeholder="Estimated minutes" min="1" className="rounded border border-border bg-background px-3 py-2 text-sm" />
-                <select value={form.priority} onChange={(e) => setForm((f) => ({ ...f, priority: e.target.value as TaskPriority }))} className="rounded border border-border bg-background px-3 py-2 text-sm">
-                  <option value="high">High Priority</option>
-                  <option value="medium">Medium Priority</option>
-                  <option value="low">Low Priority</option>
-                </select>
-                <input value={form.link} onChange={(e) => setForm((f) => ({ ...f, link: e.target.value }))} placeholder="Link (optional)" className="rounded border border-border bg-background px-3 py-2 text-sm" />
-                <textarea value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} placeholder="Description (optional)" rows={1} className="rounded border border-border bg-background px-3 py-2 text-sm resize-none" />
-              </div>
-              <button onClick={handleAddTask} className="rounded bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90">
-                Create Task
-              </button>
-            </div>
-          )}
-        </section>
-
-        {/* Scheduled Tasks */}
-        <section className="glass-card p-4">
-          <h3 className="text-base font-semibold text-foreground mb-3">
-            Scheduled <span className="text-xs text-muted-foreground font-normal ml-1">({scheduledTasks.length})</span>
-          </h3>
-          <div className="space-y-2">
-            {scheduledTasks.length === 0 && (
-              <p className="text-xs text-muted-foreground py-4 text-center">No scheduled tasks. Drag tasks from below to the calendar.</p>
-            )}
-            {scheduledTasks.slice(0, scheduledLimit).map((task) => {
-              const progressPct = getTaskProgress(task);
-              return (
-                <Tooltip key={task.id}>
-                  <TooltipTrigger asChild>
-                    <div
-                      draggable
-                      onDragStart={(e) => handleDragStart(e, task.id)}
-                      onClick={() => openEditPopup(task.id)}
-                      className="group relative flex items-center gap-3 rounded-lg border border-border bg-card p-3 cursor-grab active:cursor-grabbing hover:border-primary/30 transition-colors overflow-hidden"
-                    >
-                      {showProgressBars && progressPct > 0 && (
-                        <div
-                          className={cn("task-progress-red absolute inset-0 pointer-events-none rounded-lg", blinkEffect && "task-progress-blink")}
-                          style={{
-                            ["--progress-pct" as string]: `${Math.min(progressPct, 1) * 100}%`,
-                            ["--blink-duration" as string]: progressPct >= 0.75 ? `${Math.max(0.6, 3.6 - (progressPct - 0.75) * 12)}s` : "3.6s",
-                          }}
-                        />
-                      )}
-                      <GripVertical className="relative h-4 w-4 text-muted-foreground/60 shrink-0 z-[1]" />
-                      <div className="relative flex-1 min-w-0 z-[1]">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-medium truncate">{task.title}</span>
-                          <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-medium", priorityColors[task.priority])}>{task.priority}</span>
-                          {task.estimatedTime && <span className="text-[10px] text-muted-foreground">Est: {formatEstimated(task.estimatedTime)}</span>}
-                        </div>
-                        <div className="mt-0.5 flex items-center gap-3 text-[10px] text-muted-foreground">
-                          <span className="font-mono text-primary">{task.date}</span>
-                          {task.deadline && <span className="font-mono">Deadline: {task.deadline}</span>}
-                          {task.link && <a href={task.link} target="_blank" rel="noopener" className="flex items-center gap-0.5 text-primary hover:underline" onClick={(e) => e.stopPropagation()}><ExternalLink className="h-3 w-3" />Link</a>}
-                        </div>
-                      </div>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <button onClick={(e) => { e.stopPropagation(); updateTask(task.id, { date: "" }); }} className="relative rounded p-1.5 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-warning z-[1]">
-                            <CalendarX className="h-3.5 w-3.5" />
-                          </button>
-                        </TooltipTrigger>
-                        <TooltipContent side="left" className="text-xs">Unschedule</TooltipContent>
-                      </Tooltip>
-                      <button onClick={(e) => { e.stopPropagation(); deleteTask(task.id); }} className="relative rounded p-1.5 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-destructive z-[1]">
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  </TooltipTrigger>
-                  {task.description && <TooltipContent side="bottom" className="max-w-xs text-sm">{task.description}</TooltipContent>}
-                </Tooltip>
-              );
-            })}
-            {scheduledTasks.length > scheduledLimit && (
-              <button onClick={() => setScheduledLimit((l) => l + 5)} className="w-full rounded-lg border border-dashed border-border py-2 text-xs text-muted-foreground hover:text-foreground hover:border-primary/30 transition-colors">
-                See more ({scheduledTasks.length - scheduledLimit} remaining)
-              </button>
-            )}
-          </div>
-        </section>
-
-        {/* Unscheduled Tasks */}
-        <section className="glass-card p-4">
-          <h3 className="text-base font-semibold text-foreground mb-3">
-            Unscheduled <span className="text-xs text-muted-foreground font-normal ml-1">({unscheduledTasks.length})</span>
-          </h3>
-          <div className="space-y-2">
-            {unscheduledTasks.length === 0 && (
-              <p className="text-xs text-muted-foreground py-4 text-center">All tasks are scheduled.</p>
-            )}
-            {unscheduledTasks.slice(0, unscheduledLimit).map((task) => {
-              const progressPct = getTaskProgress(task);
-              return (
-                <Tooltip key={task.id}>
-                  <TooltipTrigger asChild>
-                    <div
-                      draggable
-                      onDragStart={(e) => handleDragStart(e, task.id)}
-                      onClick={() => openEditPopup(task.id)}
-                      className="group relative flex items-center gap-3 rounded-lg border border-border bg-card p-3 cursor-grab active:cursor-grabbing hover:border-primary/30 transition-colors overflow-hidden"
-                    >
-                      {showProgressBars && progressPct > 0 && (
-                        <div
-                          className={cn("task-progress-red absolute inset-0 pointer-events-none rounded-lg", blinkEffect && "task-progress-blink")}
-                          style={{
-                            ["--progress-pct" as string]: `${Math.min(progressPct, 1) * 100}%`,
-                            ["--blink-duration" as string]: progressPct >= 0.75 ? `${Math.max(0.6, 3.6 - (progressPct - 0.75) * 12)}s` : "3.6s",
-                          }}
-                        />
-                      )}
-                      <GripVertical className="relative h-4 w-4 text-muted-foreground/60 shrink-0 z-[1]" />
-                      <div className="relative flex-1 min-w-0 z-[1]">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-medium truncate">{task.title}</span>
-                          <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-medium", priorityColors[task.priority])}>{task.priority}</span>
-                          {task.estimatedTime && <span className="text-[10px] text-muted-foreground">Est: {formatEstimated(task.estimatedTime)}</span>}
-                        </div>
-                        <div className="mt-0.5 flex items-center gap-3 text-[10px] text-muted-foreground">
-                          {task.deadline && <span className="font-mono">Deadline: {task.deadline}</span>}
-                          {task.link && <a href={task.link} target="_blank" rel="noopener" className="flex items-center gap-0.5 text-primary hover:underline" onClick={(e) => e.stopPropagation()}><ExternalLink className="h-3 w-3" />Link</a>}
-                        </div>
-                      </div>
-                      <button onClick={(e) => { e.stopPropagation(); deleteTask(task.id); }} className="relative rounded p-1.5 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-destructive z-[1]">
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  </TooltipTrigger>
-                  {task.description && <TooltipContent side="bottom" className="max-w-xs text-sm">{task.description}</TooltipContent>}
-                </Tooltip>
-              );
-            })}
-            {unscheduledTasks.length > unscheduledLimit && (
-              <button onClick={() => setUnscheduledLimit((l) => l + 5)} className="w-full rounded-lg border border-dashed border-border py-2 text-xs text-muted-foreground hover:text-foreground hover:border-primary/30 transition-colors">
-                See more ({unscheduledTasks.length - unscheduledLimit} remaining)
-              </button>
-            )}
-          </div>
-        </section>
-
-        {/* Abandoned Tasks */}
-        {abandonedTasks.length > 0 && (
-          <section className="glass-card p-4">
-            <h3 className="text-base font-semibold text-muted-foreground mb-3">
-              Abandoned <span className="text-xs text-muted-foreground font-normal ml-1">({abandonedTasks.length})</span>
-            </h3>
-            <div className="space-y-2">
-              {abandonedTasks.slice(0, abandonedLimit).map((task) => (
-                <div key={task.id} className="group flex items-center gap-3 rounded-lg border border-border bg-card/50 p-3 opacity-60 hover:opacity-100 transition-opacity">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-medium truncate line-through">{task.title}</span>
-                      <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-medium", priorityColors[task.priority])}>{task.priority}</span>
-                    </div>
-                    <div className="mt-0.5 flex items-center gap-3 text-[10px] text-muted-foreground">
-                      {task.deadline && <span className="font-mono">Deadline: {task.deadline}</span>}
-                    </div>
-                  </div>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button onClick={() => updateTask(task.id, { status: "idle" })} className="rounded p-1.5 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-primary">
-                        <RotateCcw className="h-3.5 w-3.5" />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="left" className="text-xs">Restore</TooltipContent>
-                  </Tooltip>
-                  <button onClick={() => permanentDeleteTask(task.id)} className="rounded p-1.5 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-destructive">
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              ))}
-              {abandonedTasks.length > abandonedLimit && (
-                <button onClick={() => setAbandonedLimit((l) => l + 5)} className="w-full rounded-lg border border-dashed border-border py-2 text-xs text-muted-foreground hover:text-foreground hover:border-primary/30 transition-colors">
-                  See more ({abandonedTasks.length - abandonedLimit} remaining)
-                </button>
-              )}
-            </div>
-          </section>
-        )}
-
-        {/* Day popup */}
+        {/* Selected Day Task List (Daily-Plan style) */}
         {selectedDay && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setSelectedDay(null)}>
-            <div className="w-full max-w-md rounded-xl bg-card border border-border shadow-xl p-5 space-y-4 animate-fade-in" onClick={(e) => e.stopPropagation()}>
+            <div className="w-full max-w-lg rounded-xl bg-card border border-border shadow-xl p-5 space-y-4 animate-fade-in" onClick={(e) => e.stopPropagation()}>
               <div className="flex items-center justify-between">
-                <h3 className="text-lg font-semibold text-foreground">
-                  {new Date(selectedDay + "T12:00:00").toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}
-                </h3>
+                <div>
+                  <h3 className="text-lg font-semibold text-foreground">
+                    {new Date(selectedDay + "T12:00:00").toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
+                  </h3>
+                  <p className="text-xs text-muted-foreground">
+                    {selectedDayTasks.filter((t) => t.status === "complete").length}/{selectedDayTasks.length} done
+                  </p>
+                </div>
                 <button onClick={() => setSelectedDay(null)} className="rounded p-1 text-muted-foreground hover:text-foreground">
                   <X className="h-4 w-4" />
                 </button>
@@ -575,27 +350,78 @@ export default function SchedulePlanning() {
                 <p className="text-sm text-muted-foreground text-center py-6">No tasks on this day</p>
               ) : (
                 <div className="space-y-2 max-h-[60vh] overflow-y-auto">
-                  {selectedDayTasks.map((task) => (
-                    <div
-                      key={task.id}
-                      onClick={() => { setSelectedDay(null); openEditPopup(task.id); }}
-                      className="flex items-start gap-3 rounded-lg border border-border bg-muted/20 p-3 cursor-pointer hover:border-primary/30 transition-colors"
-                    >
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-medium text-sm">{task.title}</span>
-                          <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-medium", priorityColors[task.priority])}>{task.priority}</span>
-                          {task.estimatedTime && <span className="text-[10px] text-muted-foreground">Est: {formatEstimated(task.estimatedTime)}</span>}
+                  {selectedDayTasks.map((task) => {
+                    const overdue = isTaskOverdue(task);
+                    return (
+                      <div
+                        key={task.id}
+                        draggable={task.status !== "complete"}
+                        onDragStart={(e) => task.status !== "complete" && handleReorderStart(e, task.id)}
+                        onDrop={(e) => { e.stopPropagation(); task.status !== "complete" && handleDropOnTask(e, task.id, selectedDay); }}
+                        onDragOver={handleReorderOver}
+                        onClick={() => { setSelectedDay(null); openEditPopup(task.id); }}
+                        className={cn(
+                          "group relative flex items-center gap-3 rounded-lg border p-3 transition-all overflow-hidden select-none cursor-pointer",
+                          task.status !== "complete" && "cursor-grab active:cursor-grabbing",
+                          task.status === "idle" && !overdue && "border-border bg-card",
+                          task.status === "active" && !overdue && "task-card-active",
+                          task.status === "complete" && "task-card-complete",
+                          overdue && "task-card-overdue"
+                        )}
+                      >
+                        {task.status !== "complete" && (
+                          <GripVertical className="h-4 w-4 text-muted-foreground/60 shrink-0" />
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <p className={cn("font-medium truncate", task.status === "complete" && "line-through text-muted-foreground")}>
+                              {task.title}
+                            </p>
+                            {task.link && (
+                              <a href={task.link} target="_blank" rel="noopener" onClick={(e) => e.stopPropagation()} className="shrink-0 text-primary hover:text-primary/80">
+                                <ExternalLink className="h-3 w-3" />
+                              </a>
+                            )}
+                            <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-medium shrink-0", priorityColors[task.priority || "medium"])}>
+                              {task.priority || "medium"}
+                            </span>
+                          </div>
+                          {(task.startTime || task.endTime) && (
+                            <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground font-mono">
+                              {task.startTime && <span>Started {formatTime(task.startTime)}</span>}
+                              {task.endTime && <span>Ended {formatTime(task.endTime)}</span>}
+                              {task.startTime && task.endTime && (
+                                <span className="text-primary">{formatDuration(task.endTime - task.startTime)}</span>
+                              )}
+                            </div>
+                          )}
                         </div>
-                        {task.description && <p className="mt-1 text-xs text-muted-foreground">{task.description}</p>}
-                        <div className="mt-1 flex items-center gap-3 text-[10px] text-muted-foreground">
-                          {task.deadline && <span className="font-mono">Deadline: {task.deadline}</span>}
-                          <span className="capitalize">Status: {task.status}</span>
-                          {task.link && <a href={task.link} target="_blank" rel="noopener" className="flex items-center gap-0.5 text-primary hover:underline" onClick={(e) => e.stopPropagation()}><ExternalLink className="h-3 w-3" />Link</a>}
+                        <div className="flex items-center gap-1.5">
+                          {task.estimatedTime && (
+                            <span className="inline-flex items-center gap-0.5 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground shrink-0">
+                              <Timer className="h-2.5 w-2.5" />
+                              {formatEstimated(task.estimatedTime)}
+                            </span>
+                          )}
+                          {task.status === "idle" && (
+                            <button onClick={(e) => { e.stopPropagation(); startTask(task.id); }} className="flex items-center gap-1 rounded bg-primary/10 px-2 py-1 text-[10px] font-medium text-primary hover:bg-primary/20">
+                              <Play className="h-2.5 w-2.5" /> Start
+                            </button>
+                          )}
+                          {task.status === "active" && (
+                            <button onClick={(e) => { e.stopPropagation(); completeTask(task.id); }} className="flex items-center gap-1 rounded bg-primary px-2 py-1 text-[10px] font-medium text-primary-foreground hover:bg-primary/90">
+                              <CheckCircle2 className="h-2.5 w-2.5" /> Done
+                            </button>
+                          )}
+                          {task.status !== "active" && (
+                            <button onClick={(e) => { e.stopPropagation(); deleteTask(task.id); }} className="rounded p-1 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-destructive">
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          )}
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
