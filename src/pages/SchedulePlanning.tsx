@@ -412,7 +412,7 @@ export default function SchedulePlanning() {
         <section className="glass-card p-4 -mt-2">
           <div className="flex items-start justify-between mb-4 gap-3 flex-wrap">
             <div className="min-w-[220px]">
-              <h3 className="text-lg font-semibold text-foreground">Tasks</h3>
+              
               
             </div>
 
