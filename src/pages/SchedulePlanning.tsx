@@ -9,8 +9,8 @@ import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+  TooltipTrigger } from
+"@/components/ui/tooltip";
 import TaskEditPopup from "@/components/TaskEditPopup";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
@@ -18,8 +18,8 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+  SelectValue } from
+"@/components/ui/select";
 
 type View = "month" | "week" | "daily";
 
@@ -78,7 +78,7 @@ function isTaskOverdue(task: Task): boolean {
 const priorityColors: Record<TaskPriority, string> = {
   high: "bg-destructive/10 text-destructive",
   medium: "bg-warning/10 text-warning",
-  low: "bg-info/10 text-info",
+  low: "bg-info/10 text-info"
 };
 
 function calendarEventColor(status: Task["status"], deadline: string): string {
@@ -95,7 +95,7 @@ function getTaskProgress(task: Task): number {
   const todayDate = new Date(new Date().toISOString().slice(0, 10));
   const deadline = new Date(dl);
   const daysUntil = Math.ceil((deadline.getTime() - todayDate.getTime()) / 86400000);
-  const fullTime = (task.estimatedTime / 60) * 100;
+  const fullTime = task.estimatedTime / 60 * 100;
   const remaining = Math.max(0, daysUntil) * 8;
   if (remaining >= fullTime) return 0;
   return Math.min(1, (fullTime - remaining) / fullTime);
@@ -120,7 +120,7 @@ export default function SchedulePlanning() {
     estimatedTime: "",
     deadline: "",
     link: "",
-    priority: "medium" as TaskPriority,
+    priority: "medium" as TaskPriority
   });
   const dragNavTimer = useRef<ReturnType<typeof setTimeout>>();
   const [syncing, setSyncing] = useState(false);
@@ -168,7 +168,7 @@ export default function SchedulePlanning() {
     setSyncing(false);
     toast({
       title: "Sync complete",
-      description: `${created} events pushed to Google Calendar${errors ? `, ${errors} failed` : ""}`,
+      description: `${created} events pushed to Google Calendar${errors ? `, ${errors} failed` : ""}`
     });
   };
 
@@ -177,7 +177,7 @@ export default function SchedulePlanning() {
   const month = currentDate.getMonth();
 
   const calendarEvents = useMemo(() => {
-    const map: Record<string, { id: string; title: string; status: Task["status"]; deadline: string }[]> = {};
+    const map: Record<string, {id: string;title: string;status: Task["status"];deadline: string;}[]> = {};
     visibleTasks.forEach((t) => {
       if (!t.date) return;
       if (!map[t.date]) map[t.date] = [];
@@ -191,9 +191,9 @@ export default function SchedulePlanning() {
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
 
   const scheduledTasks = useMemo(
-    () => visibleTasks
-      .filter((t) => !!t.date && t.status !== "abandoned")
-      .sort((a, b) => (a.date || "").localeCompare(b.date || "") || a.position - b.position),
+    () => visibleTasks.
+    filter((t) => !!t.date && t.status !== "abandoned").
+    sort((a, b) => (a.date || "").localeCompare(b.date || "") || a.position - b.position),
     [visibleTasks]
   );
 
@@ -212,7 +212,7 @@ export default function SchedulePlanning() {
 
   const scheduledTasksByDate = useMemo(() => {
     const map: Record<string, Task[]> = {};
-    visibleScheduledDates.forEach((d) => { map[d] = []; });
+    visibleScheduledDates.forEach((d) => {map[d] = [];});
     scheduledTasks.forEach((t) => {
       if (visibleScheduledDates.includes(t.date)) map[t.date].push(t);
     });
@@ -234,7 +234,7 @@ export default function SchedulePlanning() {
 
   const previousTasksByDate = useMemo(() => {
     const map: Record<string, Task[]> = {};
-    visiblePreviousDates.forEach((d) => { map[d] = []; });
+    visiblePreviousDates.forEach((d) => {map[d] = [];});
     scheduledTasks.forEach((t) => {
       if (visiblePreviousDates.includes(t.date)) map[t.date].push(t);
     });
@@ -242,14 +242,14 @@ export default function SchedulePlanning() {
   }, [scheduledTasks, visiblePreviousDates]);
 
   const dailyAggregateDoneTotal = useMemo(() => {
-    let done = 0, total = 0;
+    let done = 0,total = 0;
     visiblePreviousDates.forEach((dateStr) => {
       const dayTasks = previousTasksByDate[dateStr] || [];
-      dayTasks.forEach((t) => { total++; if (t.status === "complete") done++; });
+      dayTasks.forEach((t) => {total++;if (t.status === "complete") done++;});
     });
     visibleScheduledDates.forEach((dateStr) => {
       const dayTasks = scheduledTasksByDate[dateStr] || [];
-      dayTasks.forEach((t) => { total++; if (t.status === "complete") done++; });
+      dayTasks.forEach((t) => {total++;if (t.status === "complete") done++;});
     });
     return { done, total };
   }, [visiblePreviousDates, visibleScheduledDates, previousTasksByDate, scheduledTasksByDate]);
@@ -315,16 +315,16 @@ export default function SchedulePlanning() {
   }, []);
 
   const unscheduledTasks = useMemo(
-    () => visibleTasks
-      .filter((t) => !t.date && t.status !== "complete" && t.status !== "abandoned")
-      .sort((a, b) => (a.deadline || "z").localeCompare(b.deadline || "z") || a.position - b.position),
+    () => visibleTasks.
+    filter((t) => !t.date && t.status !== "complete" && t.status !== "abandoned").
+    sort((a, b) => (a.deadline || "z").localeCompare(b.deadline || "z") || a.position - b.position),
     [visibleTasks]
   );
 
   const abandonedTasks = useMemo(
-    () => visibleTasks
-      .filter((t) => t.status === "abandoned")
-      .sort((a, b) => (b.deadline || "").localeCompare(a.deadline || "")),
+    () => visibleTasks.
+    filter((t) => t.status === "abandoned").
+    sort((a, b) => (b.deadline || "").localeCompare(a.deadline || "")),
     [visibleTasks]
   );
 
@@ -368,8 +368,8 @@ export default function SchedulePlanning() {
     e.dataTransfer.dropEffect = "move";
     if (dragNavTimer.current) return;
     dragNavTimer.current = setTimeout(() => {
-      if (view === "month") navigateMonth(dir);
-      else navigateWeek(dir);
+      if (view === "month") navigateMonth(dir);else
+      navigateWeek(dir);
       dragNavTimer.current = undefined;
     }, 600);
   };
@@ -392,7 +392,7 @@ export default function SchedulePlanning() {
       deadline: form.deadline,
       position: 0,
       link: form.link,
-      priority: form.priority,
+      priority: form.priority
     });
     setForm({ title: "", description: "", estimatedTime: "", deadline: "", link: "", priority: "medium" });
     setShowForm(false);
@@ -413,7 +413,7 @@ export default function SchedulePlanning() {
           <div className="flex items-start justify-between mb-4 gap-3 flex-wrap">
             <div className="min-w-[220px]">
               <h3 className="text-lg font-semibold text-foreground">Tasks</h3>
-              <p className="text-xs text-muted-foreground">Create tasks, drag to calendar to schedule</p>
+              
             </div>
 
             <div className="flex items-center gap-2 flex-1 justify-end min-w-[260px]">
@@ -421,18 +421,18 @@ export default function SchedulePlanning() {
                 value={taskQuery}
                 onChange={(e) => setTaskQuery(e.target.value)}
                 placeholder="Search tasks…"
-                className="w-full sm:w-56 rounded-lg border border-border bg-background px-3 py-2 text-sm"
-              />
-              {taskQuery.trim() && (
-                <button
-                  type="button"
-                  onClick={() => setTaskQuery("")}
-                  className="rounded-lg border border-border px-2.5 py-2 text-sm text-muted-foreground hover:text-foreground hover:border-primary/30 transition-colors"
-                  title="Clear search"
-                >
+                className="w-full sm:w-56 rounded-lg border border-border bg-background px-3 py-2 text-sm" />
+              
+              {taskQuery.trim() &&
+              <button
+                type="button"
+                onClick={() => setTaskQuery("")}
+                className="rounded-lg border border-border px-2.5 py-2 text-sm text-muted-foreground hover:text-foreground hover:border-primary/30 transition-colors"
+                title="Clear search">
+                
                   <X className="h-4 w-4" />
                 </button>
-              )}
+              }
               <Popover>
                 <PopoverTrigger asChild>
                   <button
@@ -441,8 +441,8 @@ export default function SchedulePlanning() {
                       "inline-flex items-center justify-center rounded-lg border border-border px-2.5 py-2 text-sm text-muted-foreground hover:text-foreground hover:border-primary/30 transition-colors",
                       (priorityFilter !== "all" || deadlineFilter !== "any") && "text-foreground border-primary/30"
                     )}
-                    title="Filters"
-                  >
+                    title="Filters">
+                    
                     <Filter className="h-4 w-4" />
                   </button>
                 </PopoverTrigger>
@@ -487,30 +487,30 @@ export default function SchedulePlanning() {
                       </div>
                     </div>
 
-                    {(priorityFilter !== "all" || deadlineFilter !== "any") && (
-                      <button
-                        type="button"
-                        onClick={() => { setPriorityFilter("all"); setDeadlineFilter("any"); }}
-                        className="w-full rounded-md border border-border px-3 py-2 text-sm text-muted-foreground hover:text-foreground hover:border-primary/30 transition-colors"
-                      >
+                    {(priorityFilter !== "all" || deadlineFilter !== "any") &&
+                    <button
+                      type="button"
+                      onClick={() => {setPriorityFilter("all");setDeadlineFilter("any");}}
+                      className="w-full rounded-md border border-border px-3 py-2 text-sm text-muted-foreground hover:text-foreground hover:border-primary/30 transition-colors">
+                      
                         Clear filters
                       </button>
-                    )}
+                    }
                   </div>
                 </PopoverContent>
               </Popover>
               <button
                 onClick={() => setShowForm(!showForm)}
-                className="flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-              >
+                className="flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90">
+                
                 <Plus className="h-4 w-4" />
                 Add Task
               </button>
             </div>
           </div>
 
-          {showForm && (
-            <div className="mb-4 p-4 rounded-lg border border-border bg-muted/20 space-y-3">
+          {showForm &&
+          <div className="mb-4 p-4 rounded-lg border border-border bg-muted/20 space-y-3">
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <input value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} placeholder="Task title *" className="rounded border border-border bg-background px-3 py-2 text-sm" />
                 <div>
@@ -530,7 +530,7 @@ export default function SchedulePlanning() {
                 Create Task
               </button>
             </div>
-          )}
+          }
         </section>
 
         <section>
@@ -540,8 +540,8 @@ export default function SchedulePlanning() {
                 type="button"
                 onClick={() => setCurrentDate(new Date())}
                 className="text-left text-lg font-semibold text-foreground hover:text-muted-foreground transition-colors"
-                title="Go to today"
-              >
+                title="Go to today">
+                
                 {currentDate.toLocaleDateString("en-US", { day: "numeric", month: "long", year: "numeric" })}
               </button>
               <div className="flex items-center gap-2">
@@ -549,180 +549,180 @@ export default function SchedulePlanning() {
                   onClick={syncToGCal}
                   disabled={syncing}
                   className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:border-primary/30 transition-colors disabled:opacity-50"
-                  title="Sync to Google Calendar"
-                >
+                  title="Sync to Google Calendar">
+                  
                   {syncing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
                   Sync
                 </button>
                 <div className="flex rounded-lg border border-border overflow-hidden">
-                  {(["month", "week", "daily"] as View[]).map((v) => (
-                    <button
-                      key={v}
-                      onClick={() => setView(v)}
-                      className={cn(
-                        "px-3 py-1.5 text-xs font-medium capitalize",
-                        view === v ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
-                      )}
-                    >
+                  {(["month", "week", "daily"] as View[]).map((v) =>
+                  <button
+                    key={v}
+                    onClick={() => setView(v)}
+                    className={cn(
+                      "px-3 py-1.5 text-xs font-medium capitalize",
+                      view === v ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+                    )}>
+                    
                       {v}
                     </button>
-                  ))}
+                  )}
                 </div>
               </div>
             </div>
 
-            {view === "month" && (
-              <div className="relative glass-card overflow-hidden">
+            {view === "month" &&
+            <div className="relative glass-card overflow-hidden">
                 <div
-                  role="button"
-                  tabIndex={0}
-                  className="absolute left-0 top-0 bottom-0 w-10 z-10 flex items-center justify-center opacity-0 hover:opacity-100 hover:bg-muted/40 transition-opacity cursor-pointer rounded-r"
-                  onClick={() => navigateMonth(-1)}
-                  onKeyDown={(e) => e.key === "Enter" && navigateMonth(-1)}
-                  onDragOver={(e) => handleEdgeDragOver(e, -1)}
-                  onDragLeave={handleEdgeDragLeave}
-                  title="Previous month"
-                >
+                role="button"
+                tabIndex={0}
+                className="absolute left-0 top-0 bottom-0 w-10 z-10 flex items-center justify-center opacity-0 hover:opacity-100 hover:bg-muted/40 transition-opacity cursor-pointer rounded-r"
+                onClick={() => navigateMonth(-1)}
+                onKeyDown={(e) => e.key === "Enter" && navigateMonth(-1)}
+                onDragOver={(e) => handleEdgeDragOver(e, -1)}
+                onDragLeave={handleEdgeDragLeave}
+                title="Previous month">
+                
                   <ChevronLeft className="h-5 w-5 text-foreground" />
                 </div>
                 <div
-                  role="button"
-                  tabIndex={0}
-                  className="absolute right-0 top-0 bottom-0 w-10 z-10 flex items-center justify-center opacity-0 hover:opacity-100 hover:bg-muted/40 transition-opacity cursor-pointer rounded-l"
-                  onClick={() => navigateMonth(1)}
-                  onKeyDown={(e) => e.key === "Enter" && navigateMonth(1)}
-                  onDragOver={(e) => handleEdgeDragOver(e, 1)}
-                  onDragLeave={handleEdgeDragLeave}
-                  title="Next month"
-                >
+                role="button"
+                tabIndex={0}
+                className="absolute right-0 top-0 bottom-0 w-10 z-10 flex items-center justify-center opacity-0 hover:opacity-100 hover:bg-muted/40 transition-opacity cursor-pointer rounded-l"
+                onClick={() => navigateMonth(1)}
+                onKeyDown={(e) => e.key === "Enter" && navigateMonth(1)}
+                onDragOver={(e) => handleEdgeDragOver(e, 1)}
+                onDragLeave={handleEdgeDragLeave}
+                title="Next month">
+                
                   <ChevronRight className="h-5 w-5 text-foreground" />
                 </div>
                 <div className="grid grid-cols-7">
-                  {dayNames.map((d) => (
-                    <div key={d} className="border-b border-border px-2 py-1.5 text-center text-xs font-medium text-muted-foreground">{d}</div>
-                  ))}
+                  {dayNames.map((d) =>
+                <div key={d} className="border-b border-border px-2 py-1.5 text-center text-xs font-medium text-muted-foreground">{d}</div>
+                )}
                 </div>
                 <div className="grid grid-cols-7">
-                  {Array.from({ length: getFirstDayOfMonth(year, month) }).map((_, i) => (
-                    <div key={`e-${i}`} className="min-h-[90px] border-b border-r border-border" onDrop={(e) => { e.preventDefault(); }} onDragOver={handleDragOver} />
-                  ))}
+                  {Array.from({ length: getFirstDayOfMonth(year, month) }).map((_, i) =>
+                <div key={`e-${i}`} className="min-h-[90px] border-b border-r border-border" onDrop={(e) => {e.preventDefault();}} onDragOver={handleDragOver} />
+                )}
                   {Array.from({ length: getDaysInMonth(year, month) }).map((_, i) => {
-                    const day = i + 1;
-                    const dateStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-                    const dayEvents = calendarEvents[dateStr] || [];
-                    const isToday = dateStr === today;
-                    return (
-                      <div key={day} className="min-h-[90px] border-b border-r border-border p-1.5 cursor-pointer hover:bg-muted/30 transition-colors" onDrop={(e) => handleDrop(e, dateStr)} onDragOver={handleDragOver} onClick={() => setSelectedDay(dateStr)}>
+                  const day = i + 1;
+                  const dateStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+                  const dayEvents = calendarEvents[dateStr] || [];
+                  const isToday = dateStr === today;
+                  return (
+                    <div key={day} className="min-h-[90px] border-b border-r border-border p-1.5 cursor-pointer hover:bg-muted/30 transition-colors" onDrop={(e) => handleDrop(e, dateStr)} onDragOver={handleDragOver} onClick={() => setSelectedDay(dateStr)}>
                         <span className={cn("inline-flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-medium", isToday ? "bg-primary text-primary-foreground" : "text-muted-foreground")}>{day}</span>
                         <div className="mt-0.5 space-y-0.5">
-                          {dayEvents.slice(0, 3).map((ev) => (
-                            <div
-                              key={ev.id}
-                              draggable
-                              onDragStart={(e) => handleDragStart(e, ev.id)}
-                              onClick={(e) => { e.stopPropagation(); openEditPopup(ev.id); }}
-                              className={cn(
-                                "truncate rounded px-1 py-0.5 text-[10px] font-medium cursor-grab active:cursor-grabbing hover:ring-1 hover:ring-primary/40",
-                                calendarEventColor(ev.status, ev.deadline)
-                              )}
-                            >
+                          {dayEvents.slice(0, 3).map((ev) =>
+                        <div
+                          key={ev.id}
+                          draggable
+                          onDragStart={(e) => handleDragStart(e, ev.id)}
+                          onClick={(e) => {e.stopPropagation();openEditPopup(ev.id);}}
+                          className={cn(
+                            "truncate rounded px-1 py-0.5 text-[10px] font-medium cursor-grab active:cursor-grabbing hover:ring-1 hover:ring-primary/40",
+                            calendarEventColor(ev.status, ev.deadline)
+                          )}>
+                          
                               {ev.title}
                             </div>
-                          ))}
+                        )}
                           {dayEvents.length > 3 && <span className="text-[9px] text-muted-foreground">+{dayEvents.length - 3}</span>}
                         </div>
-                      </div>
-                    );
-                  })}
+                      </div>);
+
+                })}
                 </div>
               </div>
-            )}
+            }
 
-            {view === "week" && (
-              <div className="relative glass-card overflow-hidden">
+            {view === "week" &&
+            <div className="relative glass-card overflow-hidden">
                 <div
-                  role="button"
-                  tabIndex={0}
-                  className="absolute left-0 top-0 bottom-0 w-10 z-10 flex items-center justify-center opacity-0 hover:opacity-100 hover:bg-muted/40 transition-opacity cursor-pointer rounded-r"
-                  onClick={() => navigateWeek(-1)}
-                  onKeyDown={(e) => e.key === "Enter" && navigateWeek(-1)}
-                  onDragOver={(e) => handleEdgeDragOver(e, -1)}
-                  onDragLeave={handleEdgeDragLeave}
-                  title="Previous week"
-                >
+                role="button"
+                tabIndex={0}
+                className="absolute left-0 top-0 bottom-0 w-10 z-10 flex items-center justify-center opacity-0 hover:opacity-100 hover:bg-muted/40 transition-opacity cursor-pointer rounded-r"
+                onClick={() => navigateWeek(-1)}
+                onKeyDown={(e) => e.key === "Enter" && navigateWeek(-1)}
+                onDragOver={(e) => handleEdgeDragOver(e, -1)}
+                onDragLeave={handleEdgeDragLeave}
+                title="Previous week">
+                
                   <ChevronLeft className="h-5 w-5 text-foreground" />
                 </div>
                 <div
-                  role="button"
-                  tabIndex={0}
-                  className="absolute right-0 top-0 bottom-0 w-10 z-10 flex items-center justify-center opacity-0 hover:opacity-100 hover:bg-muted/40 transition-opacity cursor-pointer rounded-l"
-                  onClick={() => navigateWeek(1)}
-                  onKeyDown={(e) => e.key === "Enter" && navigateWeek(1)}
-                  onDragOver={(e) => handleEdgeDragOver(e, 1)}
-                  onDragLeave={handleEdgeDragLeave}
-                  title="Next week"
-                >
+                role="button"
+                tabIndex={0}
+                className="absolute right-0 top-0 bottom-0 w-10 z-10 flex items-center justify-center opacity-0 hover:opacity-100 hover:bg-muted/40 transition-opacity cursor-pointer rounded-l"
+                onClick={() => navigateWeek(1)}
+                onKeyDown={(e) => e.key === "Enter" && navigateWeek(1)}
+                onDragOver={(e) => handleEdgeDragOver(e, 1)}
+                onDragLeave={handleEdgeDragLeave}
+                title="Next week">
+                
                   <ChevronRight className="h-5 w-5 text-foreground" />
                 </div>
                 <div className="grid grid-cols-7">
                   {getWeekDates(currentDate).map((date) => {
-                    const dateStr = date.toISOString().slice(0, 10);
-                    const dayEvents = calendarEvents[dateStr] || [];
-                    const isToday = dateStr === today;
-                    return (
-                      <div key={dateStr} className="border-r border-border last:border-r-0 cursor-pointer hover:bg-muted/30 transition-colors" onDrop={(e) => handleDrop(e, dateStr)} onDragOver={handleDragOver} onClick={() => setSelectedDay(dateStr)}>
+                  const dateStr = date.toISOString().slice(0, 10);
+                  const dayEvents = calendarEvents[dateStr] || [];
+                  const isToday = dateStr === today;
+                  return (
+                    <div key={dateStr} className="border-r border-border last:border-r-0 cursor-pointer hover:bg-muted/30 transition-colors" onDrop={(e) => handleDrop(e, dateStr)} onDragOver={handleDragOver} onClick={() => setSelectedDay(dateStr)}>
                         <div className={cn("border-b border-border px-2 py-2 text-center", isToday && "bg-primary/5")}>
                           <p className="text-[10px] text-muted-foreground">{dayNames[date.getDay()]}</p>
                           <p className={cn("mt-0.5 inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold", isToday ? "bg-primary text-primary-foreground" : "text-foreground")}>{date.getDate()}</p>
                         </div>
                         <div className="min-h-[200px] p-1.5 space-y-0.5">
-                          {dayEvents.map((ev) => (
-                            <div
-                              key={ev.id}
-                              draggable
-                              onDragStart={(e) => handleDragStart(e, ev.id)}
-                              onClick={(e) => { e.stopPropagation(); openEditPopup(ev.id); }}
-                              className={cn(
-                                "rounded px-1.5 py-1 text-[10px] cursor-grab active:cursor-grabbing hover:ring-1 hover:ring-primary/40",
-                                calendarEventColor(ev.status, ev.deadline)
-                              )}
-                            >
+                          {dayEvents.map((ev) =>
+                        <div
+                          key={ev.id}
+                          draggable
+                          onDragStart={(e) => handleDragStart(e, ev.id)}
+                          onClick={(e) => {e.stopPropagation();openEditPopup(ev.id);}}
+                          className={cn(
+                            "rounded px-1.5 py-1 text-[10px] cursor-grab active:cursor-grabbing hover:ring-1 hover:ring-primary/40",
+                            calendarEventColor(ev.status, ev.deadline)
+                          )}>
+                          
                               <div className="flex items-center gap-0.5">
                                 <Clock className="h-2.5 w-2.5 flex-shrink-0" />
                                 <span className="truncate">{ev.title}</span>
                               </div>
                             </div>
-                          ))}
+                        )}
                         </div>
-                      </div>
-                    );
-                  })}
+                      </div>);
+
+                })}
                 </div>
               </div>
-            )}
+            }
           </div>
         </section>
 
         {/* Upcoming + Previous tasks — Daily Plan style with Start/Done and time logging */}
-        {view === "daily" && (
+        {view === "daily" &&
         <section className="glass-card px-4 pb-1 pt-2 -mt-2">
           <div className="flex items-center mt-1 -mb-5">
             <div className="flex-1" />
             <button
               type="button"
               onClick={() => setPreviousDaysShown((n) => n + 3)}
-              className="flex items-center gap-0.5 text-xs font-medium text-muted-foreground opacity-0 hover:opacity-100 hover:text-foreground transition-opacity transition-colors shrink-0"
-            >
+              className="flex items-center gap-0.5 text-xs font-medium text-muted-foreground opacity-0 hover:opacity-100 hover:text-foreground transition-opacity transition-colors shrink-0">
+              
               <ChevronUp className="h-3.5 w-3.5" />
               Previous tasks
             </button>
             <div className="flex-1 flex justify-end items-center">
-              {dailyAggregateDoneTotal.total > 0 && (
-                <div className="flex items-center gap-2 text-sm text-muted-foreground -mb-2.5 mr-2">
+              {dailyAggregateDoneTotal.total > 0 &&
+              <div className="flex items-center gap-2 text-sm text-muted-foreground -mb-2.5 mr-2">
                   <CheckCircle2 className="h-4 w-4 text-primary" />
                   {dailyAggregateDoneTotal.done}/{dailyAggregateDoneTotal.total} done
                 </div>
-              )}
+              }
             </div>
           </div>
           <div className="space-y-0">
@@ -734,8 +734,8 @@ export default function SchedulePlanning() {
                   key={`prev-${dateStr}`}
                   className="space-y-2 rounded-lg border border-transparent p-2 transition-colors hover:border-border/50 min-h-[60px]"
                   onDrop={(e) => handleDropOnDay(e, dateStr)}
-                  onDragOver={handleScheduledDragOver}
-                >
+                  onDragOver={handleScheduledDragOver}>
+                  
                   <div className="mb-2 border-b border-border pb-2 min-h-[24px]">
                     <h4 className="text-sm font-semibold text-muted-foreground">{formatDayLabel(dateStr)}</h4>
                   </div>
@@ -748,7 +748,7 @@ export default function SchedulePlanning() {
                           <div
                             draggable={task.status !== "complete"}
                             onDragStart={(e) => task.status !== "complete" && handleScheduledDragStart(e, task.id)}
-                            onDrop={(e) => { e.stopPropagation(); task.status !== "complete" && handleDropOnScheduledTask(e, task.id, dateStr); }}
+                            onDrop={(e) => {e.stopPropagation();task.status !== "complete" && handleDropOnScheduledTask(e, task.id, dateStr);}}
                             onDragOver={handleScheduledDragOver}
                             onClick={() => openEditPopup(task.id)}
                             onDoubleClick={() => handleCardDoubleClick(task)}
@@ -759,63 +759,63 @@ export default function SchedulePlanning() {
                               task.status === "active" && !overdue && "task-card-active",
                               task.status === "complete" && "task-card-complete",
                               overdue && "task-card-overdue"
-                            )}
-                          >
-                            {showProgressBars && progressPct > 0 && task.status !== "complete" && (
-                              <div
-                                className={cn("task-progress-red absolute inset-0 pointer-events-none rounded-lg", blinkEffect && "task-progress-blink")}
-                                style={{
-                                  ["--progress-pct" as string]: `${Math.min(progressPct, 1) * 100}%`,
-                                  ["--blink-duration" as string]: progressPct >= 0.75 ? `${Math.max(0.6, 3.6 - (progressPct - 0.75) * 12)}s` : "3.6s",
-                                }}
-                              />
-                            )}
-                            {task.status !== "complete" && (
-                              <GripVertical className="relative h-4 w-4 text-muted-foreground/60 shrink-0 z-[1]" />
-                            )}
+                            )}>
+                            
+                            {showProgressBars && progressPct > 0 && task.status !== "complete" &&
+                            <div
+                              className={cn("task-progress-red absolute inset-0 pointer-events-none rounded-lg", blinkEffect && "task-progress-blink")}
+                              style={{
+                                ["--progress-pct" as string]: `${Math.min(progressPct, 1) * 100}%`,
+                                ["--blink-duration" as string]: progressPct >= 0.75 ? `${Math.max(0.6, 3.6 - (progressPct - 0.75) * 12)}s` : "3.6s"
+                              }} />
+
+                            }
+                            {task.status !== "complete" &&
+                            <GripVertical className="relative h-4 w-4 text-muted-foreground/60 shrink-0 z-[1]" />
+                            }
                             <div className="relative flex-1 min-w-0 z-[1]">
                               <div className="flex items-center gap-2">
                                 <p className={cn("font-medium truncate", task.status === "complete" && "line-through text-muted-foreground")}>{task.title}</p>
-                                {task.link && (
-                                  <a href={task.link} target="_blank" rel="noopener" onClick={(e) => e.stopPropagation()} className="shrink-0 text-primary hover:text-primary/80">
+                                {task.link &&
+                                <a href={task.link} target="_blank" rel="noopener" onClick={(e) => e.stopPropagation()} className="shrink-0 text-primary hover:text-primary/80">
                                     <ExternalLink className="h-3 w-3" />
                                   </a>
-                                )}
+                                }
                                 <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-medium shrink-0", priorityColors[task.priority || "medium"])}>{task.priority || "medium"}</span>
                               </div>
-                              {(task.status === "active" || task.status === "complete") && (task.startTime || task.endTime) && (
-                                <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground font-mono">
+                              {(task.status === "active" || task.status === "complete") && (task.startTime || task.endTime) &&
+                              <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground font-mono">
                                   {task.startTime && <span>Started {formatTime(task.startTime)}</span>}
                                   {task.endTime && <span>Ended {formatTime(task.endTime)}</span>}
                                   {task.startTime && task.endTime && <span className="text-primary">{formatDuration(task.endTime - task.startTime)}</span>}
                                 </div>
-                              )}
+                              }
                             </div>
                             <div className="relative flex items-center gap-1.5 z-[1]">
-                              {task.estimatedTime && (
-                                <span className="inline-flex items-center gap-0.5 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground shrink-0">
+                              {task.estimatedTime &&
+                              <span className="inline-flex items-center gap-0.5 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground shrink-0">
                                   <Timer className="h-2.5 w-2.5" />
                                   {formatEstimated(task.estimatedTime)}
                                 </span>
-                              )}
-                              {task.status === "idle" && (
-                                <button onClick={(e) => { e.stopPropagation(); startTask(task.id); }} className="flex items-center gap-1 rounded bg-primary/10 px-2 py-1 text-[10px] font-medium text-primary hover:bg-primary/20">
+                              }
+                              {task.status === "idle" &&
+                              <button onClick={(e) => {e.stopPropagation();startTask(task.id);}} className="flex items-center gap-1 rounded bg-primary/10 px-2 py-1 text-[10px] font-medium text-primary hover:bg-primary/20">
                                   <Play className="h-2.5 w-2.5" /> Start
                                 </button>
-                              )}
-                              {task.status === "active" && (
-                                <button onClick={(e) => { e.stopPropagation(); completeTask(task.id); }} className="flex items-center gap-1 rounded bg-primary px-2 py-1 text-[10px] font-medium text-primary-foreground hover:bg-primary/90">
+                              }
+                              {task.status === "active" &&
+                              <button onClick={(e) => {e.stopPropagation();completeTask(task.id);}} className="flex items-center gap-1 rounded bg-primary px-2 py-1 text-[10px] font-medium text-primary-foreground hover:bg-primary/90">
                                   <CheckCircle2 className="h-2.5 w-2.5" /> Done
                                 </button>
-                              )}
-                              {task.status !== "active" && (
-                                <button onClick={(e) => { e.stopPropagation(); deleteTask(task.id); }} className="rounded p-1 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-destructive">
+                              }
+                              {task.status !== "active" &&
+                              <button onClick={(e) => {e.stopPropagation();deleteTask(task.id);}} className="rounded p-1 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-destructive">
                                   <Trash2 className="h-3.5 w-3.5" />
                                 </button>
-                              )}
+                              }
                               <Tooltip>
                                 <TooltipTrigger asChild>
-                                  <button onClick={(e) => { e.stopPropagation(); updateTask(task.id, { date: "" }); }} className="rounded p-1 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-warning">
+                                  <button onClick={(e) => {e.stopPropagation();updateTask(task.id, { date: "" });}} className="rounded p-1 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-warning">
                                     <CalendarX className="h-3.5 w-3.5" />
                                   </button>
                                 </TooltipTrigger>
@@ -825,15 +825,15 @@ export default function SchedulePlanning() {
                           </div>
                         </TooltipTrigger>
                         {task.description && <TooltipContent side="bottom" className="max-w-xs text-sm whitespace-pre-wrap">{task.description}</TooltipContent>}
-                      </Tooltip>
-                    );
+                      </Tooltip>);
+
                   })}
-                </div>
-              );
+                </div>);
+
             })}
-            {scheduledTasks.length === 0 && previousDaysShown === 0 && (
-              <p className="text-xs text-muted-foreground py-4 text-center">No scheduled tasks. Drag tasks from below to the calendar.</p>
-            )}
+            {scheduledTasks.length === 0 && previousDaysShown === 0 &&
+            <p className="text-xs text-muted-foreground py-4 text-center">No scheduled tasks. Drag tasks from below to the calendar.</p>
+            }
             {visibleScheduledDates.map((dateStr) => {
               const dayTasks = scheduledTasksByDate[dateStr] || [];
               if (dayTasks.length === 0) return null;
@@ -842,8 +842,8 @@ export default function SchedulePlanning() {
                   key={dateStr}
                   className="space-y-2 rounded-lg border border-transparent p-2 transition-colors hover:border-border/50 min-h-[60px]"
                   onDrop={(e) => handleDropOnDay(e, dateStr)}
-                  onDragOver={handleScheduledDragOver}
-                >
+                  onDragOver={handleScheduledDragOver}>
+                  
                   <div className="mb-2 border-b border-border pb-2 min-h-[24px]">
                     <h4 className="text-sm font-semibold text-muted-foreground">{formatDayLabel(dateStr)}</h4>
                   </div>
@@ -856,7 +856,7 @@ export default function SchedulePlanning() {
                           <div
                             draggable={task.status !== "complete"}
                             onDragStart={(e) => task.status !== "complete" && handleScheduledDragStart(e, task.id)}
-                            onDrop={(e) => { e.stopPropagation(); task.status !== "complete" && handleDropOnScheduledTask(e, task.id, dateStr); }}
+                            onDrop={(e) => {e.stopPropagation();task.status !== "complete" && handleDropOnScheduledTask(e, task.id, dateStr);}}
                             onDragOver={handleScheduledDragOver}
                             onClick={() => openEditPopup(task.id)}
                             onDoubleClick={() => handleCardDoubleClick(task)}
@@ -867,69 +867,69 @@ export default function SchedulePlanning() {
                               task.status === "active" && !overdue && "task-card-active",
                               task.status === "complete" && "task-card-complete",
                               overdue && "task-card-overdue"
-                            )}
-                          >
-                            {showProgressBars && progressPct > 0 && task.status !== "complete" && (
-                              <div
-                                className={cn("task-progress-red absolute inset-0 pointer-events-none rounded-lg", blinkEffect && "task-progress-blink")}
-                                style={{
-                                  ["--progress-pct" as string]: `${Math.min(progressPct, 1) * 100}%`,
-                                  ["--blink-duration" as string]: progressPct >= 0.75 ? `${Math.max(0.6, 3.6 - (progressPct - 0.75) * 12)}s` : "3.6s",
-                                }}
-                              />
-                            )}
-                            {task.status !== "complete" && (
-                              <GripVertical className="relative h-4 w-4 text-muted-foreground/60 shrink-0 z-[1]" />
-                            )}
+                            )}>
+                            
+                            {showProgressBars && progressPct > 0 && task.status !== "complete" &&
+                            <div
+                              className={cn("task-progress-red absolute inset-0 pointer-events-none rounded-lg", blinkEffect && "task-progress-blink")}
+                              style={{
+                                ["--progress-pct" as string]: `${Math.min(progressPct, 1) * 100}%`,
+                                ["--blink-duration" as string]: progressPct >= 0.75 ? `${Math.max(0.6, 3.6 - (progressPct - 0.75) * 12)}s` : "3.6s"
+                              }} />
+
+                            }
+                            {task.status !== "complete" &&
+                            <GripVertical className="relative h-4 w-4 text-muted-foreground/60 shrink-0 z-[1]" />
+                            }
                             <div className="relative flex-1 min-w-0 z-[1]">
                               <div className="flex items-center gap-2">
                                 <p className={cn("font-medium truncate", task.status === "complete" && "line-through text-muted-foreground")}>
                                   {task.title}
                                 </p>
-                                {task.link && (
-                                  <a href={task.link} target="_blank" rel="noopener" onClick={(e) => e.stopPropagation()} className="shrink-0 text-primary hover:text-primary/80">
+                                {task.link &&
+                                <a href={task.link} target="_blank" rel="noopener" onClick={(e) => e.stopPropagation()} className="shrink-0 text-primary hover:text-primary/80">
                                     <ExternalLink className="h-3 w-3" />
                                   </a>
-                                )}
+                                }
                                 <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-medium shrink-0", priorityColors[task.priority || "medium"])}>
                                   {task.priority || "medium"}
                                 </span>
                               </div>
-                              {(task.status === "active" || task.status === "complete") && (task.startTime || task.endTime) && (
-                                <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground font-mono">
+                              {(task.status === "active" || task.status === "complete") && (task.startTime || task.endTime) &&
+                              <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground font-mono">
                                   {task.startTime && <span>Started {formatTime(task.startTime)}</span>}
                                   {task.endTime && <span>Ended {formatTime(task.endTime)}</span>}
-                                  {task.startTime && task.endTime && (
-                                    <span className="text-primary">{formatDuration(task.endTime - task.startTime)}</span>
-                                  )}
+                                  {task.startTime && task.endTime &&
+                                <span className="text-primary">{formatDuration(task.endTime - task.startTime)}</span>
+                                }
                                 </div>
-                              )}
+                              }
                             </div>
                             <div className="relative flex items-center gap-1.5 z-[1]">
-                              {task.estimatedTime && (
-                                <span className="inline-flex items-center gap-0.5 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground shrink-0">
+                              {task.estimatedTime &&
+                              <span className="inline-flex items-center gap-0.5 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground shrink-0">
                                   <Timer className="h-2.5 w-2.5" />
                                   {formatEstimated(task.estimatedTime)}
                                 </span>
-                              )}
-                              {task.status === "idle" && (
-                                <button onClick={(e) => { e.stopPropagation(); startTask(task.id); }} className="flex items-center gap-1 rounded bg-primary/10 px-2 py-1 text-[10px] font-medium text-primary hover:bg-primary/20">
+                              }
+                              {task.status === "idle" &&
+                              <button onClick={(e) => {e.stopPropagation();startTask(task.id);}} className="flex items-center gap-1 rounded bg-primary/10 px-2 py-1 text-[10px] font-medium text-primary hover:bg-primary/20">
                                   <Play className="h-2.5 w-2.5" /> Start
                                 </button>
-                              )}
-                              {task.status === "active" && (
-                                <button onClick={(e) => { e.stopPropagation(); completeTask(task.id); }} className="flex items-center gap-1 rounded bg-primary px-2 py-1 text-[10px] font-medium text-primary-foreground hover:bg-primary/90">
+                              }
+                              {task.status === "active" &&
+                              <button onClick={(e) => {e.stopPropagation();completeTask(task.id);}} className="flex items-center gap-1 rounded bg-primary px-2 py-1 text-[10px] font-medium text-primary-foreground hover:bg-primary/90">
                                   <CheckCircle2 className="h-2.5 w-2.5" /> Done
                                 </button>
-                              )}
-                              {task.status !== "active" && (
-                                <button onClick={(e) => { e.stopPropagation(); deleteTask(task.id); }} className="rounded p-1 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-destructive">
+                              }
+                              {task.status !== "active" &&
+                              <button onClick={(e) => {e.stopPropagation();deleteTask(task.id);}} className="rounded p-1 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-destructive">
                                   <Trash2 className="h-3.5 w-3.5" />
                                 </button>
-                              )}
+                              }
                               <Tooltip>
                                 <TooltipTrigger asChild>
-                                  <button onClick={(e) => { e.stopPropagation(); updateTask(task.id, { date: "" }); }} className="rounded p-1 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-warning">
+                                  <button onClick={(e) => {e.stopPropagation();updateTask(task.id, { date: "" });}} className="rounded p-1 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-warning">
                                     <CalendarX className="h-3.5 w-3.5" />
                                   </button>
                                 </TooltipTrigger>
@@ -938,43 +938,43 @@ export default function SchedulePlanning() {
                             </div>
                           </div>
                         </TooltipTrigger>
-                        {task.description && (
-                          <TooltipContent side="bottom" className="max-w-xs text-sm whitespace-pre-wrap">
+                        {task.description &&
+                        <TooltipContent side="bottom" className="max-w-xs text-sm whitespace-pre-wrap">
                             {task.description}
                           </TooltipContent>
-                        )}
-                      </Tooltip>
-                    );
+                        }
+                      </Tooltip>);
+
                   })}
-                </div>
-              );
+                </div>);
+
             })}
-            {scheduledDatesOrdered.length > scheduledDaysShown && (
-              <button
-                onClick={() => setScheduledDaysShown((n) => n + 3)}
-                className="w-full rounded-lg border border-dashed border-border py-1.5 text-xs text-muted-foreground opacity-0 hover:opacity-100 hover:text-foreground hover:border-primary/30 transition-opacity transition-colors"
-              >
+            {scheduledDatesOrdered.length > scheduledDaysShown &&
+            <button
+              onClick={() => setScheduledDaysShown((n) => n + 3)}
+              className="w-full rounded-lg border border-dashed border-border py-1.5 text-xs text-muted-foreground opacity-0 hover:opacity-100 hover:text-foreground hover:border-primary/30 transition-opacity transition-colors">
+              
                 See more (+3 days)
               </button>
-            )}
+            }
           </div>
         </section>
-        )}
+        }
 
         {/* Unscheduled Tasks — same card design; drop here to unschedule */}
         <section
           className="glass-card p-4 rounded-lg border border-border transition-colors"
           onDrop={handleDropOnUnscheduled}
-          onDragOver={handleScheduledDragOver}
-        >
+          onDragOver={handleScheduledDragOver}>
+          
           <h3 className="text-base font-semibold text-foreground mb-3">
             Unscheduled <span className="text-xs text-muted-foreground font-normal ml-1">({unscheduledTasks.length})</span>
           </h3>
           <p className="text-xs text-muted-foreground mb-3">Drag to a day above or to the calendar to schedule. Drop here to unschedule.</p>
           <div className="space-y-2">
-            {unscheduledTasks.length === 0 && (
-              <p className="text-xs text-muted-foreground py-4 text-center">All tasks are scheduled.</p>
-            )}
+            {unscheduledTasks.length === 0 &&
+            <p className="text-xs text-muted-foreground py-4 text-center">All tasks are scheduled.</p>
+            }
             {unscheduledTasks.slice(0, unscheduledLimit).map((task) => {
               const overdue = isTaskOverdue(task);
               const progressPct = getTaskProgress(task);
@@ -993,94 +993,94 @@ export default function SchedulePlanning() {
                         task.status === "active" && !overdue && "task-card-active",
                         task.status === "complete" && "task-card-complete",
                         overdue && "task-card-overdue"
-                      )}
-                    >
-                      {showProgressBars && progressPct > 0 && task.status !== "complete" && (
-                        <div
-                          className={cn("task-progress-red absolute inset-0 pointer-events-none rounded-lg", blinkEffect && "task-progress-blink")}
-                          style={{
-                            ["--progress-pct" as string]: `${Math.min(progressPct, 1) * 100}%`,
-                            ["--blink-duration" as string]: progressPct >= 0.75 ? `${Math.max(0.6, 3.6 - (progressPct - 0.75) * 12)}s` : "3.6s",
-                          }}
-                        />
-                      )}
-                      {task.status !== "complete" && (
-                        <GripVertical className="relative h-4 w-4 text-muted-foreground/60 shrink-0 z-[1]" />
-                      )}
+                      )}>
+                      
+                      {showProgressBars && progressPct > 0 && task.status !== "complete" &&
+                      <div
+                        className={cn("task-progress-red absolute inset-0 pointer-events-none rounded-lg", blinkEffect && "task-progress-blink")}
+                        style={{
+                          ["--progress-pct" as string]: `${Math.min(progressPct, 1) * 100}%`,
+                          ["--blink-duration" as string]: progressPct >= 0.75 ? `${Math.max(0.6, 3.6 - (progressPct - 0.75) * 12)}s` : "3.6s"
+                        }} />
+
+                      }
+                      {task.status !== "complete" &&
+                      <GripVertical className="relative h-4 w-4 text-muted-foreground/60 shrink-0 z-[1]" />
+                      }
                       <div className="relative flex-1 min-w-0 z-[1]">
                         <div className="flex items-center gap-2">
                           <p className={cn("font-medium truncate", task.status === "complete" && "line-through text-muted-foreground")}>
                             {task.title}
                           </p>
-                          {task.link && (
-                            <a href={task.link} target="_blank" rel="noopener" onClick={(e) => e.stopPropagation()} className="shrink-0 text-primary hover:text-primary/80">
+                          {task.link &&
+                          <a href={task.link} target="_blank" rel="noopener" onClick={(e) => e.stopPropagation()} className="shrink-0 text-primary hover:text-primary/80">
                               <ExternalLink className="h-3 w-3" />
                             </a>
-                          )}
+                          }
                           <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-medium shrink-0", priorityColors[task.priority || "medium"])}>
                             {task.priority || "medium"}
                           </span>
                         </div>
-                        {(task.status === "active" || task.status === "complete") && (task.startTime || task.endTime) && (
-                          <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground font-mono">
+                        {(task.status === "active" || task.status === "complete") && (task.startTime || task.endTime) &&
+                        <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground font-mono">
                             {task.startTime && <span>Started {formatTime(task.startTime)}</span>}
                             {task.endTime && <span>Ended {formatTime(task.endTime)}</span>}
-                            {task.startTime && task.endTime && (
-                              <span className="text-primary">{formatDuration(task.endTime - task.startTime)}</span>
-                            )}
+                            {task.startTime && task.endTime &&
+                          <span className="text-primary">{formatDuration(task.endTime - task.startTime)}</span>
+                          }
                           </div>
-                        )}
+                        }
                       </div>
                       <div className="relative flex items-center gap-1.5 z-[1]">
-                        {task.estimatedTime && (
-                          <span className="inline-flex items-center gap-0.5 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground shrink-0">
+                        {task.estimatedTime &&
+                        <span className="inline-flex items-center gap-0.5 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground shrink-0">
                             <Timer className="h-2.5 w-2.5" />
                             {formatEstimated(task.estimatedTime)}
                           </span>
-                        )}
-                        {task.status === "idle" && (
-                          <button onClick={(e) => { e.stopPropagation(); startTask(task.id); }} className="flex items-center gap-1 rounded bg-primary/10 px-2 py-1 text-[10px] font-medium text-primary hover:bg-primary/20">
+                        }
+                        {task.status === "idle" &&
+                        <button onClick={(e) => {e.stopPropagation();startTask(task.id);}} className="flex items-center gap-1 rounded bg-primary/10 px-2 py-1 text-[10px] font-medium text-primary hover:bg-primary/20">
                             <Play className="h-2.5 w-2.5" /> Start
                           </button>
-                        )}
-                        {task.status === "active" && (
-                          <button onClick={(e) => { e.stopPropagation(); completeTask(task.id); }} className="flex items-center gap-1 rounded bg-primary px-2 py-1 text-[10px] font-medium text-primary-foreground hover:bg-primary/90">
+                        }
+                        {task.status === "active" &&
+                        <button onClick={(e) => {e.stopPropagation();completeTask(task.id);}} className="flex items-center gap-1 rounded bg-primary px-2 py-1 text-[10px] font-medium text-primary-foreground hover:bg-primary/90">
                             <CheckCircle2 className="h-2.5 w-2.5" /> Done
                           </button>
-                        )}
-                        {task.status !== "active" && (
-                          <button onClick={(e) => { e.stopPropagation(); deleteTask(task.id); }} className="rounded p-1 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-destructive">
+                        }
+                        {task.status !== "active" &&
+                        <button onClick={(e) => {e.stopPropagation();deleteTask(task.id);}} className="rounded p-1 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-destructive">
                             <Trash2 className="h-3.5 w-3.5" />
                           </button>
-                        )}
+                        }
                       </div>
                     </div>
                   </TooltipTrigger>
-                  {task.description && (
-                    <TooltipContent side="bottom" className="max-w-xs text-sm whitespace-pre-wrap">
+                  {task.description &&
+                  <TooltipContent side="bottom" className="max-w-xs text-sm whitespace-pre-wrap">
                       {task.description}
                     </TooltipContent>
-                  )}
-                </Tooltip>
-              );
+                  }
+                </Tooltip>);
+
             })}
-            {unscheduledTasks.length > unscheduledLimit && (
-              <button onClick={() => setUnscheduledLimit((l) => l + 5)} className="w-full rounded-lg border border-dashed border-border py-2 text-xs text-muted-foreground hover:text-foreground hover:border-primary/30 transition-colors">
+            {unscheduledTasks.length > unscheduledLimit &&
+            <button onClick={() => setUnscheduledLimit((l) => l + 5)} className="w-full rounded-lg border border-dashed border-border py-2 text-xs text-muted-foreground hover:text-foreground hover:border-primary/30 transition-colors">
                 See more ({unscheduledTasks.length - unscheduledLimit} remaining)
               </button>
-            )}
+            }
           </div>
         </section>
 
         {/* Abandoned Tasks */}
-        {abandonedTasks.length > 0 && (
-          <section className="glass-card p-4">
+        {abandonedTasks.length > 0 &&
+        <section className="glass-card p-4">
             <h3 className="text-base font-semibold text-muted-foreground mb-3">
               Abandoned <span className="text-xs text-muted-foreground font-normal ml-1">({abandonedTasks.length})</span>
             </h3>
             <div className="space-y-2">
-              {abandonedTasks.slice(0, abandonedLimit).map((task) => (
-                <div key={task.id} className="group flex items-center gap-3 rounded-lg border border-border bg-card/50 p-3 opacity-60 hover:opacity-100 transition-opacity">
+              {abandonedTasks.slice(0, abandonedLimit).map((task) =>
+            <div key={task.id} className="group flex items-center gap-3 rounded-lg border border-border bg-card/50 p-3 opacity-60 hover:opacity-100 transition-opacity">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-medium truncate line-through">{task.title}</span>
@@ -1102,19 +1102,19 @@ export default function SchedulePlanning() {
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
                 </div>
-              ))}
-              {abandonedTasks.length > abandonedLimit && (
-                <button onClick={() => setAbandonedLimit((l) => l + 5)} className="w-full rounded-lg border border-dashed border-border py-2 text-xs text-muted-foreground hover:text-foreground hover:border-primary/30 transition-colors">
+            )}
+              {abandonedTasks.length > abandonedLimit &&
+            <button onClick={() => setAbandonedLimit((l) => l + 5)} className="w-full rounded-lg border border-dashed border-border py-2 text-xs text-muted-foreground hover:text-foreground hover:border-primary/30 transition-colors">
                   See more ({abandonedTasks.length - abandonedLimit} remaining)
                 </button>
-              )}
+            }
             </div>
           </section>
-        )}
+        }
 
         {/* Day popup */}
-        {selectedDay && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setSelectedDay(null)}>
+        {selectedDay &&
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setSelectedDay(null)}>
             <div className="w-full max-w-md rounded-xl bg-card border border-border shadow-xl p-5 space-y-4 animate-fade-in" onClick={(e) => e.stopPropagation()}>
               <div className="flex items-center justify-between">
                 <h3 className="text-lg font-semibold text-foreground">
@@ -1124,16 +1124,16 @@ export default function SchedulePlanning() {
                   <X className="h-4 w-4" />
                 </button>
               </div>
-              {selectedDayTasks.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-6">No tasks on this day</p>
-              ) : (
-                <div className="space-y-2 max-h-[60vh] overflow-y-auto">
-                  {selectedDayTasks.map((task) => (
-                    <div
-                      key={task.id}
-                      onClick={() => { setSelectedDay(null); openEditPopup(task.id); }}
-                      className="flex items-start gap-3 rounded-lg border border-border bg-muted/20 p-3 cursor-pointer hover:border-primary/30 transition-colors"
-                    >
+              {selectedDayTasks.length === 0 ?
+            <p className="text-sm text-muted-foreground text-center py-6">No tasks on this day</p> :
+
+            <div className="space-y-2 max-h-[60vh] overflow-y-auto">
+                  {selectedDayTasks.map((task) =>
+              <div
+                key={task.id}
+                onClick={() => {setSelectedDay(null);openEditPopup(task.id);}}
+                className="flex items-start gap-3 rounded-lg border border-border bg-muted/20 p-3 cursor-pointer hover:border-primary/30 transition-colors">
+                
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-medium text-sm">{task.title}</span>
@@ -1148,21 +1148,21 @@ export default function SchedulePlanning() {
                         </div>
                       </div>
                     </div>
-                  ))}
-                </div>
               )}
+                </div>
+            }
             </div>
           </div>
-        )}
+        }
 
         {/* Edit popup */}
-        {editingTask && (
-          <TaskEditPopup
-            task={editingTask}
-            onClose={() => setEditingTask(null)}
-          />
-        )}
+        {editingTask &&
+        <TaskEditPopup
+          task={editingTask}
+          onClose={() => setEditingTask(null)} />
+
+        }
       </div>
-    </TooltipProvider>
-  );
+    </TooltipProvider>);
+
 }
