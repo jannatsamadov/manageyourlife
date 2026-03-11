@@ -408,44 +408,79 @@ export default function SchedulePlanning() {
 
   return (
     <TooltipProvider delayDuration={300}>
-      <div className="mx-auto max-w-5xl space-y-8 animate-fade-in">
-        {/* Add Task */}
-        <section className="glass-card p-4 -mt-2">
-          <div className="flex items-start justify-between mb-4 gap-3 flex-wrap">
-            <div className="min-w-[220px]">
-              
-              
-            </div>
+      <div className="mx-auto max-w-5xl space-y-6 animate-fade-in">
+        {/* Unified Header Bar */}
+        <section className="glass-card p-3 -mt-2">
+          {/* Row 1: Date + Controls */}
+          <div className="flex items-center justify-between gap-3">
+            {/* Left: Date */}
+            <button
+              type="button"
+              onClick={() => setCurrentDate(new Date())}
+              className="text-left text-lg font-semibold text-foreground hover:text-primary transition-colors shrink-0"
+              title="Go to today"
+            >
+              {currentDate.toLocaleDateString("en-US", { day: "numeric", month: "long", year: "numeric" })}
+            </button>
 
-            <div className="flex items-center gap-2 flex-1 justify-end min-w-[260px]">
-              <input
-                value={taskQuery}
-                onChange={(e) => setTaskQuery(e.target.value)}
-                placeholder="Search tasks…"
-                className="w-full sm:w-56 rounded-lg border border-border bg-background px-3 py-2 text-sm" />
-              
-              {taskQuery.trim() &&
-              <button
-                type="button"
-                onClick={() => setTaskQuery("")}
-                className="rounded-lg border border-border px-2.5 py-2 text-sm text-muted-foreground hover:text-foreground hover:border-primary/30 transition-colors"
-                title="Clear search">
-                
-                  <X className="h-4 w-4" />
-                </button>
-              }
-              <Popover>
-                <PopoverTrigger asChild>
+            {/* Right: All action buttons */}
+            <div className="flex items-center gap-1.5">
+              {/* Search toggle */}
+              {searchOpen ? (
+                <div className="flex items-center gap-1 animate-in slide-in-from-right-2 duration-200">
+                  <div className="relative">
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                    <input
+                      autoFocus
+                      value={taskQuery}
+                      onChange={(e) => setTaskQuery(e.target.value)}
+                      placeholder="Search…"
+                      className="w-40 sm:w-52 rounded-lg border border-border bg-background pl-8 pr-3 py-1.5 text-sm focus:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary/30 transition-colors"
+                    />
+                  </div>
                   <button
                     type="button"
-                    className={cn(
-                      "inline-flex items-center justify-center rounded-lg border border-border px-2.5 py-2 text-sm text-muted-foreground hover:text-foreground hover:border-primary/30 transition-colors",
-                      (priorityFilter !== "all" || deadlineFilter !== "any") && "text-foreground border-primary/30"
-                    )}
-                    title="Filters">
-                    
-                    <Filter className="h-4 w-4" />
+                    onClick={() => { setSearchOpen(false); setTaskQuery(""); }}
+                    className="rounded-lg p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+                  >
+                    <X className="h-4 w-4" />
                   </button>
+                </div>
+              ) : (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={() => setSearchOpen(true)}
+                      className={cn(
+                        "rounded-lg p-2 text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors",
+                        taskQuery && "text-primary"
+                      )}
+                    >
+                      <Search className="h-4 w-4" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>Search tasks</TooltipContent>
+                </Tooltip>
+              )}
+
+              {/* Filter */}
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        className={cn(
+                          "rounded-lg p-2 text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors",
+                          (priorityFilter !== "all" || deadlineFilter !== "any") && "text-primary bg-primary/10"
+                        )}
+                      >
+                        <Filter className="h-4 w-4" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>Filters</TooltipContent>
+                  </Tooltip>
                 </PopoverTrigger>
                 <PopoverContent align="end" className="w-80">
                   <div className="space-y-4">
@@ -463,7 +498,6 @@ export default function SchedulePlanning() {
                         </SelectContent>
                       </Select>
                     </div>
-
                     <div className="space-y-1.5">
                       <div className="text-xs font-medium text-muted-foreground">Time to deadline</div>
                       <Select value={deadlineFilter} onValueChange={(v) => setDeadlineFilter(v as typeof deadlineFilter)}>
@@ -480,97 +514,108 @@ export default function SchedulePlanning() {
                         </SelectContent>
                       </Select>
                     </div>
-
                     <div className="space-y-1.5 opacity-70">
                       <div className="text-xs font-medium text-muted-foreground">Project</div>
                       <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
                         Coming soon
                       </div>
                     </div>
-
-                    {(priorityFilter !== "all" || deadlineFilter !== "any") &&
-                    <button
-                      type="button"
-                      onClick={() => {setPriorityFilter("all");setDeadlineFilter("any");}}
-                      className="w-full rounded-md border border-border px-3 py-2 text-sm text-muted-foreground hover:text-foreground hover:border-primary/30 transition-colors">
-                      
+                    {(priorityFilter !== "all" || deadlineFilter !== "any") && (
+                      <button
+                        type="button"
+                        onClick={() => { setPriorityFilter("all"); setDeadlineFilter("any"); }}
+                        className="w-full rounded-md border border-border px-3 py-2 text-sm text-muted-foreground hover:text-foreground hover:border-primary/30 transition-colors"
+                      >
                         Clear filters
                       </button>
-                    }
+                    )}
                   </div>
                 </PopoverContent>
               </Popover>
-              <button
-                onClick={() => setShowForm(!showForm)}
-                className="flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90">
-                
-                <Plus className="h-4 w-4" />
-                Add Task
-              </button>
-            </div>
-          </div>
 
-          {showForm &&
-          <div className="mb-4 p-4 rounded-lg border border-border bg-muted/20 space-y-3">
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <input value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} placeholder="Task title *" className="rounded border border-border bg-background px-3 py-2 text-sm" />
-                <div>
-                  <label className="text-[10px] text-muted-foreground">Deadline</label>
-                  <input type="date" value={form.deadline} onChange={(e) => setForm((f) => ({ ...f, deadline: e.target.value }))} className="w-full rounded border border-border bg-background px-3 py-2 text-sm [color-scheme:dark]" />
-                </div>
-                <input type="number" value={form.estimatedTime} onChange={(e) => setForm((f) => ({ ...f, estimatedTime: e.target.value }))} placeholder="Estimated minutes" min="1" className="rounded border border-border bg-background px-3 py-2 text-sm" />
-                <select value={form.priority} onChange={(e) => setForm((f) => ({ ...f, priority: e.target.value as TaskPriority }))} className="rounded border border-border bg-background px-3 py-2 text-sm">
-                  <option value="high">High Priority</option>
-                  <option value="medium">Medium Priority</option>
-                  <option value="low">Low Priority</option>
-                </select>
-                <input value={form.link} onChange={(e) => setForm((f) => ({ ...f, link: e.target.value }))} placeholder="Link (optional)" className="rounded border border-border bg-background px-3 py-2 text-sm" />
-                <textarea value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} placeholder="Description (optional)" rows={1} className="rounded border border-border bg-background px-3 py-2 text-sm resize-none" />
-              </div>
-              <button onClick={handleAddTask} className="rounded bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90">
-                Create Task
-              </button>
-            </div>
-          }
-        </section>
+              {/* Divider */}
+              <div className="h-5 w-px bg-border mx-0.5" />
 
-        <section>
-          <div className="space-y-4">
-            <div className="flex items-center justify-between flex-wrap gap-4">
-              <button
-                type="button"
-                onClick={() => setCurrentDate(new Date())}
-                className="text-left text-lg font-semibold text-foreground hover:text-muted-foreground transition-colors"
-                title="Go to today">
-                
-                {currentDate.toLocaleDateString("en-US", { day: "numeric", month: "long", year: "numeric" })}
-              </button>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={syncToGCal}
-                  disabled={syncing}
-                  className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:border-primary/30 transition-colors disabled:opacity-50"
-                  title="Sync to Google Calendar">
-                  
-                  {syncing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-                  Sync
-                </button>
-                <div className="flex rounded-lg border border-border overflow-hidden">
-                  {(["month", "week", "daily"] as View[]).map((v) =>
+              {/* Sync */}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    onClick={syncToGCal}
+                    disabled={syncing}
+                    className="rounded-lg p-2 text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors disabled:opacity-50"
+                  >
+                    {syncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>Sync to Google Calendar</TooltipContent>
+              </Tooltip>
+
+              {/* View Toggle */}
+              <div className="flex rounded-lg border border-border overflow-hidden">
+                {(["month", "week", "daily"] as View[]).map((v) => (
                   <button
                     key={v}
                     onClick={() => setView(v)}
                     className={cn(
-                      "px-3 py-1.5 text-xs font-medium capitalize",
-                      view === v ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
-                    )}>
-                    
-                      {v}
-                    </button>
-                  )}
-                </div>
+                      "px-2.5 py-1.5 text-xs font-medium capitalize transition-colors",
+                      view === v ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground hover:bg-muted/30"
+                    )}
+                  >
+                    {v}
+                  </button>
+                ))}
               </div>
+
+              {/* Divider */}
+              <div className="h-5 w-px bg-border mx-0.5" />
+
+              {/* Add Task */}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    onClick={() => setShowForm(!showForm)}
+                    className={cn(
+                      "rounded-lg p-2 transition-colors",
+                      showForm
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-primary/10 text-primary hover:bg-primary/20"
+                    )}
+                  >
+                    <Plus className="h-4 w-4" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>Add Task</TooltipContent>
+              </Tooltip>
             </div>
+          </div>
+
+          {/* Expandable Add Task Form */}
+          {showForm && (
+            <div className="mt-3 p-4 rounded-lg border border-border bg-muted/20 space-y-3 animate-in slide-in-from-top-1 duration-200">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <input value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} placeholder="Task title *" className="rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary/30 transition-colors" />
+                <div>
+                  <label className="text-[10px] text-muted-foreground">Deadline</label>
+                  <input type="date" value={form.deadline} onChange={(e) => setForm((f) => ({ ...f, deadline: e.target.value }))} className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm [color-scheme:dark] focus:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary/30 transition-colors" />
+                </div>
+                <input type="number" value={form.estimatedTime} onChange={(e) => setForm((f) => ({ ...f, estimatedTime: e.target.value }))} placeholder="Estimated minutes" min="1" className="rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary/30 transition-colors" />
+                <select value={form.priority} onChange={(e) => setForm((f) => ({ ...f, priority: e.target.value as TaskPriority }))} className="rounded-lg border border-border bg-background px-3 py-2 text-sm">
+                  <option value="high">High Priority</option>
+                  <option value="medium">Medium Priority</option>
+                  <option value="low">Low Priority</option>
+                </select>
+                <input value={form.link} onChange={(e) => setForm((f) => ({ ...f, link: e.target.value }))} placeholder="Link (optional)" className="rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary/30 transition-colors" />
+                <textarea value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} placeholder="Description (optional)" rows={1} className="rounded-lg border border-border bg-background px-3 py-2 text-sm resize-none focus:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary/30 transition-colors" />
+              </div>
+              <button onClick={handleAddTask} className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors">
+                Create Task
+              </button>
+            </div>
+          )}
+        </section>
+
+        <section>
+          <div className="space-y-4">
 
             {view === "month" &&
             <div className="relative glass-card overflow-hidden">
