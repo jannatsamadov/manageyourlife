@@ -533,6 +533,24 @@ export default function SchedulePlanning() {
                 </PopoverContent>
               </Popover>
 
+              {/* Add Task */}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    onClick={() => setShowForm(!showForm)}
+                    className={cn(
+                      "rounded-lg p-2 transition-colors",
+                      showForm
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-primary/10 text-primary hover:bg-primary/20"
+                    )}
+                  >
+                    <Plus className="h-4 w-4" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>Add Task</TooltipContent>
+              </Tooltip>
+
               {/* Divider */}
               <div className="h-5 w-px bg-border mx-0.5" />
 
@@ -565,19 +583,6 @@ export default function SchedulePlanning() {
                   </button>
                 ))}
               </div>
-
-              {/* Divider */}
-              <div className="h-5 w-px bg-border mx-0.5" />
-
-              {/* Add Task */}
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    onClick={() => setShowForm(!showForm)}
-                    className={cn(
-                      "rounded-lg p-2 transition-colors",
-                      showForm
-                        ? "bg-primary text-primary-foreground"
                         : "bg-primary/10 text-primary hover:bg-primary/20"
                     )}
                   >
