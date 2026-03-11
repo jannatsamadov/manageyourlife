@@ -18,6 +18,7 @@ export type Database = {
         Row: {
           content: string
           created_at: string
+          deleted_at: string | null
           id: string
           title: string
           updated_at: string
@@ -26,6 +27,7 @@ export type Database = {
         Insert: {
           content?: string
           created_at?: string
+          deleted_at?: string | null
           id?: string
           title?: string
           updated_at?: string
@@ -34,6 +36,7 @@ export type Database = {
         Update: {
           content?: string
           created_at?: string
+          deleted_at?: string | null
           id?: string
           title?: string
           updated_at?: string
@@ -136,6 +139,7 @@ export type Database = {
           created_at: string
           date: string | null
           deadline: string
+          deleted_at: string | null
           description: string
           estimated_time: number | null
           execution_date: string | null
@@ -155,6 +159,7 @@ export type Database = {
           created_at?: string
           date?: string | null
           deadline?: string
+          deleted_at?: string | null
           description?: string
           estimated_time?: number | null
           execution_date?: string | null
@@ -174,6 +179,7 @@ export type Database = {
           created_at?: string
           date?: string | null
           deadline?: string
+          deleted_at?: string | null
           description?: string
           estimated_time?: number | null
           execution_date?: string | null
