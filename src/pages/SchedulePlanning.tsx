@@ -124,6 +124,7 @@ export default function SchedulePlanning() {
   });
   const dragNavTimer = useRef<ReturnType<typeof setTimeout>>();
   const [syncing, setSyncing] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
 
   const normalizedTaskQuery = taskQuery.trim().toLowerCase();
   const taskMatchesQuery = useCallback((t: Task) => {
