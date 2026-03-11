@@ -18,6 +18,8 @@ export interface Task {
   position: number;
   link: string;
   priority: TaskPriority;
+  // Optional soft-delete timestamp
+  deletedAt?: string | null;
 }
 
 export interface Goal {
@@ -118,6 +120,7 @@ function dbTaskToLocal(row: any): Task {
     position: row.position ?? 0,
     link: row.link ?? "",
     priority: (row.priority as TaskPriority) ?? "medium",
+    deletedAt: row.deleted_at ?? null,
   };
 }
 
@@ -152,7 +155,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const fetchAll = async () => {
       setLoading(true);
       const [tasksRes, oppsRes] = await Promise.all([
-        supabase.from("tasks").select("*").eq("user_id", user.id).order("position", { ascending: true }).order("created_at", { ascending: true }),
+        supabase
+          .from("tasks")
+          .select("*")
+          .eq("user_id", user.id)
+          .is("deleted_at", null)
+          .order("position", { ascending: true })
+          .order("created_at", { ascending: true }),
         supabase.from("opportunities").select("*").eq("user_id", user.id).order("created_at", { ascending: true }),
       ]);
 
@@ -188,6 +197,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       deadline: task.deadline || "",
       link: task.link ?? "",
       priority: task.priority ?? "medium",
+      deleted_at: null,
     } as any).select().single();
 
     if (error) {
@@ -207,9 +217,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const permanentDeleteTask = useCallback(async (id: string) => {
-    const { error } = await supabase.from("tasks").delete().eq("id", id);
+    const { error } = await supabase.from("tasks").update({ deleted_at: new Date().toISOString() } as any).eq("id", id);
     if (error) {
-      toast({ title: "Failed to delete task", description: error.message, variant: "destructive" });
+      toast({ title: "Failed to move to trash", description: error.message, variant: "destructive" });
     } else {
       setTasks((prev) => prev.filter((t) => t.id !== id));
     }

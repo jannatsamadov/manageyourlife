@@ -1,5 +1,5 @@
 import { NavLink, useLocation } from "react-router-dom";
-import { LayoutDashboard, Target, Calendar, Settings, LogOut, StickyNote } from "lucide-react";
+import { Target, Calendar, Settings, LogOut, StickyNote, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/context/AuthContext";
 import ChatPanel from "@/components/ChatPanel";
@@ -11,10 +11,10 @@ import {
 } from "@/components/ui/tooltip";
 
 const navItems = [
-  { title: "Daily Plan", path: "/", icon: LayoutDashboard },
-  { title: "Schedule", path: "/schedule", icon: Calendar },
+  { title: "Schedule", path: "/", icon: Calendar },
   { title: "Strategy", path: "/strategy", icon: Target },
   { title: "Notes", path: "/notes", icon: StickyNote },
+  { title: "Trash", path: "/trash", icon: Trash2 },
   { title: "Settings", path: "/settings", icon: Settings },
 ];
 

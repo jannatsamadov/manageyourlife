@@ -1,5 +1,5 @@
 import { useState, useMemo, useRef, useCallback } from "react";
-import { ChevronLeft, ChevronRight, Clock, Plus, Trash2, ExternalLink, GripVertical, CalendarX, RefreshCw, Loader2, RotateCcw, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, ChevronUp, Clock, Plus, Trash2, ExternalLink, GripVertical, CalendarX, RefreshCw, Loader2, RotateCcw, X, Play, CheckCircle2, Timer, Filter } from "lucide-react";
 import { useAppState, type TaskPriority, type Task } from "@/context/AppContext";
 import { getSettings } from "@/lib/settings";
 import { isGCalAvailable, createEvent } from "@/lib/gcal";
@@ -12,6 +12,14 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import TaskEditPopup from "@/components/TaskEditPopup";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 type View = "month" | "week";
 
@@ -40,6 +48,33 @@ function formatEstimated(mins: number | null): string {
   return `${mins}m`;
 }
 
+function formatDuration(ms: number): string {
+  const seconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+  if (hours > 0) return `${hours}h ${minutes % 60}m`;
+  if (minutes > 0) return `${minutes}m ${seconds % 60}s`;
+  return `${seconds}s`;
+}
+
+function formatTime(ts: number): string {
+  return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function formatDayLabel(dateStr: string): string {
+  const today = new Date().toISOString().slice(0, 10);
+  const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+  if (dateStr === today) return "Today";
+  if (dateStr === tomorrow) return "Tomorrow";
+  return new Date(dateStr + "T12:00:00").toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" });
+}
+
+function isTaskOverdue(task: Task): boolean {
+  if (!task.deadline) return false;
+  const today = new Date().toISOString().slice(0, 10);
+  return task.deadline < today && task.status !== "complete";
+}
+
 const priorityColors: Record<TaskPriority, string> = {
   high: "bg-destructive/10 text-destructive",
   medium: "bg-warning/10 text-warning",
@@ -66,12 +101,19 @@ function getTaskProgress(task: Task): number {
   return Math.min(1, (fullTime - remaining) / fullTime);
 }
 
+const today = new Date().toISOString().slice(0, 10);
+
 export default function SchedulePlanning() {
-  const { tasks, updateTask, addTask, deleteTask, permanentDeleteTask } = useAppState();
+  const { tasks, updateTask, addTask, deleteTask, permanentDeleteTask, reorderTasks } = useAppState();
   const [view, setView] = useState<View>("month");
   const [currentDate, setCurrentDate] = useState(new Date());
   const [showForm, setShowForm] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [taskQuery, setTaskQuery] = useState("");
+  const [priorityFilter, setPriorityFilter] = useState<"all" | TaskPriority>("all");
+  const [deadlineFilter, setDeadlineFilter] = useState<"any" | "overdue" | "due3" | "due7" | "due14" | "noDeadline">("any");
+  const [scheduledDaysShown, setScheduledDaysShown] = useState(4);
+  const [previousDaysShown, setPreviousDaysShown] = useState(0);
   const [form, setForm] = useState({
     title: "",
     description: "",
@@ -82,6 +124,28 @@ export default function SchedulePlanning() {
   });
   const dragNavTimer = useRef<ReturnType<typeof setTimeout>>();
   const [syncing, setSyncing] = useState(false);
+
+  const normalizedTaskQuery = taskQuery.trim().toLowerCase();
+  const taskMatchesQuery = useCallback((t: Task) => {
+    if (priorityFilter !== "all" && (t.priority || "medium") !== priorityFilter) return false;
+
+    const todayDate = new Date(new Date().toISOString().slice(0, 10));
+    const dueDays = t.deadline ? Math.ceil((new Date(t.deadline).getTime() - todayDate.getTime()) / 86400000) : null;
+    if (deadlineFilter === "noDeadline" && t.deadline) return false;
+    if (deadlineFilter !== "any" && deadlineFilter !== "noDeadline") {
+      if (!t.deadline || dueDays === null) return false;
+      if (deadlineFilter === "overdue" && !(t.deadline < today)) return false;
+      if (deadlineFilter === "due3" && !(dueDays >= 0 && dueDays <= 3)) return false;
+      if (deadlineFilter === "due7" && !(dueDays >= 0 && dueDays <= 7)) return false;
+      if (deadlineFilter === "due14" && !(dueDays >= 0 && dueDays <= 14)) return false;
+    }
+
+    if (!normalizedTaskQuery) return true;
+    const hay = `${t.title ?? ""}\n${t.description ?? ""}\n${t.link ?? ""}`.toLowerCase();
+    return hay.includes(normalizedTaskQuery);
+  }, [deadlineFilter, normalizedTaskQuery, priorityFilter]);
+
+  const visibleTasks = useMemo(() => tasks.filter(taskMatchesQuery), [tasks, taskMatchesQuery]);
 
   const syncToGCal = async () => {
     const ok = await isGCalAvailable();
@@ -111,47 +175,149 @@ export default function SchedulePlanning() {
   const { showProgressBars, blinkEffect } = getSettings();
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
-  const today = new Date().toISOString().slice(0, 10);
 
   const calendarEvents = useMemo(() => {
     const map: Record<string, { id: string; title: string; status: Task["status"]; deadline: string }[]> = {};
-    tasks.forEach((t) => {
+    visibleTasks.forEach((t) => {
       if (!t.date) return;
       if (!map[t.date]) map[t.date] = [];
       map[t.date].push({ id: t.id, title: t.title, status: t.status, deadline: t.deadline });
     });
     return map;
-  }, [tasks]);
+  }, [visibleTasks]);
 
-  const [scheduledLimit, setScheduledLimit] = useState(3);
   const [unscheduledLimit, setUnscheduledLimit] = useState(3);
   const [abandonedLimit, setAbandonedLimit] = useState(3);
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
 
   const scheduledTasks = useMemo(
-    () => tasks
-      .filter((t) => !!t.date && t.status !== "complete" && t.status !== "abandoned")
+    () => visibleTasks
+      .filter((t) => !!t.date && t.status !== "abandoned")
       .sort((a, b) => (a.date || "").localeCompare(b.date || "") || a.position - b.position),
-    [tasks]
+    [visibleTasks]
   );
 
+  const scheduledDatesOrdered = useMemo(() => {
+    return Array.from({ length: 60 }, (_, i) => {
+      const d = new Date();
+      d.setDate(d.getDate() + i);
+      return d.toISOString().slice(0, 10);
+    });
+  }, []);
+
+  const visibleScheduledDates = useMemo(
+    () => scheduledDatesOrdered.slice(0, scheduledDaysShown),
+    [scheduledDatesOrdered, scheduledDaysShown]
+  );
+
+  const scheduledTasksByDate = useMemo(() => {
+    const map: Record<string, Task[]> = {};
+    visibleScheduledDates.forEach((d) => { map[d] = []; });
+    scheduledTasks.forEach((t) => {
+      if (visibleScheduledDates.includes(t.date)) map[t.date].push(t);
+    });
+    return map;
+  }, [scheduledTasks, visibleScheduledDates]);
+
+  const previousDatesOrdered = useMemo(() => {
+    return Array.from({ length: 60 }, (_, i) => {
+      const d = new Date();
+      d.setDate(d.getDate() - (i + 1));
+      return d.toISOString().slice(0, 10);
+    });
+  }, []);
+
+  const visiblePreviousDates = useMemo(
+    () => previousDatesOrdered.slice(0, previousDaysShown),
+    [previousDatesOrdered, previousDaysShown]
+  );
+
+  const previousTasksByDate = useMemo(() => {
+    const map: Record<string, Task[]> = {};
+    visiblePreviousDates.forEach((d) => { map[d] = []; });
+    scheduledTasks.forEach((t) => {
+      if (visiblePreviousDates.includes(t.date)) map[t.date].push(t);
+    });
+    return map;
+  }, [scheduledTasks, visiblePreviousDates]);
+
+  const handleDropOnUnscheduled = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const id = e.dataTransfer.getData("application/task-id") || e.dataTransfer.getData("application/schedule-id");
+    if (!id) return;
+    const task = tasks.find((t) => t.id === id);
+    if (task && !task.date) return;
+    updateTask(id, { date: "" });
+  };
+
+  const startTask = useCallback((id: string) => updateTask(id, { status: "active", startTime: Date.now() }), [updateTask]);
+  const completeTask = useCallback((id: string) => updateTask(id, { status: "complete", endTime: Date.now() }), [updateTask]);
+
+  const handleScheduledDragStart = (e: React.DragEvent, taskId: string) => {
+    e.dataTransfer.setData("application/schedule-id", taskId);
+    e.dataTransfer.setData("application/task-id", taskId);
+    e.dataTransfer.effectAllowed = "move";
+  };
+
+  const handleDropOnScheduledTask = (e: React.DragEvent, targetTaskId: string, targetDate: string) => {
+    e.preventDefault();
+    const sourceId = e.dataTransfer.getData("application/task-id") || e.dataTransfer.getData("application/schedule-id");
+    if (!sourceId) return;
+    const sourceTask = tasks.find((t) => t.id === sourceId);
+    if (!sourceTask) return;
+    const sourceDate = sourceTask.date || today;
+    if (sourceDate === targetDate) {
+      if (sourceId === targetTaskId) return;
+      const dayTasks = scheduledTasksByDate[targetDate];
+      const sourceIdx = dayTasks.findIndex((t) => t.id === sourceId);
+      const targetIdx = dayTasks.findIndex((t) => t.id === targetTaskId);
+      if (sourceIdx < 0 || targetIdx < 0) return;
+      const reordered = [...dayTasks];
+      const [removed] = reordered.splice(sourceIdx, 1);
+      reordered.splice(targetIdx, 0, removed);
+      reorderTasks(targetDate, reordered.map((t) => t.id));
+    } else {
+      updateTask(sourceId, { date: targetDate });
+    }
+  };
+
+  const handleScheduledDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+  };
+
+  const handleDropOnDay = (e: React.DragEvent, targetDate: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const id = e.dataTransfer.getData("application/task-id") || e.dataTransfer.getData("application/schedule-id");
+    if (!id) return;
+    const task = tasks.find((t) => t.id === id);
+    if (task?.date === targetDate) return;
+    updateTask(id, { date: targetDate });
+  };
+
+  const handleCardDoubleClick = useCallback((task: Task) => {
+    if (task.link) window.open(task.link, "_blank", "noopener");
+  }, []);
+
   const unscheduledTasks = useMemo(
-    () => tasks
+    () => visibleTasks
       .filter((t) => !t.date && t.status !== "complete" && t.status !== "abandoned")
       .sort((a, b) => (a.deadline || "z").localeCompare(b.deadline || "z") || a.position - b.position),
-    [tasks]
+    [visibleTasks]
   );
 
   const abandonedTasks = useMemo(
-    () => tasks
+    () => visibleTasks
       .filter((t) => t.status === "abandoned")
       .sort((a, b) => (b.deadline || "").localeCompare(a.deadline || "")),
-    [tasks]
+    [visibleTasks]
   );
 
   const selectedDayTasks = useMemo(
-    () => selectedDay ? tasks.filter((t) => t.date === selectedDay).sort((a, b) => a.position - b.position) : [],
-    [tasks, selectedDay]
+    () => selectedDay ? visibleTasks.filter((t) => t.date === selectedDay).sort((a, b) => a.position - b.position) : [],
+    [visibleTasks, selectedDay]
   );
 
   const handleDragStart = (e: React.DragEvent, id: string) => {
@@ -229,6 +395,132 @@ export default function SchedulePlanning() {
   return (
     <TooltipProvider delayDuration={300}>
       <div className="mx-auto max-w-5xl space-y-8 animate-fade-in">
+        {/* Add Task */}
+        <section className="glass-card p-4 -mt-2">
+          <div className="flex items-start justify-between mb-4 gap-3 flex-wrap">
+            <div className="min-w-[220px]">
+              <h3 className="text-lg font-semibold text-foreground">Tasks</h3>
+              <p className="text-xs text-muted-foreground">Create tasks, drag to calendar to schedule</p>
+            </div>
+
+            <div className="flex items-center gap-2 flex-1 justify-end min-w-[260px]">
+              <input
+                value={taskQuery}
+                onChange={(e) => setTaskQuery(e.target.value)}
+                placeholder="Search tasks…"
+                className="w-full sm:w-72 rounded-lg border border-border bg-background px-3 py-2 text-sm"
+              />
+              {taskQuery.trim() && (
+                <button
+                  type="button"
+                  onClick={() => setTaskQuery("")}
+                  className="rounded-lg border border-border px-2.5 py-2 text-sm text-muted-foreground hover:text-foreground hover:border-primary/30 transition-colors"
+                  title="Clear search"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+              <Popover>
+                <PopoverTrigger asChild>
+                  <button
+                    type="button"
+                    className={cn(
+                      "inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground hover:text-foreground hover:border-primary/30 transition-colors",
+                      (priorityFilter !== "all" || deadlineFilter !== "any") && "text-foreground border-primary/30"
+                    )}
+                    title="Filters"
+                  >
+                    <Filter className="h-4 w-4" />
+                    Filter
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent align="end" className="w-80">
+                  <div className="space-y-4">
+                    <div className="space-y-1.5">
+                      <div className="text-xs font-medium text-muted-foreground">Priority</div>
+                      <Select value={priorityFilter} onValueChange={(v) => setPriorityFilter(v as "all" | TaskPriority)}>
+                        <SelectTrigger className="h-9">
+                          <SelectValue placeholder="All priorities" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All</SelectItem>
+                          <SelectItem value="high">High</SelectItem>
+                          <SelectItem value="medium">Medium</SelectItem>
+                          <SelectItem value="low">Low</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <div className="text-xs font-medium text-muted-foreground">Time to deadline</div>
+                      <Select value={deadlineFilter} onValueChange={(v) => setDeadlineFilter(v as typeof deadlineFilter)}>
+                        <SelectTrigger className="h-9">
+                          <SelectValue placeholder="Any deadline" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="any">Any</SelectItem>
+                          <SelectItem value="overdue">Overdue</SelectItem>
+                          <SelectItem value="due3">Due in 3 days</SelectItem>
+                          <SelectItem value="due7">Due in 7 days</SelectItem>
+                          <SelectItem value="due14">Due in 14 days</SelectItem>
+                          <SelectItem value="noDeadline">No deadline</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-1.5 opacity-70">
+                      <div className="text-xs font-medium text-muted-foreground">Project</div>
+                      <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
+                        Coming soon
+                      </div>
+                    </div>
+
+                    {(priorityFilter !== "all" || deadlineFilter !== "any") && (
+                      <button
+                        type="button"
+                        onClick={() => { setPriorityFilter("all"); setDeadlineFilter("any"); }}
+                        className="w-full rounded-md border border-border px-3 py-2 text-sm text-muted-foreground hover:text-foreground hover:border-primary/30 transition-colors"
+                      >
+                        Clear filters
+                      </button>
+                    )}
+                  </div>
+                </PopoverContent>
+              </Popover>
+              <button
+                onClick={() => setShowForm(!showForm)}
+                className="flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+              >
+                <Plus className="h-4 w-4" />
+                Add Task
+              </button>
+            </div>
+          </div>
+
+          {showForm && (
+            <div className="mb-4 p-4 rounded-lg border border-border bg-muted/20 space-y-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <input value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} placeholder="Task title *" className="rounded border border-border bg-background px-3 py-2 text-sm" />
+                <div>
+                  <label className="text-[10px] text-muted-foreground">Deadline</label>
+                  <input type="date" value={form.deadline} onChange={(e) => setForm((f) => ({ ...f, deadline: e.target.value }))} className="w-full rounded border border-border bg-background px-3 py-2 text-sm [color-scheme:dark]" />
+                </div>
+                <input type="number" value={form.estimatedTime} onChange={(e) => setForm((f) => ({ ...f, estimatedTime: e.target.value }))} placeholder="Estimated minutes" min="1" className="rounded border border-border bg-background px-3 py-2 text-sm" />
+                <select value={form.priority} onChange={(e) => setForm((f) => ({ ...f, priority: e.target.value as TaskPriority }))} className="rounded border border-border bg-background px-3 py-2 text-sm">
+                  <option value="high">High Priority</option>
+                  <option value="medium">Medium Priority</option>
+                  <option value="low">Low Priority</option>
+                </select>
+                <input value={form.link} onChange={(e) => setForm((f) => ({ ...f, link: e.target.value }))} placeholder="Link (optional)" className="rounded border border-border bg-background px-3 py-2 text-sm" />
+                <textarea value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} placeholder="Description (optional)" rows={1} className="rounded border border-border bg-background px-3 py-2 text-sm resize-none" />
+              </div>
+              <button onClick={handleAddTask} className="rounded bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90">
+                Create Task
+              </button>
+            </div>
+          )}
+        </section>
+
         <section>
           <div className="space-y-4">
             <div className="flex items-center justify-between flex-wrap gap-4">
@@ -354,134 +646,296 @@ export default function SchedulePlanning() {
           </div>
         </section>
 
-        {/* Add Task */}
-        <section className="glass-card p-4">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h3 className="text-lg font-semibold text-foreground">Tasks</h3>
-              <p className="text-xs text-muted-foreground">Create tasks, drag to calendar to schedule</p>
-            </div>
+        {/* Upcoming + Previous tasks — Daily Plan style with Start/Done and time logging */}
+        <section className="glass-card px-4 pb-4 pt-2 -mt-2">
+          <div className="flex justify-center mt-1 -mb-5">
             <button
-              onClick={() => setShowForm(!showForm)}
-              className="flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+              type="button"
+              onClick={() => setPreviousDaysShown((n) => n + 3)}
+              className="flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
             >
-              <Plus className="h-4 w-4" />
-              Add Task
+              <ChevronUp className="h-3.5 w-3.5" />
+              Previous tasks
             </button>
           </div>
-
-          {showForm && (
-            <div className="mb-4 p-4 rounded-lg border border-border bg-muted/20 space-y-3">
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <input value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} placeholder="Task title *" className="rounded border border-border bg-background px-3 py-2 text-sm" />
-                <div>
-                  <label className="text-[10px] text-muted-foreground">Deadline</label>
-                  <input type="date" value={form.deadline} onChange={(e) => setForm((f) => ({ ...f, deadline: e.target.value }))} className="w-full rounded border border-border bg-background px-3 py-2 text-sm [color-scheme:dark]" />
-                </div>
-                <input type="number" value={form.estimatedTime} onChange={(e) => setForm((f) => ({ ...f, estimatedTime: e.target.value }))} placeholder="Estimated minutes" min="1" className="rounded border border-border bg-background px-3 py-2 text-sm" />
-                <select value={form.priority} onChange={(e) => setForm((f) => ({ ...f, priority: e.target.value as TaskPriority }))} className="rounded border border-border bg-background px-3 py-2 text-sm">
-                  <option value="high">High Priority</option>
-                  <option value="medium">Medium Priority</option>
-                  <option value="low">Low Priority</option>
-                </select>
-                <input value={form.link} onChange={(e) => setForm((f) => ({ ...f, link: e.target.value }))} placeholder="Link (optional)" className="rounded border border-border bg-background px-3 py-2 text-sm" />
-                <textarea value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} placeholder="Description (optional)" rows={1} className="rounded border border-border bg-background px-3 py-2 text-sm resize-none" />
-              </div>
-              <button onClick={handleAddTask} className="rounded bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90">
-                Create Task
-              </button>
-            </div>
-          )}
-        </section>
-
-        {/* Scheduled Tasks */}
-        <section className="glass-card p-4">
-          <h3 className="text-base font-semibold text-foreground mb-3">
-            Scheduled <span className="text-xs text-muted-foreground font-normal ml-1">({scheduledTasks.length})</span>
-          </h3>
-          <div className="space-y-2">
-            {scheduledTasks.length === 0 && (
-              <p className="text-xs text-muted-foreground py-4 text-center">No scheduled tasks. Drag tasks from below to the calendar.</p>
-            )}
-            {scheduledTasks.slice(0, scheduledLimit).map((task) => {
-              const progressPct = getTaskProgress(task);
+          <div className="space-y-6">
+            {previousDaysShown > 0 && visiblePreviousDates.map((dateStr) => {
+              const dayTasks = previousTasksByDate[dateStr] || [];
+              if (dayTasks.length === 0) return null;
               return (
-                <Tooltip key={task.id}>
-                  <TooltipTrigger asChild>
-                    <div
-                      draggable
-                      onDragStart={(e) => handleDragStart(e, task.id)}
-                      onClick={() => openEditPopup(task.id)}
-                      className="group relative flex items-center gap-3 rounded-lg border border-border bg-card p-3 cursor-grab active:cursor-grabbing hover:border-primary/30 transition-colors overflow-hidden"
-                    >
-                      {showProgressBars && progressPct > 0 && (
-                        <div
-                          className={cn("task-progress-red absolute inset-0 pointer-events-none rounded-lg", blinkEffect && "task-progress-blink")}
-                          style={{
-                            ["--progress-pct" as string]: `${Math.min(progressPct, 1) * 100}%`,
-                            ["--blink-duration" as string]: progressPct >= 0.75 ? `${Math.max(0.6, 3.6 - (progressPct - 0.75) * 12)}s` : "3.6s",
-                          }}
-                        />
-                      )}
-                      <GripVertical className="relative h-4 w-4 text-muted-foreground/60 shrink-0 z-[1]" />
-                      <div className="relative flex-1 min-w-0 z-[1]">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-medium truncate">{task.title}</span>
-                          <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-medium", priorityColors[task.priority])}>{task.priority}</span>
-                          {task.estimatedTime && <span className="text-[10px] text-muted-foreground">Est: {formatEstimated(task.estimatedTime)}</span>}
-                        </div>
-                        <div className="mt-0.5 flex items-center gap-3 text-[10px] text-muted-foreground">
-                          <span className="font-mono text-primary">{task.date}</span>
-                          {task.deadline && <span className="font-mono">Deadline: {task.deadline}</span>}
-                          {task.link && <a href={task.link} target="_blank" rel="noopener" className="flex items-center gap-0.5 text-primary hover:underline" onClick={(e) => e.stopPropagation()}><ExternalLink className="h-3 w-3" />Link</a>}
-                        </div>
-                      </div>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <button onClick={(e) => { e.stopPropagation(); updateTask(task.id, { date: "" }); }} className="relative rounded p-1.5 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-warning z-[1]">
-                            <CalendarX className="h-3.5 w-3.5" />
-                          </button>
-                        </TooltipTrigger>
-                        <TooltipContent side="left" className="text-xs">Unschedule</TooltipContent>
-                      </Tooltip>
-                      <button onClick={(e) => { e.stopPropagation(); deleteTask(task.id); }} className="relative rounded p-1.5 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-destructive z-[1]">
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
+                <div
+                  key={`prev-${dateStr}`}
+                  className="space-y-2 rounded-lg border border-transparent p-2 transition-colors hover:border-border/50 min-h-[60px]"
+                  onDrop={(e) => handleDropOnDay(e, dateStr)}
+                  onDragOver={handleScheduledDragOver}
+                >
+                  <div className="mb-2 flex items-center justify-between border-b border-border pb-2 min-h-[24px]">
+                    <h4 className="text-sm font-semibold text-muted-foreground">{formatDayLabel(dateStr)}</h4>
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <CheckCircle2 className="h-4 w-4 text-primary" />
+                      {dayTasks.filter((t) => t.status === "complete").length}/{dayTasks.length} done
                     </div>
-                  </TooltipTrigger>
-                  {task.description && <TooltipContent side="bottom" className="max-w-xs text-sm">{task.description}</TooltipContent>}
-                </Tooltip>
+                  </div>
+                  {dayTasks.map((task) => {
+                    const overdue = isTaskOverdue(task);
+                    const progressPct = getTaskProgress(task);
+                    return (
+                      <Tooltip key={task.id}>
+                        <TooltipTrigger asChild>
+                          <div
+                            draggable={task.status !== "complete"}
+                            onDragStart={(e) => task.status !== "complete" && handleScheduledDragStart(e, task.id)}
+                            onDrop={(e) => { e.stopPropagation(); task.status !== "complete" && handleDropOnScheduledTask(e, task.id, dateStr); }}
+                            onDragOver={handleScheduledDragOver}
+                            onClick={() => openEditPopup(task.id)}
+                            onDoubleClick={() => handleCardDoubleClick(task)}
+                            className={cn(
+                              "group relative flex items-center gap-3 rounded-lg border p-3 transition-all overflow-hidden select-none",
+                              task.status !== "complete" && "cursor-grab active:cursor-grabbing",
+                              task.status === "idle" && !overdue && "border-border bg-card",
+                              task.status === "active" && !overdue && "task-card-active",
+                              task.status === "complete" && "task-card-complete",
+                              overdue && "task-card-overdue"
+                            )}
+                          >
+                            {showProgressBars && progressPct > 0 && task.status !== "complete" && (
+                              <div
+                                className={cn("task-progress-red absolute inset-0 pointer-events-none rounded-lg", blinkEffect && "task-progress-blink")}
+                                style={{
+                                  ["--progress-pct" as string]: `${Math.min(progressPct, 1) * 100}%`,
+                                  ["--blink-duration" as string]: progressPct >= 0.75 ? `${Math.max(0.6, 3.6 - (progressPct - 0.75) * 12)}s` : "3.6s",
+                                }}
+                              />
+                            )}
+                            {task.status !== "complete" && (
+                              <GripVertical className="relative h-4 w-4 text-muted-foreground/60 shrink-0 z-[1]" />
+                            )}
+                            <div className="relative flex-1 min-w-0 z-[1]">
+                              <div className="flex items-center gap-2">
+                                <p className={cn("font-medium truncate", task.status === "complete" && "line-through text-muted-foreground")}>{task.title}</p>
+                                {task.link && (
+                                  <a href={task.link} target="_blank" rel="noopener" onClick={(e) => e.stopPropagation()} className="shrink-0 text-primary hover:text-primary/80">
+                                    <ExternalLink className="h-3 w-3" />
+                                  </a>
+                                )}
+                                <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-medium shrink-0", priorityColors[task.priority || "medium"])}>{task.priority || "medium"}</span>
+                              </div>
+                              {(task.status === "active" || task.status === "complete") && (task.startTime || task.endTime) && (
+                                <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground font-mono">
+                                  {task.startTime && <span>Started {formatTime(task.startTime)}</span>}
+                                  {task.endTime && <span>Ended {formatTime(task.endTime)}</span>}
+                                  {task.startTime && task.endTime && <span className="text-primary">{formatDuration(task.endTime - task.startTime)}</span>}
+                                </div>
+                              )}
+                            </div>
+                            <div className="relative flex items-center gap-1.5 z-[1]">
+                              {task.estimatedTime && (
+                                <span className="inline-flex items-center gap-0.5 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground shrink-0">
+                                  <Timer className="h-2.5 w-2.5" />
+                                  {formatEstimated(task.estimatedTime)}
+                                </span>
+                              )}
+                              {task.status === "idle" && (
+                                <button onClick={(e) => { e.stopPropagation(); startTask(task.id); }} className="flex items-center gap-1 rounded bg-primary/10 px-2 py-1 text-[10px] font-medium text-primary hover:bg-primary/20">
+                                  <Play className="h-2.5 w-2.5" /> Start
+                                </button>
+                              )}
+                              {task.status === "active" && (
+                                <button onClick={(e) => { e.stopPropagation(); completeTask(task.id); }} className="flex items-center gap-1 rounded bg-primary px-2 py-1 text-[10px] font-medium text-primary-foreground hover:bg-primary/90">
+                                  <CheckCircle2 className="h-2.5 w-2.5" /> Done
+                                </button>
+                              )}
+                              {task.status !== "active" && (
+                                <button onClick={(e) => { e.stopPropagation(); deleteTask(task.id); }} className="rounded p-1 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-destructive">
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              )}
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <button onClick={(e) => { e.stopPropagation(); updateTask(task.id, { date: "" }); }} className="rounded p-1 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-warning">
+                                    <CalendarX className="h-3.5 w-3.5" />
+                                  </button>
+                                </TooltipTrigger>
+                                <TooltipContent side="left" className="text-xs">Unschedule</TooltipContent>
+                              </Tooltip>
+                            </div>
+                          </div>
+                        </TooltipTrigger>
+                        {task.description && <TooltipContent side="bottom" className="max-w-xs text-sm whitespace-pre-wrap">{task.description}</TooltipContent>}
+                      </Tooltip>
+                    );
+                  })}
+                </div>
               );
             })}
-            {scheduledTasks.length > scheduledLimit && (
-              <button onClick={() => setScheduledLimit((l) => l + 5)} className="w-full rounded-lg border border-dashed border-border py-2 text-xs text-muted-foreground hover:text-foreground hover:border-primary/30 transition-colors">
-                See more ({scheduledTasks.length - scheduledLimit} remaining)
+            {scheduledTasks.length === 0 && previousDaysShown === 0 && (
+              <p className="text-xs text-muted-foreground py-4 text-center">No scheduled tasks. Drag tasks from below to the calendar.</p>
+            )}
+            {visibleScheduledDates.map((dateStr) => {
+              const dayTasks = scheduledTasksByDate[dateStr] || [];
+              if (dayTasks.length === 0) return null;
+              return (
+                <div
+                  key={dateStr}
+                  className="space-y-2 rounded-lg border border-transparent p-2 transition-colors hover:border-border/50 min-h-[60px]"
+                  onDrop={(e) => handleDropOnDay(e, dateStr)}
+                  onDragOver={handleScheduledDragOver}
+                >
+                  <div className="mb-2 flex items-center justify-between border-b border-border pb-2 min-h-[24px]">
+                    <h4 className="text-sm font-semibold text-muted-foreground">{formatDayLabel(dateStr)}</h4>
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <CheckCircle2 className="h-4 w-4 text-primary" />
+                      {dayTasks.filter((t) => t.status === "complete").length}/{dayTasks.length} done
+                    </div>
+                  </div>
+                  {dayTasks.map((task) => {
+                    const overdue = isTaskOverdue(task);
+                    const progressPct = getTaskProgress(task);
+                    return (
+                      <Tooltip key={task.id}>
+                        <TooltipTrigger asChild>
+                          <div
+                            draggable={task.status !== "complete"}
+                            onDragStart={(e) => task.status !== "complete" && handleScheduledDragStart(e, task.id)}
+                            onDrop={(e) => { e.stopPropagation(); task.status !== "complete" && handleDropOnScheduledTask(e, task.id, dateStr); }}
+                            onDragOver={handleScheduledDragOver}
+                            onClick={() => openEditPopup(task.id)}
+                            onDoubleClick={() => handleCardDoubleClick(task)}
+                            className={cn(
+                              "group relative flex items-center gap-3 rounded-lg border p-3 transition-all overflow-hidden select-none",
+                              task.status !== "complete" && "cursor-grab active:cursor-grabbing",
+                              task.status === "idle" && !overdue && "border-border bg-card",
+                              task.status === "active" && !overdue && "task-card-active",
+                              task.status === "complete" && "task-card-complete",
+                              overdue && "task-card-overdue"
+                            )}
+                          >
+                            {showProgressBars && progressPct > 0 && task.status !== "complete" && (
+                              <div
+                                className={cn("task-progress-red absolute inset-0 pointer-events-none rounded-lg", blinkEffect && "task-progress-blink")}
+                                style={{
+                                  ["--progress-pct" as string]: `${Math.min(progressPct, 1) * 100}%`,
+                                  ["--blink-duration" as string]: progressPct >= 0.75 ? `${Math.max(0.6, 3.6 - (progressPct - 0.75) * 12)}s` : "3.6s",
+                                }}
+                              />
+                            )}
+                            {task.status !== "complete" && (
+                              <GripVertical className="relative h-4 w-4 text-muted-foreground/60 shrink-0 z-[1]" />
+                            )}
+                            <div className="relative flex-1 min-w-0 z-[1]">
+                              <div className="flex items-center gap-2">
+                                <p className={cn("font-medium truncate", task.status === "complete" && "line-through text-muted-foreground")}>
+                                  {task.title}
+                                </p>
+                                {task.link && (
+                                  <a href={task.link} target="_blank" rel="noopener" onClick={(e) => e.stopPropagation()} className="shrink-0 text-primary hover:text-primary/80">
+                                    <ExternalLink className="h-3 w-3" />
+                                  </a>
+                                )}
+                                <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-medium shrink-0", priorityColors[task.priority || "medium"])}>
+                                  {task.priority || "medium"}
+                                </span>
+                              </div>
+                              {(task.status === "active" || task.status === "complete") && (task.startTime || task.endTime) && (
+                                <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground font-mono">
+                                  {task.startTime && <span>Started {formatTime(task.startTime)}</span>}
+                                  {task.endTime && <span>Ended {formatTime(task.endTime)}</span>}
+                                  {task.startTime && task.endTime && (
+                                    <span className="text-primary">{formatDuration(task.endTime - task.startTime)}</span>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                            <div className="relative flex items-center gap-1.5 z-[1]">
+                              {task.estimatedTime && (
+                                <span className="inline-flex items-center gap-0.5 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground shrink-0">
+                                  <Timer className="h-2.5 w-2.5" />
+                                  {formatEstimated(task.estimatedTime)}
+                                </span>
+                              )}
+                              {task.status === "idle" && (
+                                <button onClick={(e) => { e.stopPropagation(); startTask(task.id); }} className="flex items-center gap-1 rounded bg-primary/10 px-2 py-1 text-[10px] font-medium text-primary hover:bg-primary/20">
+                                  <Play className="h-2.5 w-2.5" /> Start
+                                </button>
+                              )}
+                              {task.status === "active" && (
+                                <button onClick={(e) => { e.stopPropagation(); completeTask(task.id); }} className="flex items-center gap-1 rounded bg-primary px-2 py-1 text-[10px] font-medium text-primary-foreground hover:bg-primary/90">
+                                  <CheckCircle2 className="h-2.5 w-2.5" /> Done
+                                </button>
+                              )}
+                              {task.status !== "active" && (
+                                <button onClick={(e) => { e.stopPropagation(); deleteTask(task.id); }} className="rounded p-1 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-destructive">
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              )}
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <button onClick={(e) => { e.stopPropagation(); updateTask(task.id, { date: "" }); }} className="rounded p-1 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-warning">
+                                    <CalendarX className="h-3.5 w-3.5" />
+                                  </button>
+                                </TooltipTrigger>
+                                <TooltipContent side="left" className="text-xs">Unschedule</TooltipContent>
+                              </Tooltip>
+                            </div>
+                          </div>
+                        </TooltipTrigger>
+                        {task.description && (
+                          <TooltipContent side="bottom" className="max-w-xs text-sm whitespace-pre-wrap">
+                            {task.description}
+                          </TooltipContent>
+                        )}
+                      </Tooltip>
+                    );
+                  })}
+                </div>
+              );
+            })}
+            {scheduledDatesOrdered.length > scheduledDaysShown && (
+              <button
+                onClick={() => setScheduledDaysShown((n) => n + 3)}
+                className="w-full rounded-lg border border-dashed border-border py-2 text-xs text-muted-foreground hover:text-foreground hover:border-primary/30 transition-colors"
+              >
+                See more (+3 days)
               </button>
             )}
           </div>
         </section>
 
-        {/* Unscheduled Tasks */}
-        <section className="glass-card p-4">
+        {/* Unscheduled Tasks — same card design; drop here to unschedule */}
+        <section
+          className="glass-card p-4 rounded-lg border border-border transition-colors"
+          onDrop={handleDropOnUnscheduled}
+          onDragOver={handleScheduledDragOver}
+        >
           <h3 className="text-base font-semibold text-foreground mb-3">
             Unscheduled <span className="text-xs text-muted-foreground font-normal ml-1">({unscheduledTasks.length})</span>
           </h3>
+          <p className="text-xs text-muted-foreground mb-3">Drag to a day above or to the calendar to schedule. Drop here to unschedule.</p>
           <div className="space-y-2">
             {unscheduledTasks.length === 0 && (
               <p className="text-xs text-muted-foreground py-4 text-center">All tasks are scheduled.</p>
             )}
             {unscheduledTasks.slice(0, unscheduledLimit).map((task) => {
+              const overdue = isTaskOverdue(task);
               const progressPct = getTaskProgress(task);
               return (
                 <Tooltip key={task.id}>
                   <TooltipTrigger asChild>
                     <div
-                      draggable
-                      onDragStart={(e) => handleDragStart(e, task.id)}
+                      draggable={task.status !== "complete"}
+                      onDragStart={(e) => task.status !== "complete" && handleScheduledDragStart(e, task.id)}
                       onClick={() => openEditPopup(task.id)}
-                      className="group relative flex items-center gap-3 rounded-lg border border-border bg-card p-3 cursor-grab active:cursor-grabbing hover:border-primary/30 transition-colors overflow-hidden"
+                      onDoubleClick={() => handleCardDoubleClick(task)}
+                      className={cn(
+                        "group relative flex items-center gap-3 rounded-lg border p-3 transition-all overflow-hidden select-none",
+                        task.status !== "complete" && "cursor-grab active:cursor-grabbing",
+                        task.status === "idle" && !overdue && "border-border bg-card",
+                        task.status === "active" && !overdue && "task-card-active",
+                        task.status === "complete" && "task-card-complete",
+                        overdue && "task-card-overdue"
+                      )}
                     >
-                      {showProgressBars && progressPct > 0 && (
+                      {showProgressBars && progressPct > 0 && task.status !== "complete" && (
                         <div
                           className={cn("task-progress-red absolute inset-0 pointer-events-none rounded-lg", blinkEffect && "task-progress-blink")}
                           style={{
@@ -490,24 +944,63 @@ export default function SchedulePlanning() {
                           }}
                         />
                       )}
-                      <GripVertical className="relative h-4 w-4 text-muted-foreground/60 shrink-0 z-[1]" />
+                      {task.status !== "complete" && (
+                        <GripVertical className="relative h-4 w-4 text-muted-foreground/60 shrink-0 z-[1]" />
+                      )}
                       <div className="relative flex-1 min-w-0 z-[1]">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-medium truncate">{task.title}</span>
-                          <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-medium", priorityColors[task.priority])}>{task.priority}</span>
-                          {task.estimatedTime && <span className="text-[10px] text-muted-foreground">Est: {formatEstimated(task.estimatedTime)}</span>}
+                        <div className="flex items-center gap-2">
+                          <p className={cn("font-medium truncate", task.status === "complete" && "line-through text-muted-foreground")}>
+                            {task.title}
+                          </p>
+                          {task.link && (
+                            <a href={task.link} target="_blank" rel="noopener" onClick={(e) => e.stopPropagation()} className="shrink-0 text-primary hover:text-primary/80">
+                              <ExternalLink className="h-3 w-3" />
+                            </a>
+                          )}
+                          <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-medium shrink-0", priorityColors[task.priority || "medium"])}>
+                            {task.priority || "medium"}
+                          </span>
                         </div>
-                        <div className="mt-0.5 flex items-center gap-3 text-[10px] text-muted-foreground">
-                          {task.deadline && <span className="font-mono">Deadline: {task.deadline}</span>}
-                          {task.link && <a href={task.link} target="_blank" rel="noopener" className="flex items-center gap-0.5 text-primary hover:underline" onClick={(e) => e.stopPropagation()}><ExternalLink className="h-3 w-3" />Link</a>}
-                        </div>
+                        {(task.status === "active" || task.status === "complete") && (task.startTime || task.endTime) && (
+                          <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground font-mono">
+                            {task.startTime && <span>Started {formatTime(task.startTime)}</span>}
+                            {task.endTime && <span>Ended {formatTime(task.endTime)}</span>}
+                            {task.startTime && task.endTime && (
+                              <span className="text-primary">{formatDuration(task.endTime - task.startTime)}</span>
+                            )}
+                          </div>
+                        )}
                       </div>
-                      <button onClick={(e) => { e.stopPropagation(); deleteTask(task.id); }} className="relative rounded p-1.5 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-destructive z-[1]">
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
+                      <div className="relative flex items-center gap-1.5 z-[1]">
+                        {task.estimatedTime && (
+                          <span className="inline-flex items-center gap-0.5 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground shrink-0">
+                            <Timer className="h-2.5 w-2.5" />
+                            {formatEstimated(task.estimatedTime)}
+                          </span>
+                        )}
+                        {task.status === "idle" && (
+                          <button onClick={(e) => { e.stopPropagation(); startTask(task.id); }} className="flex items-center gap-1 rounded bg-primary/10 px-2 py-1 text-[10px] font-medium text-primary hover:bg-primary/20">
+                            <Play className="h-2.5 w-2.5" /> Start
+                          </button>
+                        )}
+                        {task.status === "active" && (
+                          <button onClick={(e) => { e.stopPropagation(); completeTask(task.id); }} className="flex items-center gap-1 rounded bg-primary px-2 py-1 text-[10px] font-medium text-primary-foreground hover:bg-primary/90">
+                            <CheckCircle2 className="h-2.5 w-2.5" /> Done
+                          </button>
+                        )}
+                        {task.status !== "active" && (
+                          <button onClick={(e) => { e.stopPropagation(); deleteTask(task.id); }} className="rounded p-1 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-destructive">
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </TooltipTrigger>
-                  {task.description && <TooltipContent side="bottom" className="max-w-xs text-sm">{task.description}</TooltipContent>}
+                  {task.description && (
+                    <TooltipContent side="bottom" className="max-w-xs text-sm whitespace-pre-wrap">
+                      {task.description}
+                    </TooltipContent>
+                  )}
                 </Tooltip>
               );
             })}

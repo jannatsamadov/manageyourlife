@@ -32,8 +32,14 @@ function renderMarkdown(text: string): string {
   html = html.replace(/~~(.+?)~~/g, "<del>$1</del>");
   html = html.replace(/`([^`]+)`/g, '<code class="rounded bg-muted px-1.5 py-0.5 text-xs font-mono">$1</code>');
   html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener" class="text-primary underline">$1</a>');
-  html = html.replace(/^- \[x\] (.+)$/gm, '<div class="flex items-center gap-2 my-0.5"><input type="checkbox" checked disabled class="accent-primary" /><span class="line-through text-muted-foreground">$1</span></div>');
-  html = html.replace(/^- \[ \] (.+)$/gm, '<div class="flex items-center gap-2 my-0.5"><input type="checkbox" disabled class="accent-primary" /><span>$1</span></div>');
+  let todoIndex = 0;
+  html = html.replace(/^- \[(x| )\] (.+)$/gm, (_match, state, label) => {
+    const checked = state === "x";
+    const spanClass = checked ? "line-through text-muted-foreground" : "";
+    const htmlLine = `<div class="flex items-center gap-2 my-0.5"><input type="checkbox" data-todo-index="${todoIndex}" class="accent-primary todo-checkbox" ${checked ? "checked" : ""} /><span class="${spanClass}">${label}</span></div>`;
+    todoIndex += 1;
+    return htmlLine;
+  });
   html = html.replace(/^(\d+)\. (.+)$/gm, '<div class="ml-4 my-0.5"><span class="text-muted-foreground mr-2">$1.</span>$2</div>');
   html = html.replace(/^- (.+)$/gm, '<div class="ml-4 my-0.5"><span class="text-muted-foreground mr-2">•</span>$1</div>');
   html = html.replace(/^---$/gm, '<hr class="my-3 border-border" />');
@@ -48,6 +54,7 @@ export default function NoteEditorModal({ note, onClose, onUpdate, onDelete }: N
   const [saving, setSaving] = useState(false);
   const [preview, setPreview] = useState(false);
   const editorRef = useRef<HTMLTextAreaElement>(null);
+  const previewRef = useRef<HTMLDivElement | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout>>();
 
   const saveNote = useCallback(async (t: string, c: string) => {
@@ -75,6 +82,31 @@ export default function NoteEditorModal({ note, onClose, onUpdate, onDelete }: N
     setTitle(val);
     debouncedSave(val, content);
   };
+
+  const toggleTodoAtIndex = useCallback((targetIndex: number) => {
+    const todoRegex = /^- \[( |x)\] (.+)$/gm;
+    let match: RegExpExecArray | null;
+    let index = 0;
+    let newContent = content;
+
+    while ((match = todoRegex.exec(content)) !== null) {
+      if (index === targetIndex) {
+        const lineStart = match.index;
+        const lineEnd = match.index + match[0].length;
+        const completed = match[1] === "x";
+        const text = match[2];
+        const replacement = `- [${completed ? " " : "x"}] ${text}`;
+        newContent = content.slice(0, lineStart) + replacement + content.slice(lineEnd);
+        break;
+      }
+      index += 1;
+    }
+
+    if (newContent !== content) {
+      setContent(newContent);
+      debouncedSave(title, newContent);
+    }
+  }, [content, debouncedSave, title]);
 
   const insertMarkdown = (prefix: string, suffix = "") => {
     const el = editorRef.current;
@@ -127,6 +159,27 @@ export default function NoteEditorModal({ note, onClose, onUpdate, onDelete }: N
       const lineStart = content.lastIndexOf("\n", pos - 1) + 1;
       const currentLine = content.slice(lineStart, pos);
 
+      // Continue todo list (checklist) first so it doesn't fall back to plain bullet
+      const todoMatch = currentLine.match(/^(\s*- \[ \] )(.*)/);
+      if (todoMatch) {
+        if (!todoMatch[2].trim()) {
+          e.preventDefault();
+          const newContent = content.slice(0, lineStart) + content.slice(pos);
+          setContent(newContent);
+          debouncedSave(title, newContent);
+          setTimeout(() => el.setSelectionRange(lineStart, lineStart), 0);
+          return;
+        }
+        e.preventDefault();
+        const prefix = todoMatch[1];
+        const insert = "\n" + prefix;
+        const newContent = content.slice(0, pos) + insert + content.slice(pos);
+        setContent(newContent);
+        debouncedSave(title, newContent);
+        setTimeout(() => el.setSelectionRange(pos + insert.length, pos + insert.length), 0);
+        return;
+      }
+
       // Continue bullet list
       const bulletMatch = currentLine.match(/^(\s*- )(.*)/);
       if (bulletMatch) {
@@ -141,27 +194,6 @@ export default function NoteEditorModal({ note, onClose, onUpdate, onDelete }: N
         }
         e.preventDefault();
         const prefix = bulletMatch[1];
-        const insert = "\n" + prefix;
-        const newContent = content.slice(0, pos) + insert + content.slice(pos);
-        setContent(newContent);
-        debouncedSave(title, newContent);
-        setTimeout(() => el.setSelectionRange(pos + insert.length, pos + insert.length), 0);
-        return;
-      }
-
-      // Continue todo list
-      const todoMatch = currentLine.match(/^(\s*- \[ \] )(.*)/);
-      if (todoMatch) {
-        if (!todoMatch[2].trim()) {
-          e.preventDefault();
-          const newContent = content.slice(0, lineStart) + content.slice(pos);
-          setContent(newContent);
-          debouncedSave(title, newContent);
-          setTimeout(() => el.setSelectionRange(lineStart, lineStart), 0);
-          return;
-        }
-        e.preventDefault();
-        const prefix = todoMatch[1];
         const insert = "\n" + prefix;
         const newContent = content.slice(0, pos) + insert + content.slice(pos);
         setContent(newContent);
@@ -235,8 +267,42 @@ export default function NoteEditorModal({ note, onClose, onUpdate, onDelete }: N
     return () => clearTimeout(timer);
   }, [content, note.id, user]);
 
+  // Enable clicking checkboxes in preview to toggle checklist items
+  useEffect(() => {
+    if (!preview) return;
+    const container = previewRef.current;
+    if (!container) return;
+
+    const checkboxes = Array.from(
+      container.querySelectorAll<HTMLInputElement>("input.todo-checkbox[data-todo-index]")
+    );
+
+    const handleClick = (ev: Event) => {
+      const target = ev.currentTarget as HTMLInputElement;
+      const idxAttr = target.getAttribute("data-todo-index");
+      if (!idxAttr) return;
+      const idx = Number(idxAttr);
+      if (Number.isNaN(idx)) return;
+      ev.preventDefault();
+      toggleTodoAtIndex(idx);
+    };
+
+    checkboxes.forEach((cb) => cb.addEventListener("click", handleClick));
+
+    return () => {
+      checkboxes.forEach((cb) => cb.removeEventListener("click", handleClick));
+    };
+  }, [preview, content, toggleTodoAtIndex]);
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 backdrop-blur-sm animate-in fade-in duration-150">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 backdrop-blur-sm animate-in fade-in duration-150"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) {
+          onClose();
+        }
+      }}
+    >
       <div className="w-full max-w-4xl h-[85vh] rounded-xl border border-border bg-card shadow-2xl animate-in fade-in zoom-in-95 duration-200 flex flex-col overflow-hidden">
         {/* Header */}
         <div className="flex items-center gap-3 border-b border-border px-5 py-3">
@@ -290,6 +356,7 @@ export default function NoteEditorModal({ note, onClose, onUpdate, onDelete }: N
         {/* Content */}
         {preview ? (
           <div
+          ref={previewRef}
             className="flex-1 overflow-y-auto p-6 prose-sm text-foreground chat-scroll"
             dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }}
           />

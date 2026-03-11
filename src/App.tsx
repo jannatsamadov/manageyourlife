@@ -6,11 +6,11 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { AppProvider } from "@/context/AppContext";
 import AppLayout from "@/components/AppLayout";
-import DailyPlan from "@/pages/DailyPlan";
 import Strategy from "@/pages/Strategy";
 import SchedulePlanning from "@/pages/SchedulePlanning";
 import SettingsPage from "@/pages/Settings";
 import Notes from "@/pages/Notes";
+import Trash from "@/pages/Trash";
 import Auth from "@/pages/Auth";
 import NotFound from "./pages/NotFound";
 import { Loader2 } from "lucide-react";
@@ -39,10 +39,11 @@ const AppRoutes = () => (
             <AppProvider>
               <AppLayout>
                 <Routes>
-                  <Route path="/" element={<DailyPlan />} />
+                  <Route path="/" element={<SchedulePlanning />} />
                   <Route path="/strategy" element={<Strategy />} />
-                  <Route path="/schedule" element={<SchedulePlanning />} />
+                  <Route path="/schedule" element={<Navigate to="/" replace />} />
                   <Route path="/notes" element={<Notes />} />
+                  <Route path="/trash" element={<Trash />} />
                   <Route path="/settings" element={<SettingsPage />} />
                   <Route path="*" element={<NotFound />} />
                 </Routes>

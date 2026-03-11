@@ -28,6 +28,7 @@ export default function Notes() {
         .from("notes" as any)
         .select("*")
         .eq("user_id", user.id)
+        .is("deleted_at", null as any)
         .order("updated_at", { ascending: false }) as any);
       if (error) {
         toast({ title: "Failed to load notes", description: error.message, variant: "destructive" });
@@ -46,7 +47,7 @@ export default function Notes() {
 
   const createNote = async () => {
     if (!user) return;
-    const { data, error } = await (supabase.from("notes" as any).insert({ user_id: user.id, title: "Untitled", content: "" } as any).select().single() as any);
+    const { data, error } = await (supabase.from("notes" as any).insert({ user_id: user.id, title: "Untitled", content: "", deleted_at: null } as any).select().single() as any);
     if (error) {
       toast({ title: "Failed to create note", description: error.message, variant: "destructive" });
     } else if (data) {
@@ -57,7 +58,7 @@ export default function Notes() {
   };
 
   const deleteNote = async (id: string) => {
-    const { error } = await (supabase.from("notes" as any).delete().eq("id", id) as any);
+    const { error } = await (supabase.from("notes" as any).update({ deleted_at: new Date().toISOString() } as any).eq("id", id) as any);
     if (error) {
       toast({ title: "Failed to delete", description: error.message, variant: "destructive" });
     } else {
