@@ -21,7 +21,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-type View = "month" | "week";
+type View = "month" | "week" | "daily";
 
 function getDaysInMonth(year: number, month: number) {
   return new Date(year, month + 1, 0).getDate();
@@ -105,7 +105,7 @@ const today = new Date().toISOString().slice(0, 10);
 
 export default function SchedulePlanning() {
   const { tasks, updateTask, addTask, deleteTask, permanentDeleteTask, reorderTasks } = useAppState();
-  const [view, setView] = useState<View>("month");
+  const [view, setView] = useState<View>("daily");
   const [currentDate, setCurrentDate] = useState(new Date());
   const [showForm, setShowForm] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
@@ -240,6 +240,19 @@ export default function SchedulePlanning() {
     });
     return map;
   }, [scheduledTasks, visiblePreviousDates]);
+
+  const dailyAggregateDoneTotal = useMemo(() => {
+    let done = 0, total = 0;
+    visiblePreviousDates.forEach((dateStr) => {
+      const dayTasks = previousTasksByDate[dateStr] || [];
+      dayTasks.forEach((t) => { total++; if (t.status === "complete") done++; });
+    });
+    visibleScheduledDates.forEach((dateStr) => {
+      const dayTasks = scheduledTasksByDate[dateStr] || [];
+      dayTasks.forEach((t) => { total++; if (t.status === "complete") done++; });
+    });
+    return { done, total };
+  }, [visiblePreviousDates, visibleScheduledDates, previousTasksByDate, scheduledTasksByDate]);
 
   const handleDropOnUnscheduled = (e: React.DragEvent) => {
     e.preventDefault();
@@ -408,7 +421,7 @@ export default function SchedulePlanning() {
                 value={taskQuery}
                 onChange={(e) => setTaskQuery(e.target.value)}
                 placeholder="Search tasks…"
-                className="w-full sm:w-72 rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                className="w-full sm:w-56 rounded-lg border border-border bg-background px-3 py-2 text-sm"
               />
               {taskQuery.trim() && (
                 <button
@@ -425,13 +438,12 @@ export default function SchedulePlanning() {
                   <button
                     type="button"
                     className={cn(
-                      "inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground hover:text-foreground hover:border-primary/30 transition-colors",
+                      "inline-flex items-center justify-center rounded-lg border border-border px-2.5 py-2 text-sm text-muted-foreground hover:text-foreground hover:border-primary/30 transition-colors",
                       (priorityFilter !== "all" || deadlineFilter !== "any") && "text-foreground border-primary/30"
                     )}
                     title="Filters"
                   >
                     <Filter className="h-4 w-4" />
-                    Filter
                   </button>
                 </PopoverTrigger>
                 <PopoverContent align="end" className="w-80">
@@ -524,20 +536,14 @@ export default function SchedulePlanning() {
         <section>
           <div className="space-y-4">
             <div className="flex items-center justify-between flex-wrap gap-4">
-              <div className="flex items-center gap-2">
-                <h3 className="text-lg font-semibold text-foreground">
-                  {currentDate.toLocaleDateString("en-US", { month: "long", year: "numeric" })}
-                </h3>
-                <div className="flex gap-1">
-                  <button onClick={() => (view === "month" ? navigateMonth(-1) : navigateWeek(-1))} className="rounded p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground">
-                    <ChevronLeft className="h-4 w-4" />
-                  </button>
-                  <button onClick={() => setCurrentDate(new Date())} className="rounded px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground">Today</button>
-                  <button onClick={() => (view === "month" ? navigateMonth(1) : navigateWeek(1))} className="rounded p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground">
-                    <ChevronRight className="h-4 w-4" />
-                  </button>
-                </div>
-              </div>
+              <button
+                type="button"
+                onClick={() => setCurrentDate(new Date())}
+                className="text-left text-lg font-semibold text-foreground hover:text-muted-foreground transition-colors"
+                title="Go to today"
+              >
+                {currentDate.toLocaleDateString("en-US", { day: "numeric", month: "long", year: "numeric" })}
+              </button>
               <div className="flex items-center gap-2">
                 <button
                   onClick={syncToGCal}
@@ -549,19 +555,48 @@ export default function SchedulePlanning() {
                   Sync
                 </button>
                 <div className="flex rounded-lg border border-border overflow-hidden">
-                {(["month", "week"] as View[]).map((v) => (
-                  <button key={v} onClick={() => setView(v)} className={cn("px-3 py-1.5 text-xs font-medium capitalize", view === v ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground")}>
-                    {v}
-                  </button>
-                ))}
+                  {(["month", "week", "daily"] as View[]).map((v) => (
+                    <button
+                      key={v}
+                      onClick={() => setView(v)}
+                      className={cn(
+                        "px-3 py-1.5 text-xs font-medium capitalize",
+                        view === v ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+                      )}
+                    >
+                      {v}
+                    </button>
+                  ))}
                 </div>
               </div>
             </div>
 
             {view === "month" && (
               <div className="relative glass-card overflow-hidden">
-                <div className="absolute left-0 top-0 bottom-0 w-8 z-10" onDragOver={(e) => handleEdgeDragOver(e, -1)} onDragLeave={handleEdgeDragLeave} />
-                <div className="absolute right-0 top-0 bottom-0 w-8 z-10" onDragOver={(e) => handleEdgeDragOver(e, 1)} onDragLeave={handleEdgeDragLeave} />
+                <div
+                  role="button"
+                  tabIndex={0}
+                  className="absolute left-0 top-0 bottom-0 w-10 z-10 flex items-center justify-center opacity-0 hover:opacity-100 hover:bg-muted/40 transition-opacity cursor-pointer rounded-r"
+                  onClick={() => navigateMonth(-1)}
+                  onKeyDown={(e) => e.key === "Enter" && navigateMonth(-1)}
+                  onDragOver={(e) => handleEdgeDragOver(e, -1)}
+                  onDragLeave={handleEdgeDragLeave}
+                  title="Previous month"
+                >
+                  <ChevronLeft className="h-5 w-5 text-foreground" />
+                </div>
+                <div
+                  role="button"
+                  tabIndex={0}
+                  className="absolute right-0 top-0 bottom-0 w-10 z-10 flex items-center justify-center opacity-0 hover:opacity-100 hover:bg-muted/40 transition-opacity cursor-pointer rounded-l"
+                  onClick={() => navigateMonth(1)}
+                  onKeyDown={(e) => e.key === "Enter" && navigateMonth(1)}
+                  onDragOver={(e) => handleEdgeDragOver(e, 1)}
+                  onDragLeave={handleEdgeDragLeave}
+                  title="Next month"
+                >
+                  <ChevronRight className="h-5 w-5 text-foreground" />
+                </div>
                 <div className="grid grid-cols-7">
                   {dayNames.map((d) => (
                     <div key={d} className="border-b border-border px-2 py-1.5 text-center text-xs font-medium text-muted-foreground">{d}</div>
@@ -605,8 +640,30 @@ export default function SchedulePlanning() {
 
             {view === "week" && (
               <div className="relative glass-card overflow-hidden">
-                <div className="absolute left-0 top-0 bottom-0 w-8 z-10" onDragOver={(e) => handleEdgeDragOver(e, -1)} onDragLeave={handleEdgeDragLeave} />
-                <div className="absolute right-0 top-0 bottom-0 w-8 z-10" onDragOver={(e) => handleEdgeDragOver(e, 1)} onDragLeave={handleEdgeDragLeave} />
+                <div
+                  role="button"
+                  tabIndex={0}
+                  className="absolute left-0 top-0 bottom-0 w-10 z-10 flex items-center justify-center opacity-0 hover:opacity-100 hover:bg-muted/40 transition-opacity cursor-pointer rounded-r"
+                  onClick={() => navigateWeek(-1)}
+                  onKeyDown={(e) => e.key === "Enter" && navigateWeek(-1)}
+                  onDragOver={(e) => handleEdgeDragOver(e, -1)}
+                  onDragLeave={handleEdgeDragLeave}
+                  title="Previous week"
+                >
+                  <ChevronLeft className="h-5 w-5 text-foreground" />
+                </div>
+                <div
+                  role="button"
+                  tabIndex={0}
+                  className="absolute right-0 top-0 bottom-0 w-10 z-10 flex items-center justify-center opacity-0 hover:opacity-100 hover:bg-muted/40 transition-opacity cursor-pointer rounded-l"
+                  onClick={() => navigateWeek(1)}
+                  onKeyDown={(e) => e.key === "Enter" && navigateWeek(1)}
+                  onDragOver={(e) => handleEdgeDragOver(e, 1)}
+                  onDragLeave={handleEdgeDragLeave}
+                  title="Next week"
+                >
+                  <ChevronRight className="h-5 w-5 text-foreground" />
+                </div>
                 <div className="grid grid-cols-7">
                   {getWeekDates(currentDate).map((date) => {
                     const dateStr = date.toISOString().slice(0, 10);
@@ -647,18 +704,28 @@ export default function SchedulePlanning() {
         </section>
 
         {/* Upcoming + Previous tasks — Daily Plan style with Start/Done and time logging */}
-        <section className="glass-card px-4 pb-4 pt-2 -mt-2">
-          <div className="flex justify-center mt-1 -mb-5">
+        {view === "daily" && (
+        <section className="glass-card px-4 pb-1 pt-2 -mt-2">
+          <div className="flex items-center mt-1 -mb-5">
+            <div className="flex-1" />
             <button
               type="button"
               onClick={() => setPreviousDaysShown((n) => n + 3)}
-              className="flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+              className="flex items-center gap-0.5 text-xs font-medium text-muted-foreground opacity-0 hover:opacity-100 hover:text-foreground transition-opacity transition-colors shrink-0"
             >
               <ChevronUp className="h-3.5 w-3.5" />
               Previous tasks
             </button>
+            <div className="flex-1 flex justify-end items-center">
+              {dailyAggregateDoneTotal.total > 0 && (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground -mb-2.5 mr-2">
+                  <CheckCircle2 className="h-4 w-4 text-primary" />
+                  {dailyAggregateDoneTotal.done}/{dailyAggregateDoneTotal.total} done
+                </div>
+              )}
+            </div>
           </div>
-          <div className="space-y-6">
+          <div className="space-y-0">
             {previousDaysShown > 0 && visiblePreviousDates.map((dateStr) => {
               const dayTasks = previousTasksByDate[dateStr] || [];
               if (dayTasks.length === 0) return null;
@@ -669,12 +736,8 @@ export default function SchedulePlanning() {
                   onDrop={(e) => handleDropOnDay(e, dateStr)}
                   onDragOver={handleScheduledDragOver}
                 >
-                  <div className="mb-2 flex items-center justify-between border-b border-border pb-2 min-h-[24px]">
+                  <div className="mb-2 border-b border-border pb-2 min-h-[24px]">
                     <h4 className="text-sm font-semibold text-muted-foreground">{formatDayLabel(dateStr)}</h4>
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <CheckCircle2 className="h-4 w-4 text-primary" />
-                      {dayTasks.filter((t) => t.status === "complete").length}/{dayTasks.length} done
-                    </div>
                   </div>
                   {dayTasks.map((task) => {
                     const overdue = isTaskOverdue(task);
@@ -781,12 +844,8 @@ export default function SchedulePlanning() {
                   onDrop={(e) => handleDropOnDay(e, dateStr)}
                   onDragOver={handleScheduledDragOver}
                 >
-                  <div className="mb-2 flex items-center justify-between border-b border-border pb-2 min-h-[24px]">
+                  <div className="mb-2 border-b border-border pb-2 min-h-[24px]">
                     <h4 className="text-sm font-semibold text-muted-foreground">{formatDayLabel(dateStr)}</h4>
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <CheckCircle2 className="h-4 w-4 text-primary" />
-                      {dayTasks.filter((t) => t.status === "complete").length}/{dayTasks.length} done
-                    </div>
                   </div>
                   {dayTasks.map((task) => {
                     const overdue = isTaskOverdue(task);
@@ -893,13 +952,14 @@ export default function SchedulePlanning() {
             {scheduledDatesOrdered.length > scheduledDaysShown && (
               <button
                 onClick={() => setScheduledDaysShown((n) => n + 3)}
-                className="w-full rounded-lg border border-dashed border-border py-2 text-xs text-muted-foreground hover:text-foreground hover:border-primary/30 transition-colors"
+                className="w-full rounded-lg border border-dashed border-border py-1.5 text-xs text-muted-foreground opacity-0 hover:opacity-100 hover:text-foreground hover:border-primary/30 transition-opacity transition-colors"
               >
                 See more (+3 days)
               </button>
             )}
           </div>
         </section>
+        )}
 
         {/* Unscheduled Tasks — same card design; drop here to unschedule */}
         <section
