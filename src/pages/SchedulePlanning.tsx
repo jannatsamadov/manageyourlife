@@ -583,14 +583,6 @@ export default function SchedulePlanning() {
                   </button>
                 ))}
               </div>
-                        : "bg-primary/10 text-primary hover:bg-primary/20"
-                    )}
-                  >
-                    <Plus className="h-4 w-4" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent>Add Task</TooltipContent>
-              </Tooltip>
             </div>
           </div>
 
