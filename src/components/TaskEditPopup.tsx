@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from "react";
-import { X, Save, AlertTriangle, Trash2, Plus, CheckSquare } from "lucide-react";
+import { X, Save, AlertTriangle, Trash2, Plus, CheckSquare, FileText } from "lucide-react";
 import { Task, TaskPriority, useAppState } from "@/context/AppContext";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/context/AuthContext";
@@ -19,6 +19,8 @@ interface Subtask {
   title: string;
   completed: boolean;
   position: number;
+  note_id: string | null;
+  note_title?: string;
 }
 
 interface EditForm {
@@ -55,7 +57,7 @@ export default function TaskEditPopup({ task, onClose }: TaskEditPopupProps) {
     status: task.status,
   });
 
-  // Fetch subtasks
+  // Fetch subtasks with note titles
   useEffect(() => {
     const fetchSubtasks = async () => {
       const { data } = await (supabase
@@ -63,7 +65,30 @@ export default function TaskEditPopup({ task, onClose }: TaskEditPopupProps) {
         .select("*")
         .eq("parent_task_id", task.id)
         .order("position", { ascending: true }) as any);
-      if (data) setSubtasks(data.map((s: any) => ({ id: s.id, title: s.title, completed: s.completed, position: s.position })));
+      if (!data) return;
+
+      const items = data as any[];
+      // Get unique note IDs to fetch titles
+      const noteIds = [...new Set(items.filter(s => s.note_id).map(s => s.note_id))];
+      let noteTitles: Record<string, string> = {};
+      if (noteIds.length > 0) {
+        const { data: notes } = await (supabase
+          .from("notes" as any)
+          .select("id, title")
+          .in("id", noteIds) as any);
+        if (notes) {
+          (notes as any[]).forEach(n => { noteTitles[n.id] = n.title; });
+        }
+      }
+
+      setSubtasks(items.map((s: any) => ({
+        id: s.id,
+        title: s.title,
+        completed: s.completed,
+        position: s.position,
+        note_id: s.note_id || null,
+        note_title: s.note_id ? (noteTitles[s.note_id] || "Untitled Note") : undefined,
+      })));
     };
     fetchSubtasks();
   }, [task.id]);
@@ -91,15 +116,57 @@ export default function TaskEditPopup({ task, onClose }: TaskEditPopupProps) {
     return () => document.removeEventListener("mousedown", handler);
   }, [onClose]);
 
+  // Toggle subtask - two-way sync for note-sourced subtasks
   const toggleSubtask = useCallback(async (id: string, completed: boolean) => {
+    const subtask = subtasks.find(s => s.id === id);
+    if (!subtask) return;
+
+    // Update subtask in DB
     await (supabase.from("subtasks" as any).update({ completed } as any).eq("id", id) as any);
     setSubtasks((prev) => prev.map((s) => s.id === id ? { ...s, completed } : s));
-  }, []);
 
+    // Two-way sync: update note content if this subtask came from a note
+    if (subtask.note_id) {
+      const { data: noteData } = await (supabase
+        .from("notes" as any)
+        .select("content")
+        .eq("id", subtask.note_id)
+        .single() as any);
+
+      if (noteData) {
+        const noteContent = noteData.content as string;
+        const todoRegex = /^- \[( |x)\] (.+)$/gm;
+        let match: RegExpExecArray | null;
+        let newContent = noteContent;
+
+        while ((match = todoRegex.exec(noteContent)) !== null) {
+          if (match[2] === subtask.title) {
+            const lineStart = match.index;
+            const lineEnd = match.index + match[0].length;
+            const replacement = `- [${completed ? "x" : " "}] ${subtask.title}`;
+            newContent = newContent.slice(0, lineStart) + replacement + newContent.slice(lineEnd);
+            break;
+          }
+        }
+
+        if (newContent !== noteContent) {
+          await (supabase.from("notes" as any).update({ content: newContent, updated_at: new Date().toISOString() } as any).eq("id", subtask.note_id) as any);
+        }
+      }
+    }
+  }, [subtasks]);
+
+  // Delete subtask - only for non-note-sourced subtasks
   const deleteSubtask = useCallback(async (id: string) => {
+    const subtask = subtasks.find(s => s.id === id);
+    if (!subtask) return;
+
+    // Note-sourced subtasks can't be deleted from task view (one-way: note controls structure)
+    if (subtask.note_id) return;
+
     await (supabase.from("subtasks" as any).delete().eq("id", id) as any);
     setSubtasks((prev) => prev.filter((s) => s.id !== id));
-  }, []);
+  }, [subtasks]);
 
   const addSubtask = useCallback(async () => {
     if (!newSubtask.trim() || !user) return;
@@ -111,7 +178,7 @@ export default function TaskEditPopup({ task, onClose }: TaskEditPopupProps) {
       position: subtasks.length,
     } as any).select().single() as any);
     if (data) {
-      setSubtasks((prev) => [...prev, { id: data.id, title: data.title, completed: data.completed, position: data.position }]);
+      setSubtasks((prev) => [...prev, { id: data.id, title: data.title, completed: data.completed, position: data.position, note_id: null }]);
       setNewSubtask("");
     }
   }, [newSubtask, user, task.id, subtasks.length]);
@@ -136,6 +203,21 @@ export default function TaskEditPopup({ task, onClose }: TaskEditPopupProps) {
     }
     onClose();
   };
+
+  // Group subtasks: note-sourced vs manual
+  const noteSubtasks = subtasks.filter(s => s.note_id);
+  const manualSubtasks = subtasks.filter(s => !s.note_id);
+
+  // Group note subtasks by note
+  const noteGroups = useMemo(() => {
+    const groups: Record<string, { noteTitle: string; items: Subtask[] }> = {};
+    noteSubtasks.forEach(s => {
+      const nid = s.note_id!;
+      if (!groups[nid]) groups[nid] = { noteTitle: s.note_title || "Untitled Note", items: [] };
+      groups[nid].items.push(s);
+    });
+    return groups;
+  }, [noteSubtasks]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/60 backdrop-blur-sm animate-in fade-in duration-150">
@@ -244,7 +326,31 @@ export default function TaskEditPopup({ task, onClose }: TaskEditPopupProps) {
                 </span>
               )}
             </div>
-            {subtasks.map((st) => (
+
+            {/* Note-sourced subtasks grouped by note */}
+            {Object.entries(noteGroups).map(([noteId, group]) => (
+              <div key={noteId} className="mb-2">
+                <div className="flex items-center gap-1.5 mb-1">
+                  <FileText className="h-3 w-3 text-info" />
+                  <span className="text-[10px] font-medium text-info truncate">{group.noteTitle}</span>
+                </div>
+                {group.items.map((st) => (
+                  <div key={st.id} className="flex items-center gap-2 py-1 pl-4 group">
+                    <input
+                      type="checkbox"
+                      checked={st.completed}
+                      onChange={() => toggleSubtask(st.id, !st.completed)}
+                      className="accent-primary h-3.5 w-3.5 shrink-0"
+                    />
+                    <span className={cn("text-sm flex-1", st.completed && "line-through text-muted-foreground")}>{st.title}</span>
+                    <span className="text-[9px] text-muted-foreground/50 italic shrink-0">synced</span>
+                  </div>
+                ))}
+              </div>
+            ))}
+
+            {/* Manual subtasks */}
+            {manualSubtasks.map((st) => (
               <div key={st.id} className="flex items-center gap-2 py-1 group">
                 <input
                   type="checkbox"
@@ -261,6 +367,7 @@ export default function TaskEditPopup({ task, onClose }: TaskEditPopupProps) {
                 </button>
               </div>
             ))}
+
             <div className="flex items-center gap-2 mt-1">
               <input
                 value={newSubtask}
