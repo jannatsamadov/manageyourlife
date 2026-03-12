@@ -481,7 +481,7 @@ export default function NoteEditorModal({ note, onClose, onUpdate, onDelete }: N
           </div>
           <button
             onClick={() => {onDelete(note.id);onClose();}}
-            className="rounded p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+            className="rounded p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 px-0 py-0"
             title="Delete note">
             
             <Trash2 className="h-4 w-4 mx-[10px]" />
