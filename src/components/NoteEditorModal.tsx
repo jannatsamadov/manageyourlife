@@ -486,9 +486,9 @@ export default function NoteEditorModal({ note, onClose, onUpdate, onDelete }: N
             
             <Trash2 className="h-4 w-4 mx-[10px]" />
           </button>
-          <button onClick={onClose} className="rounded p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted">
-            
-          </button>
+          
+
+          
         </div>
 
         {/* Toolbar */}
