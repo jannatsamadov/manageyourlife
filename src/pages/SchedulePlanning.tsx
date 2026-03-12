@@ -466,9 +466,9 @@ export default function SchedulePlanning() {
 
               {/* Filter */}
               <Popover>
-                <PopoverTrigger asChild>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <PopoverTrigger asChild>
                       <button
                         type="button"
                         className={cn(
@@ -478,10 +478,10 @@ export default function SchedulePlanning() {
                       >
                         <Filter className="h-4 w-4" />
                       </button>
-                    </TooltipTrigger>
-                    <TooltipContent>Filters</TooltipContent>
-                  </Tooltip>
-                </PopoverTrigger>
+                    </PopoverTrigger>
+                  </TooltipTrigger>
+                  <TooltipContent>Filters</TooltipContent>
+                </Tooltip>
                 <PopoverContent align="end" className="w-80">
                   <div className="space-y-4">
                     <div className="space-y-1.5">
