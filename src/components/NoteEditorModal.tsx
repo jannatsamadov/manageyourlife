@@ -25,10 +25,10 @@ interface NoteEditorModalProps {
 }
 
 function renderMarkdown(text: string): string {
-  let html = text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+  let html = text.
+  replace(/&/g, "&amp;").
+  replace(/</g, "&lt;").
+  replace(/>/g, "&gt;");
 
   html = html.replace(/^### (.+)$/gm, '<h3 class="text-lg font-bold mt-4 mb-1">$1</h3>');
   html = html.replace(/^## (.+)$/gm, '<h2 class="text-xl font-bold mt-4 mb-1">$1</h2>');
@@ -74,17 +74,17 @@ export default function NoteEditorModal({ note, onClose, onUpdate, onDelete }: N
   useEffect(() => {
     if (!user) return;
     const fetchLinks = async () => {
-      const { data: links } = await (supabase
-        .from("note_task_links" as any)
-        .select("task_id")
-        .eq("note_id", note.id) as any);
+      const { data: links } = await (supabase.
+      from("note_task_links" as any).
+      select("task_id").
+      eq("note_id", note.id) as any);
       if (links && links.length > 0) {
         const taskIds = links.map((l: any) => l.task_id);
-        const { data: tasks } = await supabase
-          .from("tasks")
-          .select("id, title")
-          .in("id", taskIds)
-          .is("deleted_at", null);
+        const { data: tasks } = await supabase.
+        from("tasks").
+        select("id, title").
+        in("id", taskIds).
+        is("deleted_at", null);
         setLinkedTasks((tasks || []).map((t: any) => ({ id: t.id, title: t.title })));
       } else {
         setLinkedTasks([]);
@@ -96,13 +96,13 @@ export default function NoteEditorModal({ note, onClose, onUpdate, onDelete }: N
   useEffect(() => {
     if (!user || !showLinkPanel) return;
     const fetchAll = async () => {
-      const { data } = await supabase
-        .from("tasks")
-        .select("id, title")
-        .eq("user_id", user.id)
-        .is("deleted_at", null)
-        .order("created_at", { ascending: false })
-        .limit(100);
+      const { data } = await supabase.
+      from("tasks").
+      select("id, title").
+      eq("user_id", user.id).
+      is("deleted_at", null).
+      order("created_at", { ascending: false }).
+      limit(100);
       setAllTasks((data || []).map((t: any) => ({ id: t.id, title: t.title })));
     };
     fetchAll();
@@ -122,11 +122,11 @@ export default function NoteEditorModal({ note, onClose, onUpdate, onDelete }: N
 
   const linkTask = useCallback(async (taskId: string) => {
     if (!user) return;
-    const already = linkedTasks.find(t => t.id === taskId);
+    const already = linkedTasks.find((t) => t.id === taskId);
     if (already) return;
     await (supabase.from("note_task_links" as any).insert({ note_id: note.id, task_id: taskId, user_id: user.id } as any) as any);
-    const task = allTasks.find(t => t.id === taskId);
-    if (task) setLinkedTasks(prev => [...prev, task]);
+    const task = allTasks.find((t) => t.id === taskId);
+    if (task) setLinkedTasks((prev) => [...prev, task]);
 
     // Sync existing todos to the newly linked task
     syncTodosToTask(taskId);
@@ -136,24 +136,24 @@ export default function NoteEditorModal({ note, onClose, onUpdate, onDelete }: N
     await (supabase.from("note_task_links" as any).delete().eq("note_id", note.id).eq("task_id", taskId) as any);
     // Remove subtasks for this note+task combo
     await (supabase.from("subtasks" as any).delete().eq("note_id", note.id).eq("parent_task_id", taskId) as any);
-    setLinkedTasks(prev => prev.filter(t => t.id !== taskId));
+    setLinkedTasks((prev) => prev.filter((t) => t.id !== taskId));
   }, [note.id]);
 
   const syncTodosToTask = useCallback(async (taskId: string) => {
     if (!user) return;
     const todoRegex = /^- \[( |x)\] (.+)$/gm;
-    const todos: { title: string; completed: boolean }[] = [];
+    const todos: {title: string;completed: boolean;}[] = [];
     let match;
     while ((match = todoRegex.exec(content)) !== null) {
       todos.push({ title: match[2], completed: match[1] === "x" });
     }
 
-    const { data: existing } = await (supabase
-      .from("subtasks" as any)
-      .select("*")
-      .eq("note_id", note.id)
-      .eq("parent_task_id", taskId)
-      .order("position", { ascending: true }) as any);
+    const { data: existing } = await (supabase.
+    from("subtasks" as any).
+    select("*").
+    eq("note_id", note.id).
+    eq("parent_task_id", taskId).
+    order("position", { ascending: true }) as any);
     const existingList = (existing || []) as any[];
 
     for (let i = 0; i < todos.length; i++) {
@@ -172,9 +172,9 @@ export default function NoteEditorModal({ note, onClose, onUpdate, onDelete }: N
     }
   }, [user, content, note.id]);
 
-  const filteredTasks = taskSearch
-    ? allTasks.filter(t => t.title.toLowerCase().includes(taskSearch.toLowerCase()) && !linkedTasks.find(l => l.id === t.id))
-    : allTasks.filter(t => !linkedTasks.find(l => l.id === t.id));
+  const filteredTasks = taskSearch ?
+  allTasks.filter((t) => t.title.toLowerCase().includes(taskSearch.toLowerCase()) && !linkedTasks.find((l) => l.id === t.id)) :
+  allTasks.filter((t) => !linkedTasks.find((l) => l.id === t.id));
 
   const saveNote = useCallback(async (t: string, c: string) => {
     setSaving(true);
@@ -342,7 +342,7 @@ export default function NoteEditorModal({ note, onClose, onUpdate, onDelete }: N
   useEffect(() => {
     if (!user || linkedTasks.length === 0) return;
     const timer = setTimeout(() => {
-      linkedTasks.forEach(lt => syncTodosToTask(lt.id));
+      linkedTasks.forEach((lt) => syncTodosToTask(lt.id));
     }, 1500);
     return () => clearTimeout(timer);
   }, [content, linkedTasks, user, syncTodosToTask]);
@@ -378,8 +378,8 @@ export default function NoteEditorModal({ note, onClose, onUpdate, onDelete }: N
       className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 backdrop-blur-sm animate-in fade-in duration-150"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
-      }}
-    >
+      }}>
+      
       <div className="w-full max-w-4xl h-[85vh] rounded-xl border border-border bg-card shadow-2xl animate-in fade-in zoom-in-95 duration-200 flex flex-col overflow-hidden">
         {/* Header */}
         <div className="flex items-center gap-3 border-b border-border px-5 py-3">
@@ -387,8 +387,8 @@ export default function NoteEditorModal({ note, onClose, onUpdate, onDelete }: N
             value={title}
             onChange={(e) => handleTitleChange(e.target.value)}
             placeholder="Note title"
-            className="flex-1 bg-transparent text-lg font-semibold outline-none placeholder:text-muted-foreground"
-          />
+            className="flex-1 bg-transparent text-lg font-semibold outline-none placeholder:text-muted-foreground" />
+          
           <div className="flex items-center gap-1.5">
             {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" /> : <Save className="h-3.5 w-3.5 text-primary" />}
             <span className="text-[10px] text-muted-foreground">{saving ? "Saving..." : "Saved"}</span>
@@ -400,75 +400,75 @@ export default function NoteEditorModal({ note, onClose, onUpdate, onDelete }: N
               onClick={() => setShowLinkPanel(!showLinkPanel)}
               className={cn(
                 "rounded p-1.5 transition-colors",
-                linkedTasks.length > 0
-                  ? "text-primary bg-primary/10 hover:bg-primary/20"
-                  : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                linkedTasks.length > 0 ?
+                "text-primary bg-primary/10 hover:bg-primary/20" :
+                "text-muted-foreground hover:text-foreground hover:bg-muted"
               )}
-              title={`Linked tasks (${linkedTasks.length})`}
-            >
+              title={`Linked tasks (${linkedTasks.length})`}>
+              
               <Link className="h-4 w-4" />
             </button>
-            {linkedTasks.length > 0 && (
-              <span className="absolute -top-1 -right-1 h-3.5 w-3.5 rounded-full bg-primary text-[9px] font-bold text-primary-foreground flex items-center justify-center">
+            {linkedTasks.length > 0 &&
+            <span className="absolute -top-1 -right-1 h-3.5 w-3.5 rounded-full bg-primary text-[9px] font-bold text-primary-foreground flex items-center justify-center">
                 {linkedTasks.length}
               </span>
-            )}
+            }
 
             {/* Link Panel Dropdown */}
-            {showLinkPanel && (
-              <div
-                ref={linkPanelRef}
-                className="absolute right-0 top-full mt-2 w-72 rounded-lg border border-border bg-card shadow-xl z-50 overflow-hidden"
-              >
+            {showLinkPanel &&
+            <div
+              ref={linkPanelRef}
+              className="absolute right-0 top-full mt-2 w-72 rounded-lg border border-border bg-card shadow-xl z-50 overflow-hidden">
+              
                 <div className="px-3 py-2 border-b border-border">
                   <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Link to Tasks</span>
                 </div>
 
                 {/* Linked tasks */}
-                {linkedTasks.length > 0 && (
-                  <div className="px-3 py-2 border-b border-border space-y-1">
+                {linkedTasks.length > 0 &&
+              <div className="px-3 py-2 border-b border-border space-y-1">
                     <span className="text-[10px] text-muted-foreground">Linked</span>
-                    {linkedTasks.map(t => (
-                      <div key={t.id} className="flex items-center gap-2 py-1 group">
+                    {linkedTasks.map((t) =>
+                <div key={t.id} className="flex items-center gap-2 py-1 group">
                         <Link className="h-3 w-3 text-primary shrink-0" />
                         <span className="text-xs text-foreground flex-1 truncate">{t.title}</span>
                         <button
-                          onClick={() => unlinkTask(t.id)}
-                          className="text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-destructive"
-                        >
+                    onClick={() => unlinkTask(t.id)}
+                    className="text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-destructive">
+                    
                           <X className="h-3 w-3" />
                         </button>
                       </div>
-                    ))}
-                  </div>
                 )}
+                  </div>
+              }
 
                 {/* Search and add */}
                 <div className="p-2">
                   <input
-                    value={taskSearch}
-                    onChange={(e) => setTaskSearch(e.target.value)}
-                    placeholder="Search tasks..."
-                    className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary mb-1"
-                    autoFocus
-                  />
+                  value={taskSearch}
+                  onChange={(e) => setTaskSearch(e.target.value)}
+                  placeholder="Search tasks..."
+                  className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary mb-1"
+                  autoFocus />
+                
                   <div className="max-h-40 overflow-y-auto space-y-0.5">
-                    {filteredTasks.slice(0, 20).map(t => (
-                      <button
-                        key={t.id}
-                        onClick={() => linkTask(t.id)}
-                        className="w-full text-left px-2 py-1.5 rounded text-xs text-foreground hover:bg-muted truncate"
-                      >
+                    {filteredTasks.slice(0, 20).map((t) =>
+                  <button
+                    key={t.id}
+                    onClick={() => linkTask(t.id)}
+                    className="w-full text-left px-2 py-1.5 rounded text-xs text-foreground hover:bg-muted truncate">
+                    
                         {t.title}
                       </button>
-                    ))}
-                    {filteredTasks.length === 0 && (
-                      <p className="text-[10px] text-muted-foreground text-center py-2">No tasks found</p>
-                    )}
+                  )}
+                    {filteredTasks.length === 0 &&
+                  <p className="text-[10px] text-muted-foreground text-center py-2">No tasks found</p>
+                  }
                   </div>
                 </div>
               </div>
-            )}
+            }
           </div>
 
           <div className="flex rounded-md border border-border overflow-hidden ml-1">
@@ -480,20 +480,20 @@ export default function NoteEditorModal({ note, onClose, onUpdate, onDelete }: N
             </button>
           </div>
           <button
-            onClick={() => { onDelete(note.id); onClose(); }}
+            onClick={() => {onDelete(note.id);onClose();}}
             className="rounded p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-            title="Delete note"
-          >
+            title="Delete note">
+            
             <Trash2 className="h-4 w-4" />
           </button>
           <button onClick={onClose} className="rounded p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted">
-            <X className="h-4 w-4" />
+            
           </button>
         </div>
 
         {/* Toolbar */}
-        {!preview && (
-          <div className="flex items-center gap-0.5 border-b border-border px-5 py-1.5 flex-wrap">
+        {!preview &&
+        <div className="flex items-center gap-0.5 border-b border-border px-5 py-1.5 flex-wrap">
             <button onClick={() => insertMarkdown("**", "**")} className="rounded p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted" title="Bold"><Bold className="h-3.5 w-3.5" /></button>
             <button onClick={() => insertMarkdown("*", "*")} className="rounded p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted" title="Italic"><Italic className="h-3.5 w-3.5" /></button>
             <button onClick={() => insertMarkdown("`", "`")} className="rounded p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted" title="Code"><Code className="h-3.5 w-3.5" /></button>
@@ -506,26 +506,26 @@ export default function NoteEditorModal({ note, onClose, onUpdate, onDelete }: N
             <button onClick={() => insertMarkdown("[", "](url)")} className="rounded p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted" title="Link"><Link2 className="h-3.5 w-3.5" /></button>
             <button onClick={() => insertMarkdown("---\n")} className="rounded p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted" title="Divider"><Minus className="h-3.5 w-3.5" /></button>
           </div>
-        )}
+        }
 
         {/* Content */}
-        {preview ? (
-          <div
-            ref={previewRef}
-            className="flex-1 overflow-y-auto p-6 prose-sm text-foreground chat-scroll"
-            dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }}
-          />
-        ) : (
-          <textarea
-            ref={editorRef}
-            value={content}
-            onChange={(e) => handleContentChange(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Start writing... Use markdown syntax"
-            className="flex-1 resize-none bg-transparent p-6 text-sm leading-relaxed outline-none placeholder:text-muted-foreground font-mono"
-          />
-        )}
+        {preview ?
+        <div
+          ref={previewRef}
+          className="flex-1 overflow-y-auto p-6 prose-sm text-foreground chat-scroll"
+          dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }} /> :
+
+
+        <textarea
+          ref={editorRef}
+          value={content}
+          onChange={(e) => handleContentChange(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder="Start writing... Use markdown syntax"
+          className="flex-1 resize-none bg-transparent p-6 text-sm leading-relaxed outline-none placeholder:text-muted-foreground font-mono" />
+
+        }
       </div>
-    </div>
-  );
+    </div>);
+
 }
