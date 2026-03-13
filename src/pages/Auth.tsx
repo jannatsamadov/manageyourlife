@@ -27,6 +27,10 @@ export default function Auth() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSignUp && password !== confirmPassword) {
+      toast({ title: "Xəta", description: "Şifrələr uyğun gəlmir.", variant: "destructive" });
+      return;
+    }
     setSubmitting(true);
     const { error } = isSignUp ? await signUp(email, password) : await signIn(email, password);
     setSubmitting(false);
