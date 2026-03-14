@@ -85,6 +85,23 @@ export default function SettingsPage() {
         <Separator />
 
         <div className="space-y-4">
+          <h3 className="text-base font-medium text-foreground">Chronos Timer</h3>
+          <div className="space-y-2">
+            <Label htmlFor="birthdate">Doğum tarixi</Label>
+            <input
+              id="birthdate"
+              type="date"
+              value={settings.birthdate}
+              onChange={(e) => update({ birthdate: e.target.value })}
+              className="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary w-full max-w-xs"
+            />
+            <p className="text-xs text-muted-foreground">120 illik ömür countdown hesablanması üçün istifadə olunur</p>
+          </div>
+        </div>
+
+        <Separator />
+
+        <div className="space-y-4">
           <h3 className="text-base font-medium text-foreground">Display</h3>
           <div className="flex items-center justify-between">
             <Label htmlFor="compact">Compact view</Label>
