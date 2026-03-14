@@ -14,6 +14,7 @@ export interface Settings {
   compactView: boolean;
   showProgressBars: boolean;
   blinkEffect: boolean;
+  birthdate: string;
 }
 
 const defaults: Settings = {
