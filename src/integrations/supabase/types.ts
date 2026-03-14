@@ -174,6 +174,7 @@ export type Database = {
         Row: {
           actual_end: string | null
           actual_start: string | null
+          attribute_tag: string
           category: string
           created_at: string
           date: string | null
@@ -190,10 +191,12 @@ export type Database = {
           status: string
           title: string
           user_id: string
+          weight: number
         }
         Insert: {
           actual_end?: string | null
           actual_start?: string | null
+          attribute_tag?: string
           category?: string
           created_at?: string
           date?: string | null
@@ -210,10 +213,12 @@ export type Database = {
           status?: string
           title: string
           user_id: string
+          weight?: number
         }
         Update: {
           actual_end?: string | null
           actual_start?: string | null
+          attribute_tag?: string
           category?: string
           created_at?: string
           date?: string | null
@@ -230,6 +235,7 @@ export type Database = {
           status?: string
           title?: string
           user_id?: string
+          weight?: number
         }
         Relationships: [
           {
@@ -240,6 +246,33 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      user_attributes: {
+        Row: {
+          attribute: string
+          id: string
+          max_value: number
+          updated_at: string
+          user_id: string
+          value: number
+        }
+        Insert: {
+          attribute: string
+          id?: string
+          max_value?: number
+          updated_at?: string
+          user_id: string
+          value?: number
+        }
+        Update: {
+          attribute?: string
+          id?: string
+          max_value?: number
+          updated_at?: string
+          user_id?: string
+          value?: number
+        }
+        Relationships: []
       }
     }
     Views: {
