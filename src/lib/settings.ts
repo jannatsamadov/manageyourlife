@@ -22,6 +22,7 @@ const defaults: Settings = {
   compactView: false,
   showProgressBars: true,
   blinkEffect: true,
+  birthdate: "",
 };
 
 export function getSettings(): Settings {
