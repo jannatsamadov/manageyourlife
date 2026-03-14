@@ -35,6 +35,7 @@ export function getSettings(): Settings {
       compactView: parsed.compactView ?? defaults.compactView,
       showProgressBars: parsed.showProgressBars ?? defaults.showProgressBars,
       blinkEffect: parsed.blinkEffect ?? defaults.blinkEffect,
+      birthdate: parsed.birthdate ?? defaults.birthdate,
     };
   } catch {
     return { ...defaults };
