@@ -14,6 +14,7 @@ export interface Settings {
   compactView: boolean;
   showProgressBars: boolean;
   blinkEffect: boolean;
+  birthdate: string;
 }
 
 const defaults: Settings = {
@@ -21,6 +22,7 @@ const defaults: Settings = {
   compactView: false,
   showProgressBars: true,
   blinkEffect: true,
+  birthdate: "",
 };
 
 export function getSettings(): Settings {
@@ -33,6 +35,7 @@ export function getSettings(): Settings {
       compactView: parsed.compactView ?? defaults.compactView,
       showProgressBars: parsed.showProgressBars ?? defaults.showProgressBars,
       blinkEffect: parsed.blinkEffect ?? defaults.blinkEffect,
+      birthdate: parsed.birthdate ?? defaults.birthdate,
     };
   } catch {
     return { ...defaults };
