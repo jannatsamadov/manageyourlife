@@ -12,7 +12,7 @@ import {
 
 const navItems = [
   { title: "Schedule", path: "/", icon: Calendar },
-  { title: "Strategy", path: "/strategy", icon: Target },
+  
   { title: "Notes", path: "/notes", icon: StickyNote },
   { title: "Trash", path: "/trash", icon: Trash2 },
   { title: "Settings", path: "/settings", icon: Settings },

@@ -6,7 +6,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { AppProvider } from "@/context/AppContext";
 import AppLayout from "@/components/AppLayout";
-import Strategy from "@/pages/Strategy";
+
 import SchedulePlanning from "@/pages/SchedulePlanning";
 import SettingsPage from "@/pages/Settings";
 import Notes from "@/pages/Notes";
@@ -40,7 +40,7 @@ const AppRoutes = () => (
               <AppLayout>
                 <Routes>
                   <Route path="/" element={<SchedulePlanning />} />
-                  <Route path="/strategy" element={<Strategy />} />
+                  
                   <Route path="/schedule" element={<Navigate to="/" replace />} />
                   <Route path="/notes" element={<Notes />} />
                   <Route path="/trash" element={<Trash />} />
