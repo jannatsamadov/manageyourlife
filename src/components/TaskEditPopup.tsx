@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from "react";
-import { X, Save, AlertTriangle, Trash2, Plus, CheckSquare, FileText } from "lucide-react";
+import { X, Save, AlertTriangle, Trash2, Plus, CheckSquare, FileText, Send } from "lucide-react";
 import { Task, TaskPriority, useAppState } from "@/context/AppContext";
+import ShareTaskDialog from "@/components/ShareTaskDialog";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/context/AuthContext";
 import { cn } from "@/lib/utils";
@@ -45,6 +46,7 @@ export default function TaskEditPopup({ task, onClose }: TaskEditPopupProps) {
   const popupRef = useRef<HTMLDivElement>(null);
   const [subtasks, setSubtasks] = useState<Subtask[]>([]);
   const [newSubtask, setNewSubtask] = useState("");
+  const [shareOpen, setShareOpen] = useState(false);
 
   const [editForm, setEditForm] = useState<EditForm>({
     title: task.title,
@@ -227,9 +229,14 @@ export default function TaskEditPopup({ task, onClose }: TaskEditPopupProps) {
       >
         <div className="flex items-center justify-between border-b border-border px-5 py-3">
           <h3 className="text-base font-semibold text-foreground">Edit Task</h3>
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground shrink-0">
-            <X className="h-4 w-4" />
-          </button>
+          <div className="flex items-center gap-1.5">
+            <button onClick={() => setShareOpen(true)} className="text-muted-foreground hover:text-primary shrink-0" title="Göndər">
+              <Send className="h-4 w-4" />
+            </button>
+            <button onClick={onClose} className="text-muted-foreground hover:text-foreground shrink-0">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         </div>
         <div className="px-5 py-4 space-y-3 max-h-[75vh] overflow-y-auto chat-scroll">
           <input
@@ -410,6 +417,7 @@ export default function TaskEditPopup({ task, onClose }: TaskEditPopupProps) {
           </div>
         </div>
       </div>
+      <ShareTaskDialog task={task} open={shareOpen} onOpenChange={setShareOpen} />
     </div>
   );
 }

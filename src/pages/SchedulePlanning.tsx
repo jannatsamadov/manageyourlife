@@ -12,6 +12,7 @@ import {
   TooltipTrigger } from
 "@/components/ui/tooltip";
 import TaskEditPopup from "@/components/TaskEditPopup";
+import IncomingShares from "@/components/IncomingShares";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Select,
@@ -425,6 +426,8 @@ export default function SchedulePlanning() {
 
             {/* Right: All action buttons */}
             <div className="flex items-center gap-1.5">
+              {/* Incoming shares */}
+              <IncomingShares />
               {/* Search toggle */}
               {searchOpen ? (
                 <div className="flex items-center gap-1 animate-in slide-in-from-right-2 duration-200">

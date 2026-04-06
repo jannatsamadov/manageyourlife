@@ -170,6 +170,36 @@ export type Database = {
           },
         ]
       }
+      task_shares: {
+        Row: {
+          created_at: string
+          id: string
+          recipient_email: string
+          recipient_id: string | null
+          sender_id: string
+          status: string
+          task_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          recipient_email: string
+          recipient_id?: string | null
+          sender_id: string
+          status?: string
+          task_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          recipient_email?: string
+          recipient_id?: string | null
+          sender_id?: string
+          status?: string
+          task_id?: string
+        }
+        Relationships: []
+      }
       tasks: {
         Row: {
           actual_end: string | null
