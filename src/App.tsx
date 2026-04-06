@@ -6,7 +6,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { AppProvider } from "@/context/AppContext";
 import AppLayout from "@/components/AppLayout";
-import Strategy from "@/pages/Strategy";
+
 import SchedulePlanning from "@/pages/SchedulePlanning";
 import SettingsPage from "@/pages/Settings";
 import Notes from "@/pages/Notes";
