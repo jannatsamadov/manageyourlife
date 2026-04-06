@@ -12,6 +12,7 @@ import {
   TooltipTrigger } from
 "@/components/ui/tooltip";
 import TaskEditPopup from "@/components/TaskEditPopup";
+import IncomingShares from "@/components/IncomingShares";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Select,
