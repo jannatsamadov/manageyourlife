@@ -33,6 +33,7 @@ const AppRoutes = () => (
   <BrowserRouter>
     <Routes>
       <Route path="/auth" element={<Auth />} />
+      <Route path="/reset-password" element={<ResetPassword />} />
       <Route
         path="/*"
         element={
