@@ -46,6 +46,7 @@ export default function TaskEditPopup({ task, onClose }: TaskEditPopupProps) {
   const popupRef = useRef<HTMLDivElement>(null);
   const [subtasks, setSubtasks] = useState<Subtask[]>([]);
   const [newSubtask, setNewSubtask] = useState("");
+  const [shareOpen, setShareOpen] = useState(false);
 
   const [editForm, setEditForm] = useState<EditForm>({
     title: task.title,
