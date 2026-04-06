@@ -417,6 +417,7 @@ export default function TaskEditPopup({ task, onClose }: TaskEditPopupProps) {
           </div>
         </div>
       </div>
+      <ShareTaskDialog task={task} open={shareOpen} onOpenChange={setShareOpen} />
     </div>
   );
 }
