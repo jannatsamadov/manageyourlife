@@ -426,6 +426,8 @@ export default function SchedulePlanning() {
 
             {/* Right: All action buttons */}
             <div className="flex items-center gap-1.5">
+              {/* Incoming shares */}
+              <IncomingShares />
               {/* Search toggle */}
               {searchOpen ? (
                 <div className="flex items-center gap-1 animate-in slide-in-from-right-2 duration-200">
