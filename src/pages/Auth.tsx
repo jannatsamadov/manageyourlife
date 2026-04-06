@@ -31,7 +31,7 @@ export default function Auth() {
 
     if (forgotMode) {
       setSubmitting(true);
-      const { error } = await lovable.auth.resetPasswordForEmail(email, {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
         redirectTo: `${window.location.origin}/reset-password`,
       });
       setSubmitting(false);
