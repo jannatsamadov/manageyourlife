@@ -28,6 +28,22 @@ export default function Auth() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (forgotMode) {
+      setSubmitting(true);
+      const { error } = await lovable.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/reset-password`,
+      });
+      setSubmitting(false);
+      if (error) {
+        toast({ title: "Xəta", description: error.message, variant: "destructive" });
+      } else {
+        toast({ title: "Email göndərildi", description: "Şifrə yeniləmə linki emailinizə göndərildi." });
+        setForgotMode(false);
+      }
+      return;
+    }
+
     if (isSignUp && password !== confirmPassword) {
       toast({ title: "Xəta", description: "Şifrələr uyğun gəlmir.", variant: "destructive" });
       return;
