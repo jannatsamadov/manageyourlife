@@ -40,7 +40,7 @@ const AppRoutes = () => (
               <AppLayout>
                 <Routes>
                   <Route path="/" element={<SchedulePlanning />} />
-                  <Route path="/strategy" element={<Strategy />} />
+                  
                   <Route path="/schedule" element={<Navigate to="/" replace />} />
                   <Route path="/notes" element={<Notes />} />
                   <Route path="/trash" element={<Trash />} />
