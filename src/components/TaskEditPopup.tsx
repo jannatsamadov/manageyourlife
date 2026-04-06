@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from "react";
-import { X, Save, AlertTriangle, Trash2, Plus, CheckSquare, FileText } from "lucide-react";
+import { X, Save, AlertTriangle, Trash2, Plus, CheckSquare, FileText, Send } from "lucide-react";
 import { Task, TaskPriority, useAppState } from "@/context/AppContext";
+import ShareTaskDialog from "@/components/ShareTaskDialog";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/context/AuthContext";
 import { cn } from "@/lib/utils";
