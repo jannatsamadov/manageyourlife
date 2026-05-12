@@ -552,7 +552,13 @@ export default function NoteEditorModal({ note, onClose, onUpdate, onDelete }: N
               const start = m.index;
               const end = start + m[0].length;
               if (pos >= start && pos <= end) {
-                const url = m[2] || m[1];
+                let url = m[1] || m[2];
+                if (url && m[2]) {
+                  url = url.replace(/[.,;:!?'"]+$/, "");
+                  const opens = (url.match(/\(/g) || []).length;
+                  const closes = (url.match(/\)/g) || []).length;
+                  if (closes > opens) url = url.replace(/\)+$/, (s) => s.slice(0, opens - closes));
+                }
                 if (url) window.open(url, "_blank", "noopener");
                 break;
               }
