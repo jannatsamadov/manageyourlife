@@ -38,8 +38,27 @@ function renderMarkdown(text: string): string {
   html = html.replace(/~~(.+?)~~/g, "<del>$1</del>");
   html = html.replace(/`([^`]+)`/g, '<code class="rounded bg-muted px-1.5 py-0.5 text-xs font-mono">$1</code>');
   html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener" class="text-primary underline">$1</a>');
-  // Auto-link bare URLs (not already inside an href)
-  html = html.replace(/(^|[^"=>\]])(https?:\/\/[^\s<]+)/g, '$1<a href="$2" target="_blank" rel="noopener" class="text-primary underline break-all">$2</a>');
+  // Auto-link bare URLs (not already inside an href). Trim trailing punctuation.
+  html = html.replace(/(^|[^"=>\]])(https?:\/\/[^\s<]+)/g, (_m, pre, url) => {
+    let trail = "";
+    while (url.length > 0 && /[.,;:!?'"]/.test(url[url.length - 1])) {
+      trail = url[url.length - 1] + trail;
+      url = url.slice(0, -1);
+    }
+    // Balance trailing ) ] }
+    const pairs: Record<string, string> = { ")": "(", "]": "[", "}": "{" };
+    while (url.length > 0 && pairs[url[url.length - 1]]) {
+      const close = url[url.length - 1];
+      const open = pairs[close];
+      const opens = (url.match(new RegExp("\\" + open, "g")) || []).length;
+      const closes = (url.match(new RegExp("\\" + close, "g")) || []).length;
+      if (closes > opens) {
+        trail = close + trail;
+        url = url.slice(0, -1);
+      } else break;
+    }
+    return `${pre}<a href="${url}" target="_blank" rel="noopener" class="text-primary underline break-all">${url}</a>${trail}`;
+  });
   let todoIndex = 0;
   html = html.replace(/^- \[(x| )\] (.+)$/gm, (_match, state, label) => {
     const checked = state === "x";
