@@ -523,7 +523,23 @@ export default function NoteEditorModal({ note, onClose, onUpdate, onDelete }: N
           value={content}
           onChange={(e) => handleContentChange(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Start writing... Use markdown syntax"
+          onClick={(e) => {
+            if (!(e.ctrlKey || e.metaKey)) return;
+            const el = e.currentTarget;
+            const pos = el.selectionStart;
+            const urlRegex = /(https?:\/\/[^\s)]+)|\[[^\]]+\]\(([^)]+)\)/g;
+            let m: RegExpExecArray | null;
+            while ((m = urlRegex.exec(content)) !== null) {
+              const start = m.index;
+              const end = start + m[0].length;
+              if (pos >= start && pos <= end) {
+                const url = m[2] || m[1];
+                if (url) window.open(url, "_blank", "noopener");
+                break;
+              }
+            }
+          }}
+          placeholder="Start writing... Use markdown syntax. Ctrl/Cmd+Click a URL to open it."
           className="flex-1 resize-none bg-transparent p-6 text-sm leading-relaxed outline-none placeholder:text-muted-foreground font-mono" />
 
         }
