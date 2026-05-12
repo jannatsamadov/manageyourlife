@@ -546,7 +546,7 @@ export default function NoteEditorModal({ note, onClose, onUpdate, onDelete }: N
             if (!(e.ctrlKey || e.metaKey)) return;
             const el = e.currentTarget;
             const pos = el.selectionStart;
-            const urlRegex = /(https?:\/\/[^\s)]+)|\[[^\]]+\]\(([^)]+)\)/g;
+            const urlRegex = /\[[^\]]+\]\(([^)]+)\)|(https?:\/\/[^\s]+)/g;
             let m: RegExpExecArray | null;
             while ((m = urlRegex.exec(content)) !== null) {
               const start = m.index;
