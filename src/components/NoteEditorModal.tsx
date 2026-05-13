@@ -29,6 +29,11 @@ const normalizeExternalUrl = (url: string) => {
   return /^www\./i.test(trimmed) ? `https://${trimmed}` : trimmed;
 };
 
+const decodeMarkdownUrl = (url: string) =>
+  url.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+
+const externalRedirectHref = (url: string) => `/external-link?to=${encodeURIComponent(normalizeExternalUrl(decodeMarkdownUrl(url)))}`;
+
 const trimUrlPunctuation = (value: string) => {
   let url = value;
   let trail = "";
@@ -53,9 +58,8 @@ const trimUrlPunctuation = (value: string) => {
 };
 
 const openExternalUrl = (url: string) => {
-  const normalizedUrl = normalizeExternalUrl(url);
   const anchor = document.createElement("a");
-  anchor.href = normalizedUrl;
+  anchor.href = externalRedirectHref(url);
   anchor.target = "_blank";
   anchor.rel = "noopener noreferrer";
   anchor.referrerPolicy = "no-referrer";
@@ -78,13 +82,13 @@ function renderMarkdown(text: string): string {
   html = html.replace(/~~(.+?)~~/g, "<del>$1</del>");
   html = html.replace(/`([^`]+)`/g, '<code class="rounded bg-muted px-1.5 py-0.5 text-xs font-mono">$1</code>');
   html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_match, label, url) => {
-    const href = normalizeExternalUrl(url);
+    const href = externalRedirectHref(url);
     return `<a href="${href}" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer" class="text-primary underline">${label}</a>`;
   });
   // Auto-link bare URLs (not already inside an href). Trim trailing punctuation.
   html = html.replace(/(^|[^"=>\]])((?:https?:\/\/|www\.)[^\s<]+)/g, (_m, pre, rawUrl) => {
     const { url, trail } = trimUrlPunctuation(rawUrl);
-    const href = normalizeExternalUrl(url);
+    const href = externalRedirectHref(url);
     return `${pre}<a href="${href}" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer" class="text-primary underline break-all">${url}</a>${trail}`;
   });
   let todoIndex = 0;
