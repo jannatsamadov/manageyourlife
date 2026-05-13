@@ -24,6 +24,46 @@ interface NoteEditorModalProps {
   onDelete: (id: string) => void;
 }
 
+const normalizeExternalUrl = (url: string) => {
+  const trimmed = url.trim();
+  return /^www\./i.test(trimmed) ? `https://${trimmed}` : trimmed;
+};
+
+const trimUrlPunctuation = (value: string) => {
+  let url = value;
+  let trail = "";
+  while (url.length > 0 && /[.,;:!?'\"]/.test(url[url.length - 1])) {
+    trail = url[url.length - 1] + trail;
+    url = url.slice(0, -1);
+  }
+
+  const pairs: Record<string, string> = { ")": "(", "]": "[", "}": "{" };
+  while (url.length > 0 && pairs[url[url.length - 1]]) {
+    const close = url[url.length - 1];
+    const open = pairs[close];
+    const opens = (url.match(new RegExp("\\" + open, "g")) || []).length;
+    const closes = (url.match(new RegExp("\\" + close, "g")) || []).length;
+    if (closes > opens) {
+      trail = close + trail;
+      url = url.slice(0, -1);
+    } else break;
+  }
+
+  return { url, trail };
+};
+
+const openExternalUrl = (url: string) => {
+  const normalizedUrl = normalizeExternalUrl(url);
+  const anchor = document.createElement("a");
+  anchor.href = normalizedUrl;
+  anchor.target = "_blank";
+  anchor.rel = "noopener noreferrer";
+  anchor.referrerPolicy = "no-referrer";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+};
+
 function renderMarkdown(text: string): string {
   let html = text.
   replace(/&/g, "&amp;").
@@ -37,27 +77,15 @@ function renderMarkdown(text: string): string {
   html = html.replace(/\*(.+?)\*/g, "<em>$1</em>");
   html = html.replace(/~~(.+?)~~/g, "<del>$1</del>");
   html = html.replace(/`([^`]+)`/g, '<code class="rounded bg-muted px-1.5 py-0.5 text-xs font-mono">$1</code>');
-  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener" class="text-primary underline">$1</a>');
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_match, label, url) => {
+    const href = normalizeExternalUrl(url);
+    return `<a href="${href}" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer" class="text-primary underline">${label}</a>`;
+  });
   // Auto-link bare URLs (not already inside an href). Trim trailing punctuation.
-  html = html.replace(/(^|[^"=>\]])(https?:\/\/[^\s<]+)/g, (_m, pre, url) => {
-    let trail = "";
-    while (url.length > 0 && /[.,;:!?'"]/.test(url[url.length - 1])) {
-      trail = url[url.length - 1] + trail;
-      url = url.slice(0, -1);
-    }
-    // Balance trailing ) ] }
-    const pairs: Record<string, string> = { ")": "(", "]": "[", "}": "{" };
-    while (url.length > 0 && pairs[url[url.length - 1]]) {
-      const close = url[url.length - 1];
-      const open = pairs[close];
-      const opens = (url.match(new RegExp("\\" + open, "g")) || []).length;
-      const closes = (url.match(new RegExp("\\" + close, "g")) || []).length;
-      if (closes > opens) {
-        trail = close + trail;
-        url = url.slice(0, -1);
-      } else break;
-    }
-    return `${pre}<a href="${url}" target="_blank" rel="noopener" class="text-primary underline break-all">${url}</a>${trail}`;
+  html = html.replace(/(^|[^"=>\]])((?:https?:\/\/|www\.)[^\s<]+)/g, (_m, pre, rawUrl) => {
+    const { url, trail } = trimUrlPunctuation(rawUrl);
+    const href = normalizeExternalUrl(url);
+    return `${pre}<a href="${href}" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer" class="text-primary underline break-all">${url}</a>${trail}`;
   });
   let todoIndex = 0;
   html = html.replace(/^- \[(x| )\] (.+)$/gm, (_match, state, label) => {
