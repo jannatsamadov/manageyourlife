@@ -559,8 +559,15 @@ export default function NoteEditorModal({ note, onClose, onUpdate, onDelete }: N
 
         {/* Content */}
         {preview ?
-        <div
+          <div
           ref={previewRef}
+          onClick={(e) => {
+            const anchor = (e.target as HTMLElement).closest<HTMLAnchorElement>("a[href]");
+            if (!anchor) return;
+            e.preventDefault();
+            e.stopPropagation();
+            openExternalUrl(anchor.href);
+          }}
           className="flex-1 overflow-y-auto p-6 prose-sm text-foreground chat-scroll"
           dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }} /> :
 
@@ -574,7 +581,7 @@ export default function NoteEditorModal({ note, onClose, onUpdate, onDelete }: N
             if (!(e.ctrlKey || e.metaKey)) return;
             const el = e.currentTarget;
             const pos = el.selectionStart;
-            const urlRegex = /\[[^\]]+\]\(([^)]+)\)|(https?:\/\/[^\s]+)/g;
+            const urlRegex = /\[[^\]]+\]\(([^)]+)\)|((?:https?:\/\/|www\.)[^\s]+)/g;
             let m: RegExpExecArray | null;
             while ((m = urlRegex.exec(content)) !== null) {
               const start = m.index;
@@ -582,12 +589,9 @@ export default function NoteEditorModal({ note, onClose, onUpdate, onDelete }: N
               if (pos >= start && pos <= end) {
                 let url = m[1] || m[2];
                 if (url && m[2]) {
-                  url = url.replace(/[.,;:!?'"]+$/, "");
-                  const opens = (url.match(/\(/g) || []).length;
-                  const closes = (url.match(/\)/g) || []).length;
-                  if (closes > opens) url = url.replace(/\)+$/, (s) => s.slice(0, opens - closes));
+                  url = trimUrlPunctuation(url).url;
                 }
-                if (url) window.open(url, "_blank", "noopener");
+                if (url) openExternalUrl(url);
                 break;
               }
             }
