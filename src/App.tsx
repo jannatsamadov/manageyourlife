@@ -13,6 +13,7 @@ import Notes from "@/pages/Notes";
 import Trash from "@/pages/Trash";
 import Auth from "@/pages/Auth";
 import ResetPassword from "@/pages/ResetPassword";
+import ExternalLinkRedirect from "@/pages/ExternalLinkRedirect";
 import NotFound from "./pages/NotFound";
 import { Loader2 } from "lucide-react";
 
@@ -34,6 +35,7 @@ const AppRoutes = () => (
     <Routes>
       <Route path="/auth" element={<Auth />} />
       <Route path="/reset-password" element={<ResetPassword />} />
+      <Route path="/external-link" element={<ExternalLinkRedirect />} />
       <Route
         path="/*"
         element={
