@@ -24,50 +24,6 @@ interface NoteEditorModalProps {
   onDelete: (id: string) => void;
 }
 
-const normalizeExternalUrl = (url: string) => {
-  const trimmed = url.trim();
-  return /^www\./i.test(trimmed) ? `https://${trimmed}` : trimmed;
-};
-
-const decodeMarkdownUrl = (url: string) =>
-  url.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'");
-
-const externalRedirectHref = (url: string) => `/external-link?to=${encodeURIComponent(normalizeExternalUrl(decodeMarkdownUrl(url)))}`;
-
-const trimUrlPunctuation = (value: string) => {
-  let url = value;
-  let trail = "";
-  while (url.length > 0 && /[.,;:!?'\"]/.test(url[url.length - 1])) {
-    trail = url[url.length - 1] + trail;
-    url = url.slice(0, -1);
-  }
-
-  const pairs: Record<string, string> = { ")": "(", "]": "[", "}": "{" };
-  while (url.length > 0 && pairs[url[url.length - 1]]) {
-    const close = url[url.length - 1];
-    const open = pairs[close];
-    const opens = (url.match(new RegExp("\\" + open, "g")) || []).length;
-    const closes = (url.match(new RegExp("\\" + close, "g")) || []).length;
-    if (closes > opens) {
-      trail = close + trail;
-      url = url.slice(0, -1);
-    } else break;
-  }
-
-  return { url, trail };
-};
-
-const openExternalUrl = (url: string) => {
-  const anchor = document.createElement("a");
-  anchor.href = externalRedirectHref(url);
-  anchor.target = "_blank";
-  anchor.rel = "noopener noreferrer";
-  anchor.referrerPolicy = "no-referrer";
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-};
-
 function renderMarkdown(text: string): string {
   let html = text.
   replace(/&/g, "&amp;").
@@ -81,16 +37,7 @@ function renderMarkdown(text: string): string {
   html = html.replace(/\*(.+?)\*/g, "<em>$1</em>");
   html = html.replace(/~~(.+?)~~/g, "<del>$1</del>");
   html = html.replace(/`([^`]+)`/g, '<code class="rounded bg-muted px-1.5 py-0.5 text-xs font-mono">$1</code>');
-  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_match, label, url) => {
-    const href = externalRedirectHref(url);
-    return `<a href="${href}" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer" class="text-primary underline">${label}</a>`;
-  });
-  // Auto-link bare URLs (not already inside an href). Trim trailing punctuation.
-  html = html.replace(/(^|[^"=>\]])((?:https?:\/\/|www\.)[^\s<]+)/g, (_m, pre, rawUrl) => {
-    const { url, trail } = trimUrlPunctuation(rawUrl);
-    const href = externalRedirectHref(url);
-    return `${pre}<a href="${href}" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer" class="text-primary underline break-all">${url}</a>${trail}`;
-  });
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener" class="text-primary underline">$1</a>');
   let todoIndex = 0;
   html = html.replace(/^- \[(x| )\] (.+)$/gm, (_match, state, label) => {
     const checked = state === "x";
@@ -563,15 +510,8 @@ export default function NoteEditorModal({ note, onClose, onUpdate, onDelete }: N
 
         {/* Content */}
         {preview ?
-          <div
+        <div
           ref={previewRef}
-          onClick={(e) => {
-            const anchor = (e.target as HTMLElement).closest<HTMLAnchorElement>("a[href]");
-            if (!anchor) return;
-            e.preventDefault();
-            e.stopPropagation();
-            openExternalUrl(anchor.href);
-          }}
           className="flex-1 overflow-y-auto p-6 prose-sm text-foreground chat-scroll"
           dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }} /> :
 
@@ -581,26 +521,7 @@ export default function NoteEditorModal({ note, onClose, onUpdate, onDelete }: N
           value={content}
           onChange={(e) => handleContentChange(e.target.value)}
           onKeyDown={handleKeyDown}
-          onClick={(e) => {
-            if (!(e.ctrlKey || e.metaKey)) return;
-            const el = e.currentTarget;
-            const pos = el.selectionStart;
-            const urlRegex = /\[[^\]]+\]\(([^)]+)\)|((?:https?:\/\/|www\.)[^\s]+)/g;
-            let m: RegExpExecArray | null;
-            while ((m = urlRegex.exec(content)) !== null) {
-              const start = m.index;
-              const end = start + m[0].length;
-              if (pos >= start && pos <= end) {
-                let url = m[1] || m[2];
-                if (url && m[2]) {
-                  url = trimUrlPunctuation(url).url;
-                }
-                if (url) openExternalUrl(url);
-                break;
-              }
-            }
-          }}
-          placeholder="Start writing... Use markdown syntax. Ctrl/Cmd+Click a URL to open it."
+          placeholder="Start writing... Use markdown syntax"
           className="flex-1 resize-none bg-transparent p-6 text-sm leading-relaxed outline-none placeholder:text-muted-foreground font-mono" />
 
         }
