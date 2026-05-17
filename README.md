@@ -1,8 +1,8 @@
-# Stratify — Personal Strategic Management Ecosystem
+# SManageYourLife — Personal Strategic Management Ecosystem
 
 **Canlı sayt:** [https://manageyourlife.netlify.app](https://manageyourlife.netlify.app)
 
-Stratify — GTD (Getting Things Done) metodologiyasına əsaslanan, RPG elementləri ilə zənginləşdirilmiş şəxsi strategiya və məhsuldarlıq platformasıdır. Gündəlik tapşırıqları, uzunmüddətli məqsədləri və həyat balansını bir yerdə idarə etməyə imkan verir.
+GTD (Getting Things Done) metodologiyasına əsaslanan, RPG elementləri ilə zənginləşdirilmiş şəxsi strategiya və məhsuldarlıq platformasıdır. Gündəlik tapşırıqları, uzunmüddətli məqsədləri və həyat balansını bir yerdə idarə etməyə imkan verir.
 
 ## Əsas Funksionallıqlar
 
