@@ -55,6 +55,23 @@ function renderMarkdown(text: string): string {
   return html;
 }
 
+const urlRegex = /https?:\/\/[^\s<>()]+/g;
+
+function openUrlInNewTab(url: string) {
+  window.open(url, "_blank", "noopener,noreferrer");
+}
+
+function findUrlAtCursor(text: string, cursorPosition: number) {
+  for (const match of text.matchAll(urlRegex)) {
+    const start = match.index ?? 0;
+    const end = start + match[0].length;
+    if (cursorPosition >= start && cursorPosition <= end) {
+      return match[0].replace(/[.,;:!?]+$/, "");
+    }
+  }
+  return null;
+}
+
 export default function NoteEditorModal({ note, onClose, onUpdate, onDelete }: NoteEditorModalProps) {
   const { user } = useAuth();
   const [title, setTitle] = useState(note.title);
@@ -228,6 +245,20 @@ export default function NoteEditorModal({ note, onClose, onUpdate, onDelete }: N
       debouncedSave(title, newContent);
     }
   }, [content, debouncedSave, title]);
+
+  const handlePreviewClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const link = (e.target as HTMLElement).closest("a");
+    if (!link?.href) return;
+    e.preventDefault();
+    e.stopPropagation();
+    openUrlInNewTab(link.href);
+  }, []);
+
+  const handleEditorClick = (e: React.MouseEvent<HTMLTextAreaElement>) => {
+    if (!e.metaKey && !e.ctrlKey) return;
+    const url = findUrlAtCursor(content, e.currentTarget.selectionStart);
+    if (url) openUrlInNewTab(url);
+  };
 
   const insertMarkdown = (prefix: string, suffix = "") => {
     const el = editorRef.current;
@@ -514,6 +545,7 @@ export default function NoteEditorModal({ note, onClose, onUpdate, onDelete }: N
         {preview ?
         <div
           ref={previewRef}
+          onClick={handlePreviewClick}
           className="flex-1 overflow-y-auto p-6 prose-sm text-foreground chat-scroll"
           dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }} /> :
 
@@ -522,6 +554,7 @@ export default function NoteEditorModal({ note, onClose, onUpdate, onDelete }: N
           ref={editorRef}
           value={content}
           onChange={(e) => handleContentChange(e.target.value)}
+          onClick={handleEditorClick}
           onKeyDown={handleKeyDown}
           placeholder="Start writing... Use markdown syntax"
           className="flex-1 resize-none bg-transparent p-6 text-sm leading-relaxed outline-none placeholder:text-muted-foreground font-mono" />
