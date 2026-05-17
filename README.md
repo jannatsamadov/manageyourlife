@@ -1,4 +1,4 @@
-# SManageYourLife — Personal Strategic Management Ecosystem
+# ManageYourLife — Personal Strategic Management Ecosystem
 
 **Canlı sayt:** [https://manageyourlife.netlify.app](https://manageyourlife.netlify.app)
 
