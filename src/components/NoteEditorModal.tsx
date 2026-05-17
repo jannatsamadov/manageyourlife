@@ -249,13 +249,10 @@ export default function NoteEditorModal({ note, onClose, onUpdate, onDelete }: N
   const handlePreviewClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const link = (e.target as HTMLElement).closest("a");
     if (!link?.href) return;
-    e.preventDefault();
     e.stopPropagation();
-    openUrlInNewTab(link.href);
   }, []);
 
   const handleEditorClick = (e: React.MouseEvent<HTMLTextAreaElement>) => {
-    if (!e.metaKey && !e.ctrlKey) return;
     const url = findUrlAtCursor(content, e.currentTarget.selectionStart);
     if (url) openUrlInNewTab(url);
   };
