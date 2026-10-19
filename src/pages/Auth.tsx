@@ -67,7 +67,7 @@ export default function Auth() {
           <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary">
             <Target className="h-6 w-6 text-primary-foreground" />
           </div>
-          <h1 className="text-2xl font-bold text-foreground">Stratify</h1>
+          <h1 className="text-2xl font-bold text-foreground">ManageYourLife</h1>
           <p className="text-sm text-muted-foreground">Personal Strategic Management</p>
         </div>
 

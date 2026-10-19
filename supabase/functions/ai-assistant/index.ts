@@ -7,7 +7,7 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-const SYSTEM_PROMPT = `You are a productivity assistant for "Stratify". You help the user create tasks.
+const SYSTEM_PROMPT = `You are a productivity assistant for "ManageYourLife". You help the user create tasks.
 
 CRITICAL RULES:
 1. When the user wants to add ONE task, call create_task.

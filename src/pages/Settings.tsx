@@ -56,7 +56,7 @@ export default function SettingsPage() {
     <div className="mx-auto max-w-2xl space-y-8 animate-fade-in">
       <div>
         <h2 className="text-2xl font-bold text-foreground">Settings</h2>
-        <p className="text-sm text-muted-foreground mt-1">Customize your Stratify experience</p>
+        <p className="text-sm text-muted-foreground mt-1">Customize your ManageYourLife experience</p>
       </div>
 
       <div className="space-y-6 glass-card p-6">
