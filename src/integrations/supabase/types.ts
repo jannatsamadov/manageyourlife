@@ -94,6 +94,63 @@ export type Database = {
         }
         Relationships: []
       }
+      google_connections: {
+        Row: {
+          calendar_id: string
+          connected_at: string
+          google_email: string | null
+          last_calendar_sync_at: string | null
+          last_error: string | null
+          last_tasks_import_at: string | null
+          scopes: string[]
+          user_id: string
+        }
+        Insert: {
+          calendar_id?: string
+          connected_at?: string
+          google_email?: string | null
+          last_calendar_sync_at?: string | null
+          last_error?: string | null
+          last_tasks_import_at?: string | null
+          scopes?: string[]
+          user_id: string
+        }
+        Update: {
+          calendar_id?: string
+          connected_at?: string
+          google_email?: string | null
+          last_calendar_sync_at?: string | null
+          last_error?: string | null
+          last_tasks_import_at?: string | null
+          scopes?: string[]
+          user_id?: string
+        }
+        Relationships: []
+      }
+      google_tokens: {
+        Row: {
+          access_token_enc: string | null
+          access_token_expires_at: string | null
+          refresh_token_enc: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          access_token_enc?: string | null
+          access_token_expires_at?: string | null
+          refresh_token_enc: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          access_token_enc?: string | null
+          access_token_expires_at?: string | null
+          refresh_token_enc?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       inbox_items: {
         Row: {
           attachments: Json
@@ -207,6 +264,30 @@ export type Database = {
           id?: string
           title?: string
           updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      oauth_states: {
+        Row: {
+          code_verifier: string
+          expires_at: string
+          redirect_to: string
+          state_hash: string
+          user_id: string
+        }
+        Insert: {
+          code_verifier: string
+          expires_at: string
+          redirect_to: string
+          state_hash: string
+          user_id: string
+        }
+        Update: {
+          code_verifier?: string
+          expires_at?: string
+          redirect_to?: string
+          state_hash?: string
           user_id?: string
         }
         Relationships: []
@@ -349,6 +430,9 @@ export type Database = {
           description: string
           estimated_time: number | null
           execution_date: string | null
+          gcal_calendar_id: string | null
+          gcal_event_id: string | null
+          gcal_hash: string | null
           id: string
           link: string
           linked_note_id: string | null
@@ -371,6 +455,9 @@ export type Database = {
           description?: string
           estimated_time?: number | null
           execution_date?: string | null
+          gcal_calendar_id?: string | null
+          gcal_event_id?: string | null
+          gcal_hash?: string | null
           id?: string
           link?: string
           linked_note_id?: string | null
@@ -393,6 +480,9 @@ export type Database = {
           description?: string
           estimated_time?: number | null
           execution_date?: string | null
+          gcal_calendar_id?: string | null
+          gcal_event_id?: string | null
+          gcal_hash?: string | null
           id?: string
           link?: string
           linked_note_id?: string | null

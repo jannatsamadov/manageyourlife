@@ -149,8 +149,12 @@ export default function Inbox() {
     }
   };
 
+  // Kept as a sorted "deleted" row, so a re-import (Google Tasks) does not bring it back.
   const remove = async (item: InboxItem) => {
-    const { error } = await supabase.from("inbox_items").delete().eq("id", item.id);
+    const { error } = await supabase
+      .from("inbox_items")
+      .update({ sorted_at: new Date().toISOString(), result_type: "deleted", result_id: null })
+      .eq("id", item.id);
     if (error) {
       toast({ title: "Failed to delete", description: error.message, variant: "destructive" });
       return;
@@ -162,7 +166,10 @@ export default function Inbox() {
         <ToastAction
           altText="Undo"
           onClick={async () => {
-            const { error: undoError } = await supabase.from("inbox_items").insert(item);
+            const { error: undoError } = await supabase
+              .from("inbox_items")
+              .update({ sorted_at: null, result_type: null })
+              .eq("id", item.id);
             if (undoError) toast({ title: "Undo failed", description: undoError.message, variant: "destructive" });
             else setItems((prev) => [item, ...prev].sort((a, b) => b.created_at.localeCompare(a.created_at)));
           }}

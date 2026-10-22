@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Settings as SettingsIcon, Calendar } from "lucide-react";
+import { Settings as SettingsIcon } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -11,45 +11,20 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import { AI_MODELS, getSettings, saveSettings, type Settings } from "@/lib/settings";
-import { isGCalAvailable } from "@/lib/gcal";
-import { lovable } from "@/integrations/lovable/index";
-import { toast } from "@/hooks/use-toast";
 import TelegramConnect from "@/components/settings/TelegramConnect";
+import GoogleConnect from "@/components/settings/GoogleConnect";
 import ApiTokens from "@/components/settings/ApiTokens";
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<Settings | null>(null);
-  const [gcalOk, setGcalOk] = useState(false);
-  const [connecting, setConnecting] = useState(false);
 
   useEffect(() => {
     setSettings(getSettings());
-    isGCalAvailable().then(setGcalOk);
   }, []);
 
   const update = (partial: Partial<Settings>) => {
     const next = saveSettings(partial);
     setSettings(next);
-  };
-
-  const connectGoogleCalendar = async () => {
-    setConnecting(true);
-    try {
-      const { error } = await lovable.auth.signInWithOAuth("google", {
-        redirect_uri: window.location.origin,
-        extraParams: {
-          prompt: "consent",
-          access_type: "offline",
-        },
-      });
-      if (error) {
-        toast({ title: "Connection failed", description: error.message, variant: "destructive" });
-      }
-    } catch (err: any) {
-      toast({ title: "Connection failed", description: err.message, variant: "destructive" });
-    } finally {
-      setConnecting(false);
-    }
   };
 
   if (!settings) return null;
@@ -122,33 +97,9 @@ export default function SettingsPage() {
 
       <TelegramConnect />
 
-      <ApiTokens />
+      <GoogleConnect />
 
-      <div className="space-y-6 glass-card p-6">
-        <div className="flex items-center gap-3">
-          <Calendar className="h-5 w-5 text-primary" />
-          <h3 className="text-lg font-semibold text-foreground">Google Calendar</h3>
-        </div>
-        <div className="flex items-center gap-3">
-          <div className={`h-2.5 w-2.5 rounded-full ${gcalOk ? "bg-green-500" : "bg-muted-foreground/40"}`} />
-          <span className="text-sm">{gcalOk ? "Connected — syncing with your Google Calendar" : "Not connected"}</span>
-        </div>
-        {!gcalOk && (
-          <button
-            onClick={connectGoogleCalendar}
-            disabled={connecting}
-            className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
-          >
-            <Calendar className="h-4 w-4" />
-            {connecting ? "Connecting..." : "Connect Google Calendar"}
-          </button>
-        )}
-        <p className="text-xs text-muted-foreground">
-          {gcalOk
-            ? "Scheduled tasks will sync to your Google Calendar via the Sync button on the Schedule page."
-            : "Connect your Google account to enable calendar sync. You'll need to grant calendar permissions."}
-        </p>
-      </div>
+      <ApiTokens />
     </div>
   );
 }

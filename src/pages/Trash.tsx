@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Trash2, Undo2, AlertTriangle, Loader2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/context/AuthContext";
+import { queueCalendarSync } from "@/lib/gcal";
 
 interface TrashTask {
   id: string;
@@ -55,6 +56,7 @@ export default function Trash() {
       .eq("id", id) as any);
     if (!error) {
       setTasks((prev) => prev.filter((t) => t.id !== id));
+      queueCalendarSync(id);
     }
   };
 

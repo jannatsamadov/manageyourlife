@@ -2,7 +2,7 @@ import { useState, useMemo, useRef, useCallback } from "react";
 import { ChevronLeft, ChevronRight, ChevronUp, Clock, Plus, Trash2, ExternalLink, GripVertical, CalendarX, RefreshCw, Loader2, RotateCcw, X, Play, CheckCircle2, Timer, Filter, Search } from "lucide-react";
 import { useAppState, type TaskPriority, type Task } from "@/context/AppContext";
 import { getSettings } from "@/lib/settings";
-import { isGCalAvailable, createEvent } from "@/lib/gcal";
+import { getGoogleConnection, googleAction } from "@/lib/gcal";
 import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import {
@@ -149,29 +149,24 @@ export default function SchedulePlanning() {
 
   const visibleTasks = useMemo(() => tasks.filter(taskMatchesQuery), [tasks, taskMatchesQuery]);
 
+  // Scheduled tasks → events in the chosen Google calendar (updates in place, no duplicates).
   const syncToGCal = async () => {
-    const ok = await isGCalAvailable();
-    if (!ok) {
-      toast({ title: "Not connected", description: "Sign in with Google to enable calendar sync", variant: "destructive" });
+    if (!(await getGoogleConnection())) {
+      toast({ title: "Google is not connected", description: "Connect it in Settings → Google", variant: "destructive" });
       return;
     }
     setSyncing(true);
-    let created = 0;
-    let errors = 0;
-    const scheduled = tasks.filter((t) => !!t.date && t.status !== "complete");
-    for (const task of scheduled) {
-      try {
-        await createEvent({ title: task.title, description: task.description, date: task.date, estimatedTime: task.estimatedTime });
-        created++;
-      } catch {
-        errors++;
-      }
+    try {
+      const r = await googleAction.syncCalendar();
+      toast({
+        title: "Google Calendar synced",
+        description: `${r.created} added, ${r.updated} updated, ${r.removed} removed${r.failed ? `, ${r.failed} failed: ${r.errors[0]}` : ""}`
+      });
+    } catch (e: any) {
+      toast({ title: "Sync failed", description: e.message, variant: "destructive" });
+    } finally {
+      setSyncing(false);
     }
-    setSyncing(false);
-    toast({
-      title: "Sync complete",
-      description: `${created} events pushed to Google Calendar${errors ? `, ${errors} failed` : ""}`
-    });
   };
 
   const { showProgressBars, blinkEffect } = getSettings();

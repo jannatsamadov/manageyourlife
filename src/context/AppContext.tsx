@@ -2,6 +2,7 @@ import { createContext, useContext, useState, useEffect, ReactNode, useCallback 
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/context/AuthContext";
 import { toast } from "@/hooks/use-toast";
+import { queueCalendarSync } from "@/lib/gcal";
 
 export type TaskPriority = "high" | "medium" | "low";
 
@@ -205,6 +206,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     } else if (data) {
       const saved = dbTaskToLocal(data);
       setTasks((prev) => [...prev, saved]);
+      if (saved.date) queueCalendarSync(saved.id);
       return saved;
     }
   }, [user]);
@@ -215,6 +217,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       toast({ title: "Failed to abandon task", description: error.message, variant: "destructive" });
     } else {
       setTasks((prev) => prev.map((t) => t.id === id ? { ...t, status: "abandoned" as const } : t));
+      queueCalendarSync(id);
     }
   }, []);
 
@@ -224,6 +227,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       toast({ title: "Failed to move to trash", description: error.message, variant: "destructive" });
     } else {
       setTasks((prev) => prev.filter((t) => t.id !== id));
+      queueCalendarSync(id);
     }
   }, []);
 
@@ -246,6 +250,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       toast({ title: "Failed to update task", description: error.message, variant: "destructive" });
     } else {
       setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, ...updates } : t)));
+      queueCalendarSync(id);
     }
   }, []);
 
