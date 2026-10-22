@@ -1,4 +1,8 @@
-project_id = "gsgoufuajbxygwnwlkbj"
+project_id = "svvnimydbddqxbttofdz"
 
+# The functions check the caller themselves (user JWT, Telegram secret header, API token).
 [functions.ai-assistant]
+verify_jwt = false
+
+[functions.telegram-webhook]
 verify_jwt = false

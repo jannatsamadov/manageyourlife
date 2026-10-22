@@ -14,6 +14,54 @@ export type Database = {
   }
   public: {
     Tables: {
+      inbox_items: {
+        Row: {
+          attachments: Json
+          content: string
+          created_at: string
+          id: string
+          meta: Json
+          result_id: string | null
+          result_type: string | null
+          sorted_at: string | null
+          source: string
+          source_ref: string | null
+          source_url: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          attachments?: Json
+          content?: string
+          created_at?: string
+          id?: string
+          meta?: Json
+          result_id?: string | null
+          result_type?: string | null
+          sorted_at?: string | null
+          source: string
+          source_ref?: string | null
+          source_url?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          attachments?: Json
+          content?: string
+          created_at?: string
+          id?: string
+          meta?: Json
+          result_id?: string | null
+          result_type?: string | null
+          sorted_at?: string | null
+          source?: string
+          source_ref?: string | null
+          source_url?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       note_task_links: {
         Row: {
           created_at: string
@@ -285,6 +333,45 @@ export type Database = {
           },
         ]
       }
+      telegram_link_codes: {
+        Row: {
+          code_hash: string
+          expires_at: string
+          user_id: string
+        }
+        Insert: {
+          code_hash: string
+          expires_at: string
+          user_id: string
+        }
+        Update: {
+          code_hash?: string
+          expires_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      telegram_links: {
+        Row: {
+          chat_id: number
+          created_at: string
+          user_id: string
+          username: string | null
+        }
+        Insert: {
+          chat_id: number
+          created_at?: string
+          user_id: string
+          username?: string | null
+        }
+        Update: {
+          chat_id?: number
+          created_at?: string
+          user_id?: string
+          username?: string | null
+        }
+        Relationships: []
+      }
       user_attributes: {
         Row: {
           attribute: string
@@ -317,7 +404,11 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      create_telegram_link_code: { Args: never; Returns: string }
+      redeem_telegram_link_code: {
+        Args: { p_chat_id: number; p_code: string; p_username: string }
+        Returns: string
+      }
     }
     Enums: {
       [_ in never]: never

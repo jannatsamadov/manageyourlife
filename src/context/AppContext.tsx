@@ -59,7 +59,7 @@ interface AppState {
   opportunities: Opportunity[];
   setOpportunities: React.Dispatch<React.SetStateAction<Opportunity[]>>;
   loading: boolean;
-  addTask: (task: Omit<Task, "id"> & Partial<Pick<Task, "link" | "priority">>) => Promise<void>;
+  addTask: (task: Omit<Task, "id"> & Partial<Pick<Task, "link" | "priority">>) => Promise<Task | undefined>;
   deleteTask: (id: string) => Promise<void>;
   permanentDeleteTask: (id: string) => Promise<void>;
   updateTask: (id: string, updates: Partial<Task>) => Promise<void>;
@@ -203,7 +203,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (error) {
       toast({ title: "Failed to save task", description: error.message, variant: "destructive" });
     } else if (data) {
-      setTasks((prev) => [...prev, dbTaskToLocal(data)]);
+      const saved = dbTaskToLocal(data);
+      setTasks((prev) => [...prev, saved]);
+      return saved;
     }
   }, [user]);
 

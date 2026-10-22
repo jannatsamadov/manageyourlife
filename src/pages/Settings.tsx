@@ -14,6 +14,7 @@ import { AI_MODELS, getSettings, saveSettings, type Settings } from "@/lib/setti
 import { isGCalAvailable } from "@/lib/gcal";
 import { lovable } from "@/integrations/lovable/index";
 import { toast } from "@/hooks/use-toast";
+import TelegramConnect from "@/components/settings/TelegramConnect";
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -117,6 +118,8 @@ export default function SettingsPage() {
           </div>
         </div>
       </div>
+
+      <TelegramConnect />
 
       <div className="space-y-6 glass-card p-6">
         <div className="flex items-center gap-3">

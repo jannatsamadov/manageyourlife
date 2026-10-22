@@ -10,6 +10,7 @@ import AppLayout from "@/components/AppLayout";
 import SchedulePlanning from "@/pages/SchedulePlanning";
 import SettingsPage from "@/pages/Settings";
 import Notes from "@/pages/Notes";
+import Inbox from "@/pages/Inbox";
 import Trash from "@/pages/Trash";
 import Auth from "@/pages/Auth";
 import ResetPassword from "@/pages/ResetPassword";
@@ -44,6 +45,7 @@ const AppRoutes = () => (
                   <Route path="/" element={<SchedulePlanning />} />
                   
                   <Route path="/schedule" element={<Navigate to="/" replace />} />
+                  <Route path="/inbox" element={<Inbox />} />
                   <Route path="/notes" element={<Notes />} />
                   <Route path="/trash" element={<Trash />} />
                   <Route path="/settings" element={<SettingsPage />} />
