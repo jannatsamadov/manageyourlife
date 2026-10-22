@@ -1,6 +1,10 @@
 // Remote MCP server (P-18): Streamable HTTP transport, stateless, plain JSON responses (no SSE stream).
-// Auth: a personal access token from Settings → API & MCP, sent as "Authorization: Bearer myl_…".
-// Read tools need the "read" scope, write tools "write"; every write is logged in api_audit_log.
+// Auth, either:
+//  - a personal access token from Settings → MCP, sent as "Authorization: Bearer myl_…" (Claude Code), or
+//  - an OAuth access token from Supabase Auth's OAuth 2.1 server (claude.ai connectors): a 401 points the client to
+//    /.well-known/oauth-protected-resource, which names Supabase Auth as the authorization server; the user approves
+//    on the app's /oauth/consent page.
+// Read tools need the "read" scope, write tools "write" (OAuth tokens get both); every write is logged in api_audit_log.
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 import { TOOLS, ToolError } from "./tools.ts";
 
@@ -12,20 +16,39 @@ const PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05
 const cors = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, content-type, mcp-protocol-version, mcp-session-id, last-event-id",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Expose-Headers": "WWW-Authenticate",
 };
 const json = (body: unknown, status = 200, headers: Record<string, string> = {}) =>
   new Response(JSON.stringify(body), { status, headers: { ...cors, "Content-Type": "application/json", ...headers } });
 
-type Auth = { id: string; user_id: string; scopes: string[] };
+type Auth = { id: string | null; user_id: string; scopes: string[]; client_id?: string | null };
+
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+const RESOURCE = `${SUPABASE_URL}/functions/v1/mcp`;
+const RESOURCE_METADATA = `${RESOURCE}/.well-known/oauth-protected-resource`;
 
 async function sha256Hex(text: string) {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+// OAuth access token = a Supabase Auth JWT; Auth itself checks it (signature, expiry, session).
+async function oauthUser(jwt: string): Promise<Auth | null> {
+  const { data, error } = await db.auth.getUser(jwt);
+  if (error || !data.user) return null;
+  let clientId: string | null = null;
+  try {
+    clientId = JSON.parse(atob(jwt.split(".")[1].replace(/-/g, "+").replace(/_/g, "/"))).client_id ?? null;
+  } catch { /* not needed for access */ }
+  return { id: null, user_id: data.user.id, scopes: ["read", "write"], client_id: clientId };
+}
+
 async function authenticate(req: Request): Promise<Auth | null> {
-  const token = req.headers.get("Authorization")?.match(/^Bearer\s+(myl_[0-9a-f]{64})$/)?.[1];
+  const bearer = req.headers.get("Authorization")?.match(/^Bearer\s+(\S+)$/)?.[1];
+  if (!bearer) return null;
+  if (!bearer.startsWith("myl_")) return bearer.split(".").length === 3 ? oauthUser(bearer) : null;
+  const token = bearer.match(/^myl_[0-9a-f]{64}$/)?.[0];
   if (!token) return null;
   const { data } = await db
     .from("api_tokens")
@@ -60,7 +83,9 @@ async function callTool(auth: Auth, name: string, args: unknown) {
 
 async function log(auth: Auth, action: string, targetId: unknown, ok: boolean, error?: string) {
   const target = typeof targetId === "string" && /^[0-9a-f-]{36}$/i.test(targetId) ? targetId : null;
-  const { error: logError } = await db.from("api_audit_log").insert({ user_id: auth.user_id, token_id: auth.id, action, target_id: target, ok, error: error ?? null });
+  const { error: logError } = await db.from("api_audit_log").insert({
+    user_id: auth.user_id, token_id: auth.id, oauth_client_id: auth.client_id ?? null, action, target_id: target, ok, error: error ?? null,
+  });
   if (logError) console.error("audit log:", logError);
 }
 
@@ -100,14 +125,23 @@ async function handle(msg: any, auth: Auth) {
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: cors });
+  // RFC 9728 protected resource metadata: tells OAuth clients which authorization server issues tokens for us.
+  if (req.method === "GET" && new URL(req.url).pathname.endsWith("/.well-known/oauth-protected-resource")) {
+    return json({
+      resource: RESOURCE,
+      authorization_servers: [`${SUPABASE_URL}/auth/v1`],
+      bearer_methods_supported: ["header"],
+      resource_name: "ManageYourLife",
+    });
+  }
   if (req.method !== "POST") return new Response("Method not allowed", { status: 405, headers: { ...cors, Allow: "POST" } });
 
   const auth = await authenticate(req);
   if (!auth) {
     return json(
-      { jsonrpc: "2.0", id: null, error: { code: -32001, message: "Missing, wrong or revoked API token. Create one in ManageYourLife → Settings → API & MCP." } },
+      { jsonrpc: "2.0", id: null, error: { code: -32001, message: "Sign in, or use a token from ManageYourLife → Settings → MCP." } },
       401,
-      { "WWW-Authenticate": 'Bearer realm="manageyourlife"' },
+      { "WWW-Authenticate": `Bearer resource_metadata="${RESOURCE_METADATA}"` },
     );
   }
 

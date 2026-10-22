@@ -20,6 +20,7 @@ export type Database = {
           created_at: string
           error: string | null
           id: number
+          oauth_client_id: string | null
           ok: boolean
           target_id: string | null
           token_id: string | null
@@ -30,6 +31,7 @@ export type Database = {
           created_at?: string
           error?: string | null
           id?: never
+          oauth_client_id?: string | null
           ok: boolean
           target_id?: string | null
           token_id?: string | null
@@ -40,6 +42,7 @@ export type Database = {
           created_at?: string
           error?: string | null
           id?: never
+          oauth_client_id?: string | null
           ok?: boolean
           target_id?: string | null
           token_id?: string | null

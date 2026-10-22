@@ -22,7 +22,9 @@ export default function Auth() {
     );
   }
 
-  if (user) return <Navigate to="/" replace />;
+  // Back to where sign-in was asked for (e.g. the OAuth consent page); only paths inside the app.
+  const next = new URLSearchParams(window.location.search).get("next");
+  if (user) return <Navigate to={next?.startsWith("/") && !next.startsWith("//") ? next : "/"} replace />;
 
   const { signIn, signUp } = useAuth();
 

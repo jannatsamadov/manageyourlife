@@ -15,6 +15,7 @@ import Trash from "@/pages/Trash";
 import Auth from "@/pages/Auth";
 import ResetPassword from "@/pages/ResetPassword";
 import Privacy from "@/pages/Privacy";
+import OAuthConsent from "@/pages/OAuthConsent";
 import NotFound from "./pages/NotFound";
 import { Loader2 } from "lucide-react";
 
@@ -37,6 +38,7 @@ const AppRoutes = () => (
       <Route path="/auth" element={<Auth />} />
       <Route path="/reset-password" element={<ResetPassword />} />
       <Route path="/privacy" element={<Privacy />} />
+      <Route path="/oauth/consent" element={<OAuthConsent />} />
       <Route
         path="/*"
         element={
