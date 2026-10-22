@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { MessageCircle, X, Send, Plus, Loader2 } from "lucide-react";
+import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import { useAppState } from "@/context/AppContext";
@@ -91,7 +92,7 @@ export default function ChatPanel() {
             Authorization: `Bearer ${session?.access_token}`,
             apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
           },
-          body: JSON.stringify({ message: text, history, model: getSettings().aiModel }),
+          body: JSON.stringify({ message: text, history, model: getSettings().aiModel, today: format(new Date(), "yyyy-MM-dd") }),
         }
       );
 
