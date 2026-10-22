@@ -8,7 +8,7 @@ const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPAB
   auth: { persistSession: false },
 });
 
-const HOW_TO_LINK = "Open ManageYourLife → Settings → Connect Telegram to link this chat.";
+const HOW_TO_LINK = "ManageYourLife → Settings → Telegram → Connect, then send me the code shown there.";
 const LINKED = "✓ Connected. Send me anything — text, links, forwards, files — and it lands in your ManageYourLife Inbox.";
 
 // Constant-time compare of Telegram's secret header.
@@ -103,8 +103,10 @@ async function onMessage(msg: any) {
   if (msg.chat.type !== "private") return done();
   const text: string = msg.text ?? "";
 
-  if (/^\/start(\s|$)/.test(text)) {
-    const code = text.split(/\s+/)[1];
+  // The code comes as "/start <code>" from the t.me link, or pasted by hand when a Telegram client drops the link's payload.
+  const pasted = text.trim().match(/^[0-9a-f]{32}$/)?.[0];
+  if (/^\/start(\s|$)/.test(text) || pasted) {
+    const code = pasted ?? text.split(/\s+/)[1];
     if (code) {
       const { data: uid, error } = await supabase.rpc("redeem_telegram_link_code", {
         p_code: code,
@@ -191,6 +193,8 @@ Deno.serve(async (req) => {
   }
   const update = await req.json().catch(() => null);
   if (!update) return done();
+  const m = update.message ?? update.edited_message;
+  console.log("update", Object.keys(update).filter((k) => k !== "update_id").join(","), m ? `chat=${m.chat?.id} start=${/^\/start\s+\S/.test(m.text ?? "")}` : "");
 
   try {
     if (update.message) return await onMessage(update.message);

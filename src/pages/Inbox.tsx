@@ -201,7 +201,7 @@ export default function Inbox() {
             }
           }}
           rows={1}
-          placeholder="Capture a thought… (Enter to save)"
+          placeholder="Capture…"
           className="flex-1 resize-none bg-transparent py-1.5 text-sm text-foreground outline-none placeholder:text-muted-foreground"
         />
         <button
@@ -220,7 +220,7 @@ export default function Inbox() {
         </div>
       ) : items.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border py-10 px-4 text-center text-sm text-muted-foreground">
-          Inbox is empty.
+          Empty
         </div>
       ) : (
         <div className="space-y-2">
