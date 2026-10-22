@@ -32,6 +32,7 @@ const check = <T>({ data, error }: { data: T; error: unknown }) => {
 
 const STATUSES = ["idle", "active", "complete", "abandoned"];
 const PRIORITIES = ["high", "medium", "low"];
+const KINDS = ["idea", "question", "todo", "resource"];
 const TASK_COLS = "id, title, description, status, date, deadline, priority, estimated_time, link, created_at";
 const DATE = { type: "string", description: "YYYY-MM-DD" };
 const ID = { type: "string", description: "uuid" };
@@ -330,27 +331,34 @@ export const TOOLS: Tool[] = [
   {
     name: "inbox_list",
     title: "List the Inbox",
-    description: "Unsorted Inbox items (captured from Telegram, Google Tasks, MCP, typed in the app…), newest first.",
+    description: "Unsorted Inbox items (captured from Telegram, Google Tasks, MCP, typed in the app…), newest first. kind: idea / question / todo / resource or null.",
     scope: "read",
-    inputSchema: { type: "object", properties: { limit: { type: "integer", minimum: 1, maximum: 200, default: 50 } } },
+    inputSchema: { type: "object", properties: { kind: { type: "string", enum: KINDS }, limit: { type: "integer", minimum: 1, maximum: 200, default: 50 } } },
     annotations: READ,
-    run: async ({ limit }, { db, userId }) => ({
-      items: check(await db.from("inbox_items").select("id, source, content, source_url, attachments, created_at")
-        .eq("user_id", userId).is("sorted_at", null).order("created_at", { ascending: false }).limit(limitOf(limit, 50, 200))),
-    }),
+    run: async ({ kind, limit }, { db, userId }) => {
+      need(kind === undefined || KINDS.includes(kind), `kind: one of ${KINDS.join(", ")}`);
+      let q = db.from("inbox_items").select("id, kind, source, content, source_url, attachments, created_at").eq("user_id", userId).is("sorted_at", null);
+      if (kind) q = q.eq("kind", kind);
+      return { items: check(await q.order("created_at", { ascending: false }).limit(limitOf(limit, 50, 200))) };
+    },
   },
   {
     name: "inbox_add",
     title: "Add to the Inbox",
     description: "Capture something into the Inbox as is, to be sorted later by the user.",
     scope: "write",
-    inputSchema: { type: "object", properties: { content: { type: "string" }, url: { type: "string", description: "Link back to the source" } }, required: ["content"] },
+    inputSchema: {
+      type: "object",
+      properties: { content: { type: "string" }, kind: { type: "string", enum: KINDS }, url: { type: "string", description: "Link back to the source" } },
+      required: ["content"],
+    },
     annotations: WRITE,
-    run: async ({ content, url }, { db, userId }) => {
+    run: async ({ content, kind, url }, { db, userId }) => {
       need(isText(content, 20000), "content: 1–20000 characters");
+      need(kind === undefined || KINDS.includes(kind), `kind: one of ${KINDS.join(", ")}`);
       need(url === undefined || (typeof url === "string" && url.length <= 2000), "url: up to 2000 characters");
-      return check(await db.from("inbox_items").insert({ user_id: userId, source: "mcp", content, source_url: url ?? null })
-        .select("id, source, content, source_url, created_at").single()) as Record<string, unknown>;
+      return check(await db.from("inbox_items").insert({ user_id: userId, source: "mcp", content, kind: kind ?? null, source_url: url ?? null })
+        .select("id, kind, source, content, source_url, created_at").single()) as Record<string, unknown>;
     },
   },
 ];

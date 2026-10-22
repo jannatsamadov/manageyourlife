@@ -157,6 +157,7 @@ export type Database = {
           content: string
           created_at: string
           id: string
+          kind: string | null
           meta: Json
           result_id: string | null
           result_type: string | null
@@ -172,6 +173,7 @@ export type Database = {
           content?: string
           created_at?: string
           id?: string
+          kind?: string | null
           meta?: Json
           result_id?: string | null
           result_type?: string | null
@@ -187,6 +189,7 @@ export type Database = {
           content?: string
           created_at?: string
           id?: string
+          kind?: string | null
           meta?: Json
           result_id?: string | null
           result_type?: string | null

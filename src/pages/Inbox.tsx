@@ -7,17 +7,29 @@ import { useAppState } from "@/context/AppContext";
 import { toast } from "@/hooks/use-toast";
 import { ToastAction } from "@/components/ui/toast";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 
 type InboxItem = Tables<"inbox_items">;
 
 const SOURCE_LABELS: Record<string, string> = {
-  manual: "Typed here",
+  manual: "App",
   telegram: "Telegram",
   google_tasks: "Google Tasks",
   obsidian: "Obsidian",
   files: "Files",
   mcp: "MCP",
 };
+
+// The 4 note sections (P-49); Telegram sets them with /idea, /question, /todo, /resource.
+const KINDS = [
+  { key: "idea", emoji: "💡", label: "Ideas" },
+  { key: "question", emoji: "❓", label: "Questions for research" },
+  { key: "todo", emoji: "✅", label: "To-dos" },
+  { key: "resource", emoji: "📚", label: "Resources" },
+] as const;
+type Kind = (typeof KINDS)[number]["key"];
+type Filter = "all" | "none" | Kind;
+const emojiOf = (kind: string | null) => KINDS.find((k) => k.key === kind)?.emoji ?? "○";
 
 const URL_RE = /(https?:\/\/[^\s<>()]+)/g;
 
@@ -39,7 +51,18 @@ function Linkified({ text }: { text: string }) {
 }
 
 const metaOf = (item: InboxItem) => (item.meta ?? {}) as { links?: string[]; forwarded_from?: string | null };
-const attachmentsOf = (item: InboxItem) => (Array.isArray(item.attachments) ? item.attachments : []) as { type?: string; file_name?: string | null }[];
+const attachmentsOf = (item: InboxItem) =>
+  (Array.isArray(item.attachments) ? item.attachments : []) as { type?: string; file_name?: string | null; path?: string | null }[];
+
+// Files from Telegram live in the private bucket; a short-lived link opens them.
+async function openFile(path: string) {
+  const tab = window.open("about:blank", "_blank");
+  const { data, error } = await supabase.storage.from("inbox-files").createSignedUrl(path, 300);
+  if (error || !data) {
+    tab?.close();
+    toast({ title: "Failed", description: error?.message, variant: "destructive" });
+  } else if (tab) tab.location.href = data.signedUrl;
+}
 
 // First line → title; the full text stays in the body.
 function splitTitle(content: string, max: number) {
@@ -59,6 +82,7 @@ export default function Inbox() {
   const [loading, setLoading] = useState(true);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
+  const [filter, setFilter] = useState<Filter>("all");
 
   useEffect(() => {
     if (!user) return;
@@ -80,7 +104,7 @@ export default function Inbox() {
     if (!user || !content) return;
     const { data, error } = await supabase
       .from("inbox_items")
-      .insert({ user_id: user.id, source: "manual", content })
+      .insert({ user_id: user.id, source: "manual", content, kind: filter === "all" || filter === "none" ? null : filter })
       .select()
       .single();
     if (error) {
@@ -149,6 +173,12 @@ export default function Inbox() {
     }
   };
 
+  const setKind = async (item: InboxItem, kind: Kind | null) => {
+    const { error } = await supabase.from("inbox_items").update({ kind }).eq("id", item.id);
+    if (error) toast({ title: "Failed", description: error.message, variant: "destructive" });
+    else setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, kind } : i)));
+  };
+
   // Kept as a sorted "deleted" row, so a re-import (Google Tasks) does not bring it back.
   const remove = async (item: InboxItem) => {
     const { error } = await supabase
@@ -182,6 +212,14 @@ export default function Inbox() {
 
   if (!user) return null;
 
+  const count = (f: Filter) => items.filter((i) => (f === "all" ? true : f === "none" ? !i.kind : i.kind === f)).length;
+  const shown = items.filter((i) => (filter === "all" ? true : filter === "none" ? !i.kind : i.kind === filter));
+  const chips: { key: Filter; emoji: string; label: string }[] = [
+    { key: "all", emoji: "All", label: "Everything" },
+    ...KINDS,
+    { key: "none", emoji: "○", label: "No section yet" },
+  ];
+
   return (
     <div className="mx-auto max-w-3xl space-y-6 animate-fade-in">
       <div className="flex items-center gap-2">
@@ -214,22 +252,51 @@ export default function Inbox() {
         </button>
       </div>
 
+      <div className="flex flex-wrap gap-1.5">
+        {chips.map((c) => (
+          <Tooltip key={c.key}>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => setFilter(c.key)}
+                className={`rounded-full border px-2.5 py-1 text-xs transition-colors ${filter === c.key ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:text-foreground"}`}
+              >
+                {c.emoji} {count(c.key)}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{c.label}</TooltipContent>
+          </Tooltip>
+        ))}
+      </div>
+
       {loading ? (
         <div className="flex items-center justify-center py-20">
           <Loader2 className="h-6 w-6 animate-spin text-primary" />
         </div>
-      ) : items.length === 0 ? (
+      ) : shown.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border py-10 px-4 text-center text-sm text-muted-foreground">
           Empty
         </div>
       ) : (
         <div className="space-y-2">
-          {items.map((item) => {
+          {shown.map((item) => {
             const meta = metaOf(item);
             const files = attachmentsOf(item);
             return (
               <div key={item.id} className="glass-card space-y-2 px-4 py-3">
                 <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger className="rounded px-1 text-sm leading-none hover:bg-muted" aria-label="Section">
+                      {emojiOf(item.kind)}
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start">
+                      {KINDS.map((k) => (
+                        <DropdownMenuItem key={k.key} onClick={() => setKind(item, k.key)}>
+                          {k.emoji} {k.label}
+                        </DropdownMenuItem>
+                      ))}
+                      <DropdownMenuItem onClick={() => setKind(item, null)}>○ None</DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                   <span className="rounded bg-muted px-1.5 py-0.5">{SOURCE_LABELS[item.source] ?? item.source}</span>
                   <span>
                     {new Date(item.created_at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
@@ -252,10 +319,15 @@ export default function Inbox() {
                 {(files.length > 0 || (meta.links?.length ?? 0) > 0) && (
                   <div className="flex flex-wrap gap-2 text-[11px]">
                     {files.map((f, i) => (
-                      <span key={i} className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-muted-foreground">
+                      <button
+                        key={i}
+                        onClick={() => f.path && openFile(f.path)}
+                        disabled={!f.path}
+                        className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-muted-foreground enabled:hover:text-primary"
+                      >
                         <Paperclip className="h-3 w-3" />
                         {f.file_name || f.type}
-                      </span>
+                      </button>
                     ))}
                     {meta.links
                       ?.filter((l) => !item.content.includes(l))

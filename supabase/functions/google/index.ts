@@ -40,6 +40,7 @@ async function importTasks(userId: string) {
     const rows = tasks.map((t) => ({
       user_id: userId,
       source: "google_tasks",
+      kind: "todo",
       source_ref: t.id,
       source_url: t.webViewLink ?? null,
       content: [t.title?.trim(), t.notes?.trim()].filter(Boolean).join("\n\n"),
