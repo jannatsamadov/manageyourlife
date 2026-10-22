@@ -14,6 +14,86 @@ export type Database = {
   }
   public: {
     Tables: {
+      api_audit_log: {
+        Row: {
+          action: string
+          created_at: string
+          error: string | null
+          id: number
+          ok: boolean
+          target_id: string | null
+          token_id: string | null
+          user_id: string
+        }
+        Insert: {
+          action: string
+          created_at?: string
+          error?: string | null
+          id?: never
+          ok: boolean
+          target_id?: string | null
+          token_id?: string | null
+          user_id: string
+        }
+        Update: {
+          action?: string
+          created_at?: string
+          error?: string | null
+          id?: never
+          ok?: boolean
+          target_id?: string | null
+          token_id?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "api_audit_log_token_id_fkey"
+            columns: ["token_id"]
+            isOneToOne: false
+            referencedRelation: "api_tokens"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      api_tokens: {
+        Row: {
+          created_at: string
+          expires_at: string | null
+          id: string
+          last_used_at: string | null
+          name: string
+          revoked_at: string | null
+          scopes: string[]
+          token_hash: string
+          token_prefix: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          expires_at?: string | null
+          id?: string
+          last_used_at?: string | null
+          name: string
+          revoked_at?: string | null
+          scopes: string[]
+          token_hash: string
+          token_prefix: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          expires_at?: string | null
+          id?: string
+          last_used_at?: string | null
+          name?: string
+          revoked_at?: string | null
+          scopes?: string[]
+          token_hash?: string
+          token_prefix?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       inbox_items: {
         Row: {
           attachments: Json
@@ -404,6 +484,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      create_api_token: {
+        Args: { p_expires_at?: string; p_name: string; p_scopes: string[] }
+        Returns: string
+      }
       create_telegram_link_code: { Args: never; Returns: string }
       redeem_telegram_link_code: {
         Args: { p_chat_id: number; p_code: string; p_username: string }
