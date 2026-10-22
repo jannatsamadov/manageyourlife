@@ -14,6 +14,7 @@ import Inbox from "@/pages/Inbox";
 import Trash from "@/pages/Trash";
 import Auth from "@/pages/Auth";
 import ResetPassword from "@/pages/ResetPassword";
+import Privacy from "@/pages/Privacy";
 import NotFound from "./pages/NotFound";
 import { Loader2 } from "lucide-react";
 
@@ -35,6 +36,7 @@ const AppRoutes = () => (
     <Routes>
       <Route path="/auth" element={<Auth />} />
       <Route path="/reset-password" element={<ResetPassword />} />
+      <Route path="/privacy" element={<Privacy />} />
       <Route
         path="/*"
         element={
