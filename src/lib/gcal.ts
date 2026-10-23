@@ -17,12 +17,18 @@ async function callFunction<T>(name: string, body: Record<string, unknown>): Pro
   return data as T;
 }
 
-export type CalendarSyncResult = { created: number; updated: number; removed: number; unchanged: number; failed: number; errors: string[] };
-export type TasksImportResult = { lists: number; found: number; added: number };
+export type CalendarSyncResult = {
+  created: number; updated: number; removed: number; unchanged: number; failed: number; errors: string[];
+  google_tasks: { completed: number; reopened: number; failed: number };
+};
+export type TasksImportResult = { lists: number; found: number; added: number; done: number };
 export type GoogleCalendar = { id: string; name: string; primary: boolean };
+// start / end: "YYYY-MM-DD" when all_day (end exclusive), else ISO date-times.
+export type GoogleEvent = { id: string; title: string; all_day: boolean; start: string; end: string; url: string | null; color: string | null; calendar: string };
 
 export const googleAction = {
   calendars: () => callFunction<{ calendars: GoogleCalendar[] }>("google", { action: "calendars" }),
+  events: (timeMin: string, timeMax: string) => callFunction<{ events: GoogleEvent[] }>("google", { action: "events", time_min: timeMin, time_max: timeMax }),
   importTasks: () => callFunction<TasksImportResult>("google", { action: "import_tasks" }),
   syncCalendar: (taskIds?: string[]) => callFunction<CalendarSyncResult>("google", { action: "sync_calendar", task_ids: taskIds }),
   disconnect: () => callFunction<{ disconnected: boolean }>("google", { action: "disconnect" }),
@@ -48,14 +54,18 @@ export function setGoogleConnected(value: boolean) {
   connected = value;
 }
 
+export async function isGoogleConnected() {
+  if (connected === null) connected = !!(await getGoogleConnection());
+  return connected;
+}
+
 export function queueCalendarSync(taskId: string) {
   pending.add(taskId);
   clearTimeout(timer);
   timer = setTimeout(async () => {
     const ids = [...pending];
     pending.clear();
-    if (connected === null) connected = !!(await getGoogleConnection());
-    if (!connected) return;
+    if (!(await isGoogleConnected())) return;
     try {
       await googleAction.syncCalendar(ids);
     } catch (e) {

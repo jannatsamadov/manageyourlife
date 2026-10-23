@@ -3,6 +3,9 @@ import { ChevronLeft, ChevronRight, ChevronUp, Clock, Plus, Trash2, ExternalLink
 import { useAppState, type TaskPriority, type Task } from "@/context/AppContext";
 import { getSettings } from "@/lib/settings";
 import { getGoogleConnection, googleAction } from "@/lib/gcal";
+import { localDay, useGoogleEvents } from "@/hooks/useGoogleEvents";
+import { useQueryClient } from "@tanstack/react-query";
+import GoogleEventChip from "@/components/GoogleEventChip";
 import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import {
@@ -126,6 +129,7 @@ export default function SchedulePlanning() {
   const dragNavTimer = useRef<ReturnType<typeof setTimeout>>();
   const [syncing, setSyncing] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const queryClient = useQueryClient();
 
   const normalizedTaskQuery = taskQuery.trim().toLowerCase();
   const taskMatchesQuery = useCallback((t: Task) => {
@@ -162,6 +166,7 @@ export default function SchedulePlanning() {
         title: "Google Calendar synced",
         description: `${r.created} added, ${r.updated} updated, ${r.removed} removed${r.failed ? `, ${r.failed} failed: ${r.errors[0]}` : ""}`
       });
+      queryClient.invalidateQueries({ queryKey: ["google-events"] });
     } catch (e: any) {
       toast({ title: "Sync failed", description: e.message, variant: "destructive" });
     } finally {
@@ -250,6 +255,19 @@ export default function SchedulePlanning() {
     });
     return { done, total };
   }, [visiblePreviousDates, visibleScheduledDates, previousTasksByDate, scheduledTasksByDate]);
+
+  // Google Calendar events for the days on screen (T-9).
+  const [eventsFrom, eventsTo] = useMemo(() => {
+    const dayAfter = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
+    if (view === "month") return [localDay(new Date(year, month, 1)), localDay(new Date(year, month + 1, 1))];
+    if (view === "week") {
+      const week = getWeekDates(currentDate);
+      return [localDay(week[0]), localDay(dayAfter(week[6]))];
+    }
+    const days = [...visiblePreviousDates, ...visibleScheduledDates].sort();
+    return days.length ? [days[0], localDay(dayAfter(new Date(`${days[days.length - 1]}T00:00:00`)))] : ["", ""];
+  }, [view, year, month, currentDate, visiblePreviousDates, visibleScheduledDates]);
+  const googleEvents = useGoogleEvents(eventsFrom, eventsTo);
 
   const handleDropOnUnscheduled = (e: React.DragEvent) => {
     e.preventDefault();
@@ -651,6 +669,9 @@ export default function SchedulePlanning() {
                   const day = i + 1;
                   const dateStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
                   const dayEvents = calendarEvents[dateStr] || [];
+                  const gEvents = googleEvents[dateStr] || [];
+                  const gShown = gEvents.slice(0, Math.max(0, 3 - dayEvents.length));
+                  const hidden = dayEvents.length + gEvents.length - Math.min(dayEvents.length, 3) - gShown.length;
                   const isToday = dateStr === today;
                   return (
                     <div key={day} className="min-h-[90px] border-b border-r border-border p-1.5 cursor-pointer hover:bg-muted/30 transition-colors" onDrop={(e) => handleDrop(e, dateStr)} onDragOver={handleDragOver} onClick={() => setSelectedDay(dateStr)}>
@@ -670,7 +691,8 @@ export default function SchedulePlanning() {
                               {ev.title}
                             </div>
                         )}
-                          {dayEvents.length > 3 && <span className="text-[9px] text-muted-foreground">+{dayEvents.length - 3}</span>}
+                          {gShown.map((ev) => <GoogleEventChip key={ev.id} event={ev} />)}
+                          {hidden > 0 && <span className="text-[9px] text-muted-foreground">+{hidden}</span>}
                         </div>
                       </div>);
 
@@ -734,6 +756,7 @@ export default function SchedulePlanning() {
                               </div>
                             </div>
                         )}
+                          {(googleEvents[localDay(date)] || []).map((ev) => <GoogleEventChip key={ev.id} event={ev} className="px-1.5 py-1" />)}
                         </div>
                       </div>);
 
@@ -777,8 +800,11 @@ export default function SchedulePlanning() {
                   onDrop={(e) => handleDropOnDay(e, dateStr)}
                   onDragOver={handleScheduledDragOver}>
                   
-                  <div className="mb-2 border-b border-border pb-2 min-h-[24px]">
-                    <h4 className="text-sm font-semibold text-muted-foreground">{formatDayLabel(dateStr)}</h4>
+                  <div className="mb-2 border-b border-border pb-2 min-h-[24px] flex items-center gap-2">
+                    <h4 className="text-sm font-semibold text-muted-foreground shrink-0">{formatDayLabel(dateStr)}</h4>
+                    <div className="flex min-w-0 gap-1 overflow-hidden">
+                      {(googleEvents[dateStr] || []).map((ev) => <GoogleEventChip key={ev.id} event={ev} className="max-w-[12rem] shrink-0" />)}
+                    </div>
                   </div>
                   {dayTasks.map((task) => {
                     const overdue = isTaskOverdue(task);
@@ -801,7 +827,7 @@ export default function SchedulePlanning() {
                               task.status === "complete" && "task-card-complete",
                               overdue && "task-card-overdue"
                             )}>
-                            
+
                             {showProgressBars && progressPct > 0 && task.status !== "complete" &&
                             <div
                               className={cn("task-progress-red absolute inset-0 pointer-events-none rounded-lg", blinkEffect && "task-progress-blink")}
@@ -885,8 +911,11 @@ export default function SchedulePlanning() {
                   onDrop={(e) => handleDropOnDay(e, dateStr)}
                   onDragOver={handleScheduledDragOver}>
                   
-                  <div className="mb-2 border-b border-border pb-2 min-h-[24px]">
-                    <h4 className="text-sm font-semibold text-muted-foreground">{formatDayLabel(dateStr)}</h4>
+                  <div className="mb-2 border-b border-border pb-2 min-h-[24px] flex items-center gap-2">
+                    <h4 className="text-sm font-semibold text-muted-foreground shrink-0">{formatDayLabel(dateStr)}</h4>
+                    <div className="flex min-w-0 gap-1 overflow-hidden">
+                      {(googleEvents[dateStr] || []).map((ev) => <GoogleEventChip key={ev.id} event={ev} className="max-w-[12rem] shrink-0" />)}
+                    </div>
                   </div>
                   {dayTasks.map((task) => {
                     const overdue = isTaskOverdue(task);
@@ -1165,6 +1194,11 @@ export default function SchedulePlanning() {
                   <X className="h-4 w-4" />
                 </button>
               </div>
+              {(googleEvents[selectedDay] || []).length > 0 &&
+            <div className="space-y-1">
+                  {googleEvents[selectedDay].map((ev) => <GoogleEventChip key={ev.id} event={ev} className="px-2 py-1 text-xs" />)}
+                </div>
+            }
               {selectedDayTasks.length === 0 ?
             <p className="text-sm text-muted-foreground text-center py-6">No tasks on this day</p> :
 

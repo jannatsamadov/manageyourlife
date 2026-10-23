@@ -7,6 +7,11 @@
 // Read tools need the "read" scope, write tools "write" (OAuth tokens get both); every write is logged in api_audit_log.
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 import { TOOLS, ToolError } from "./tools.ts";
+import { syncTasksIfConnected } from "../_shared/gsync.ts";
+
+declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void } | undefined;
+// Task changes also go to Google Calendar / Google Tasks when the user connected Google (T-69).
+const GOOGLE_SYNCED = new Set(["task_create", "task_update", "task_trash"]);
 
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, {
   auth: { persistSession: false },
@@ -72,6 +77,11 @@ async function callTool(auth: Auth, name: string, args: unknown) {
   try {
     const out = await tool.run(input, { db, userId: auth.user_id });
     if (tool.scope === "write") await log(auth, tool.name, (out as any).id ?? (input as any).id, true);
+    if (GOOGLE_SYNCED.has(tool.name)) {
+      // After the reply; the client does not wait for Google.
+      const job = syncTasksIfConnected(auth.user_id, [(out as any).id]);
+      if (typeof EdgeRuntime !== "undefined") EdgeRuntime.waitUntil(job);
+    }
     return { content: [{ type: "text", text: JSON.stringify(out, null, 2) }] };
   } catch (e) {
     const message = e instanceof ToolError ? e.message : `Server error: ${(e as any)?.message ?? e}`;

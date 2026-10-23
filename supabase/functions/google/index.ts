@@ -1,20 +1,59 @@
 // Google Calendar + Google Tasks for the signed-in user (P-17, P-50). POST { action, ... }:
 //   calendars      → calendars the user can write to
-//   import_tasks   → open Google Tasks into the Inbox (one-way; an item is never imported twice)
-//   sync_calendar  → scheduled tasks → all-day events in the chosen calendar; create / update / delete, no duplicates
+//   events         → { time_min, time_max } Google events for the app calendar (read on demand, nothing stored)
+//   import_tasks   → open Google Tasks into the Inbox (an item is never imported twice); tasks completed or deleted
+//                    in Google since the last import take their Inbox item out / mark the app task done
+//   sync_calendar  → scheduled tasks → all-day events in the chosen calendar, and done state → Google Tasks
 //                    { task_ids?: string[] } limits it to those tasks (auto-sync after a change in the app)
 //   disconnect     → revoke the access at Google and forget the tokens
-import { GoogleError, ReconnectNeeded, cors, db, decrypt, google, hex, json, sha256, userFrom } from "../_shared/google.ts";
+import { GoogleError, ReconnectNeeded, cors, db, decrypt, google, json, userFrom } from "../_shared/google.ts";
+import { CAL, TASKS, syncCalendar, syncTasks } from "../_shared/gsync.ts";
 
-const CAL = "https://www.googleapis.com/calendar/v3";
-const TASKS = "https://tasks.googleapis.com/tasks/v1";
-const gone = (e: unknown) => e instanceof GoogleError && (e.status === 404 || e.status === 410);
+class BadInput extends Error {}
 
 async function calendars(userId: string) {
   const data = await google(userId, `${CAL}/users/me/calendarList?minAccessRole=writer&maxResults=250`);
   return {
     calendars: (data.items ?? []).map((c: any) => ({ id: c.id, name: c.summaryOverride ?? c.summary, primary: !!c.primary })),
   };
+}
+
+// Events of the calendars the user shows in Google Calendar, between two instants (at most 100 days).
+// The app's own task events are left out: the tasks are on the calendar already.
+async function events(userId: string, timeMin: unknown, timeMax: unknown) {
+  const from = typeof timeMin === "string" ? Date.parse(timeMin) : NaN;
+  const to = typeof timeMax === "string" ? Date.parse(timeMax) : NaN;
+  if (isNaN(from) || isNaN(to) || to <= from) throw new BadInput("time_min and time_max: ISO times, min < max");
+  const range = `timeMin=${encodeURIComponent(new Date(from).toISOString())}&timeMax=${encodeURIComponent(new Date(Math.min(to, from + 100 * 86400_000)).toISOString())}`;
+
+  const list = await google(userId, `${CAL}/users/me/calendarList?maxResults=250`);
+  const shown = (list.items ?? []).filter((c: any) => c.selected && !c.hidden && !c.deleted).slice(0, 25);
+  const perCalendar = await Promise.all(shown.map(async (c: any) => {
+    try {
+      const page = await google(userId, `${CAL}/calendars/${encodeURIComponent(c.id)}/events?${range}&singleEvents=true&orderBy=startTime&maxResults=250` +
+        "&fields=items(id,summary,start,end,htmlLink,status,extendedProperties)");
+      return (page.items ?? [])
+        .filter((e: any) => e.status !== "cancelled" && !e.extendedProperties?.private?.myl_task_id)
+        .map((e: any) => ({
+          id: `${c.id}:${e.id}`,
+          title: e.summary || "(no title)",
+          all_day: !!e.start?.date,
+          start: e.start?.date ?? e.start?.dateTime,
+          end: e.end?.date ?? e.end?.dateTime,
+          url: e.htmlLink ?? null,
+          color: c.backgroundColor ?? null,
+          calendar: c.summaryOverride ?? c.summary,
+        }));
+    } catch (e) {
+      if (e instanceof ReconnectNeeded) throw e;
+      console.warn(`events of ${c.id}:`, e instanceof Error ? e.message : e); // e.g. a subscribed calendar that went away
+      return [];
+    }
+  }));
+  const all = perCalendar.flat().filter((e) => e.start && e.end);
+  // All-day first, then by start time.
+  all.sort((a, b) => Number(b.all_day) - Number(a.all_day) || a.start.localeCompare(b.start));
+  return { events: all };
 }
 
 async function allPages(userId: string, url: string) {
@@ -29,12 +68,23 @@ async function allPages(userId: string, url: string) {
 }
 
 async function importTasks(userId: string) {
+  const { data: conn, error: connError } = await db.from("google_connections").select("last_tasks_import_at").eq("user_id", userId).maybeSingle();
+  if (connError) throw connError;
+  const startedAt = new Date().toISOString();
+  // After the first import only what changed since the last one (a few minutes' overlap), done and deleted ones too.
+  const since = conn?.last_tasks_import_at ? new Date(new Date(conn.last_tasks_import_at).getTime() - 5 * 60_000).toISOString() : null;
+  const query = since
+    ? `showCompleted=true&showHidden=true&showDeleted=true&updatedMin=${encodeURIComponent(since)}`
+    : "showCompleted=false&showHidden=false";
+
   const lists = await allPages(userId, `${TASKS}/users/@me/lists`);
   let found = 0;
   let added = 0;
+  const closed: any[] = [];
   for (const list of lists) {
-    const tasks = (await allPages(userId, `${TASKS}/lists/${encodeURIComponent(list.id)}/tasks?showCompleted=false&showHidden=false`))
-      .filter((t) => t.title?.trim() || t.notes?.trim());
+    const all = await allPages(userId, `${TASKS}/lists/${encodeURIComponent(list.id)}/tasks?${query}`);
+    closed.push(...all.filter((t) => t.deleted || t.status === "completed"));
+    const tasks = all.filter((t) => !t.deleted && t.status !== "completed" && (t.title?.trim() || t.notes?.trim()));
     found += tasks.length;
     if (!tasks.length) continue;
     const rows = tasks.map((t) => ({
@@ -52,84 +102,46 @@ async function importTasks(userId: string) {
     if (error) throw error;
     added += data.length;
   }
-  await db.from("google_connections").update({ last_tasks_import_at: new Date().toISOString() }).eq("user_id", userId);
-  return { lists: lists.length, found, added };
+  const done = await closeFromGoogle(userId, closed);
+  await db.from("google_connections").update({ last_tasks_import_at: startedAt }).eq("user_id", userId);
+  return { lists: lists.length, found, added, done };
 }
 
-// All-day event for a task's planned day (end date is exclusive in Google Calendar).
-function eventFor(t: any) {
-  const end = new Date(`${t.date}T00:00:00Z`);
-  end.setUTCDate(end.getUTCDate() + 1);
-  const details = [t.description?.trim(), t.link || null, t.estimated_time ? `Estimate: ${t.estimated_time} min` : null].filter(Boolean);
-  return {
-    summary: (t.status === "complete" ? "✓ " : "") + t.title,
-    description: [...details, "— ManageYourLife"].join("\n\n"),
-    start: { date: t.date },
-    end: { date: end.toISOString().slice(0, 10) },
-    transparency: "transparent",
-    extendedProperties: { private: { myl_task_id: t.id } },
-  };
-}
-
-async function syncCalendar(userId: string, taskIds?: unknown) {
-  const { data: conn, error: connError } = await db.from("google_connections").select("calendar_id").eq("user_id", userId).maybeSingle();
-  if (connError) throw connError;
-  if (!conn) throw new ReconnectNeeded("Google is not connected");
-  const calendarId: string = conn.calendar_id;
-  const eventsUrl = (cal: string, id?: string) => `${CAL}/calendars/${encodeURIComponent(cal)}/events${id ? `/${encodeURIComponent(id)}` : ""}`;
-
-  let q = db.from("tasks")
-    .select("id, title, description, status, date, link, estimated_time, deleted_at, gcal_event_id, gcal_calendar_id, gcal_hash")
-    .eq("user_id", userId);
-  if (Array.isArray(taskIds) && taskIds.length) q = q.in("id", taskIds.filter((id) => typeof id === "string").slice(0, 200));
-  else q = q.or("date.not.is.null,gcal_event_id.not.is.null");
-  const { data: tasks, error } = await q;
-  if (error) throw error;
-
-  const counts = { created: 0, updated: 0, removed: 0, unchanged: 0, failed: 0 };
-  const errors: string[] = [];
-  for (const t of tasks) {
-    try {
-      const wanted = !!t.date && !t.deleted_at && t.status !== "abandoned";
-      // Unscheduled / trashed / abandoned, or the target calendar changed → the old event goes.
-      if (t.gcal_event_id && (!wanted || t.gcal_calendar_id !== calendarId)) {
-        await google(userId, eventsUrl(t.gcal_calendar_id ?? calendarId, t.gcal_event_id), { method: "DELETE" }).catch((e) => {
-          if (!gone(e)) throw e;
-        });
-        await db.from("tasks").update({ gcal_event_id: null, gcal_calendar_id: null, gcal_hash: null }).eq("id", t.id);
-        t.gcal_event_id = null;
-        if (!wanted) counts.removed++;
-      }
-      if (!wanted) continue;
-
-      const body = eventFor(t);
-      const hash = hex(await sha256(JSON.stringify(body)));
-      if (t.gcal_event_id && t.gcal_hash === hash) {
-        counts.unchanged++;
+// Completed or deleted in Google Tasks: an unsorted Inbox item leaves the Inbox; a task made from it is marked done
+// (completed only — a task deleted in Google stays as it is in the app).
+async function closeFromGoogle(userId: string, closed: any[]) {
+  let done = 0;
+  const completedTasks: string[] = [];
+  for (let i = 0; i < closed.length; i += 100) {
+    const chunk = closed.slice(i, i + 100);
+    const byRef = new Map(chunk.map((t) => [t.id, t]));
+    const { data: items, error } = await db.from("inbox_items").select("id, source_ref, sorted_at, result_type, result_id, meta")
+      .eq("user_id", userId).eq("source", "google_tasks").in("source_ref", [...byRef.keys()]);
+    if (error) throw error;
+    for (const item of items) {
+      const g = byRef.get(item.source_ref);
+      const status = g.deleted ? "deleted" : "completed";
+      const meta = item.meta ?? {};
+      if (meta.gtask_status === status) continue;
+      if (!item.sorted_at) {
+        await db.from("inbox_items").update({ sorted_at: new Date().toISOString(), result_type: "deleted", meta: { ...meta, gtask_status: status } }).eq("id", item.id);
+        done++;
         continue;
       }
-      let event: any = null;
-      if (t.gcal_event_id) {
-        // Deleted in Google meanwhile → create it again below.
-        event = await google(userId, eventsUrl(calendarId, t.gcal_event_id), { method: "PUT", body }).catch((e) => {
-          if (!gone(e)) throw e;
-          return null;
-        });
-        if (event) counts.updated++;
+      if (item.result_type === "task" && item.result_id && status === "completed") {
+        const { data: task } = await db.from("tasks").select("id, status, actual_end").eq("user_id", userId).eq("id", item.result_id).maybeSingle();
+        if (task && task.status !== "complete") {
+          await db.from("tasks").update({ status: "complete", actual_end: task.actual_end ?? g.completed ?? new Date().toISOString() }).eq("id", task.id);
+          completedTasks.push(task.id);
+          done++;
+        }
       }
-      if (!event) {
-        event = await google(userId, eventsUrl(calendarId), { method: "POST", body });
-        counts.created++;
-      }
-      await db.from("tasks").update({ gcal_event_id: event.id, gcal_calendar_id: calendarId, gcal_hash: hash }).eq("id", t.id);
-    } catch (e) {
-      if (e instanceof ReconnectNeeded) throw e;
-      counts.failed++;
-      errors.push(`${t.title}: ${e instanceof Error ? e.message : e}`);
+      await db.from("inbox_items").update({ meta: { ...meta, gtask_status: status } }).eq("id", item.id);
     }
   }
-  await db.from("google_connections").update({ last_calendar_sync_at: new Date().toISOString() }).eq("user_id", userId);
-  return { ...counts, errors: errors.slice(0, 5) };
+  // Their calendar events get the ✓.
+  if (completedTasks.length) await syncCalendar(userId, completedTasks).catch((e) => console.error("calendar after import:", e));
+  return done;
 }
 
 async function disconnect(userId: string) {
@@ -152,17 +164,19 @@ Deno.serve(async (req) => {
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
   const user = await userFrom(req);
   if (!user) return json({ error: "Unauthorized" }, 401);
-  const { action, task_ids } = await req.json().catch(() => ({}));
+  const { action, task_ids, time_min, time_max } = await req.json().catch(() => ({}));
 
   try {
     switch (action) {
       case "calendars": return json(await calendars(user.id));
+      case "events": return json(await events(user.id, time_min, time_max));
       case "import_tasks": return json(await importTasks(user.id));
-      case "sync_calendar": return json(await syncCalendar(user.id, task_ids));
+      case "sync_calendar": return json(await syncTasks(user.id, task_ids));
       case "disconnect": return json(await disconnect(user.id));
       default: return json({ error: `Unknown action: ${action}` }, 400);
     }
   } catch (e) {
+    if (e instanceof BadInput) return json({ error: e.message }, 400);
     if (e instanceof ReconnectNeeded) return json({ error: e.message, reconnect: true }, 409);
     if (e instanceof GoogleError) return json({ error: `Google: ${e.message}` }, 502);
     console.error(`google ${action}:`, e);
