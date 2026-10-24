@@ -232,7 +232,7 @@ export type Database = {
             foreignKeyName: "note_task_links_note_id_fkey"
             columns: ["note_id"]
             isOneToOne: false
-            referencedRelation: "notes"
+            referencedRelation: "vault_files"
             referencedColumns: ["id"]
           },
           {
@@ -441,7 +441,7 @@ export type Database = {
             foreignKeyName: "subtasks_note_id_fkey"
             columns: ["note_id"]
             isOneToOne: false
-            referencedRelation: "notes"
+            referencedRelation: "vault_files"
             referencedColumns: ["id"]
           },
           {
@@ -575,7 +575,7 @@ export type Database = {
             foreignKeyName: "tasks_linked_note_id_fkey"
             columns: ["linked_note_id"]
             isOneToOne: false
-            referencedRelation: "notes"
+            referencedRelation: "vault_files"
             referencedColumns: ["id"]
           },
           {
@@ -609,18 +609,21 @@ export type Database = {
         Row: {
           chat_id: number
           created_at: string
+          time_zone: string
           user_id: string
           username: string | null
         }
         Insert: {
           chat_id: number
           created_at?: string
+          time_zone?: string
           user_id: string
           username?: string | null
         }
         Update: {
           chat_id?: number
           created_at?: string
+          time_zone?: string
           user_id?: string
           username?: string | null
         }
@@ -657,6 +660,8 @@ export type Database = {
         Row: {
           body: string | null
           etag: string
+          excerpt: string | null
+          id: string
           indexed_at: string
           links: string[]
           modified_at: string
@@ -666,11 +671,15 @@ export type Database = {
           title: string
           todo_done: number
           todo_open: number
+          trash_key: string | null
+          trashed_at: string | null
           user_id: string
         }
         Insert: {
           body?: string | null
           etag: string
+          excerpt?: string | null
+          id?: string
           indexed_at?: string
           links?: string[]
           modified_at: string
@@ -680,11 +689,15 @@ export type Database = {
           title: string
           todo_done?: number
           todo_open?: number
+          trash_key?: string | null
+          trashed_at?: string | null
           user_id: string
         }
         Update: {
           body?: string | null
           etag?: string
+          excerpt?: string | null
+          id?: string
           indexed_at?: string
           links?: string[]
           modified_at?: string
@@ -694,6 +707,29 @@ export type Database = {
           title?: string
           todo_done?: number
           todo_open?: number
+          trash_key?: string | null
+          trashed_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      vault_folders: {
+        Row: {
+          color: string | null
+          path: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          color?: string | null
+          path: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          color?: string | null
+          path?: string
+          updated_at?: string
           user_id?: string
         }
         Relationships: []

@@ -8,7 +8,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 const BOT = import.meta.env.VITE_TELEGRAM_BOT_USERNAME as string;
 const WAIT_MS = 15 * 60 * 1000; // link code lifetime
 
-// Settings card: link a Telegram chat; the bot drops every message into the Inbox (P-19).
+// Settings card: link a Telegram chat; the bot puts every message into today's draft note, Drafts/<date> (P-19, P-57).
 export default function TelegramConnect() {
   const { user } = useAuth();
   const [link, setLink] = useState<{ chat_id: number; username: string | null } | null>(null);
@@ -18,7 +18,12 @@ export default function TelegramConnect() {
   const poll = useRef<ReturnType<typeof setInterval>>();
 
   const load = useCallback(async () => {
-    const { data } = await supabase.from("telegram_links").select("chat_id, username").maybeSingle();
+    const { data } = await supabase.from("telegram_links").select("chat_id, username, time_zone").maybeSingle();
+    // The bot names the daily draft by the user's own date (P-57).
+    const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (data && zone && data.time_zone !== zone) {
+      await supabase.from("telegram_links").update({ time_zone: zone }).eq("chat_id", data.chat_id);
+    }
     setLink(data);
     setLoading(false);
     return data;

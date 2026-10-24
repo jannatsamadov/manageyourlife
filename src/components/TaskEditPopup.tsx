@@ -7,6 +7,7 @@ import { useAuth } from "@/context/AuthContext";
 import { cn } from "@/lib/utils";
 import { useStrategyNodes } from "@/hooks/useStrategy";
 import { buildForest, pickList } from "@/lib/strategy";
+import { vault } from "@/lib/vault";
 
 function formatDuration(ms: number): string {
   const seconds = Math.floor(ms / 1000);
@@ -81,10 +82,11 @@ export default function TaskEditPopup({ task, onClose }: TaskEditPopupProps) {
       const noteIds = [...new Set(items.filter(s => s.note_id).map(s => s.note_id))];
       let noteTitles: Record<string, string> = {};
       if (noteIds.length > 0) {
-        const { data: notes } = await (supabase
-          .from("notes" as any)
+        // Notes are vault files (P-57); the id survives renames.
+        const { data: notes } = await supabase
+          .from("vault_files")
           .select("id, title")
-          .in("id", noteIds) as any);
+          .in("id", noteIds as string[]);
         if (notes) {
           (notes as any[]).forEach(n => { noteTitles[n.id] = n.title; });
         }
@@ -134,34 +136,9 @@ export default function TaskEditPopup({ task, onClose }: TaskEditPopupProps) {
     await (supabase.from("subtasks" as any).update({ completed } as any).eq("id", id) as any);
     setSubtasks((prev) => prev.map((s) => s.id === id ? { ...s, completed } : s));
 
-    // Two-way sync: update note content if this subtask came from a note
+    // Two-way sync: the same "- [ ]" line in the note file is ticked (server side, version-checked).
     if (subtask.note_id) {
-      const { data: noteData } = await (supabase
-        .from("notes" as any)
-        .select("content")
-        .eq("id", subtask.note_id)
-        .single() as any);
-
-      if (noteData) {
-        const noteContent = noteData.content as string;
-        const todoRegex = /^- \[( |x)\] (.+)$/gm;
-        let match: RegExpExecArray | null;
-        let newContent = noteContent;
-
-        while ((match = todoRegex.exec(noteContent)) !== null) {
-          if (match[2] === subtask.title) {
-            const lineStart = match.index;
-            const lineEnd = match.index + match[0].length;
-            const replacement = `- [${completed ? "x" : " "}] ${subtask.title}`;
-            newContent = newContent.slice(0, lineStart) + replacement + newContent.slice(lineEnd);
-            break;
-          }
-        }
-
-        if (newContent !== noteContent) {
-          await (supabase.from("notes" as any).update({ content: newContent, updated_at: new Date().toISOString() } as any).eq("id", subtask.note_id) as any);
-        }
-      }
+      await vault("toggle_todo", { note_id: subtask.note_id, title: subtask.title, completed }).catch(() => {});
     }
   }, [subtasks]);
 

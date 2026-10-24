@@ -5,6 +5,7 @@ interface NoteCardProps {
   content: string;
   updatedAt: string;
   onClick: () => void;
+  todos?: { done: number; total: number }; // when the content is only an excerpt (vault notes)
 }
 
 function formatDate(iso: string) {
@@ -28,10 +29,10 @@ function countTodos(content: string): { done: number; total: number } {
   return { done, total: todos.length };
 }
 
-export default function NoteCard({ title, content, updatedAt, onClick }: NoteCardProps) {
+export default function NoteCard({ title, content, updatedAt, onClick, todos: given }: NoteCardProps) {
   const preview = getPreviewLines(content);
-  const hasMore = content.split("\n").filter((l) => l.trim()).length > 2;
-  const todos = countTodos(content);
+  const hasMore = content.split("\n").filter((l) => l.trim()).length > 2 || content.length > 120;
+  const todos = given ?? countTodos(content);
 
   return (
     <div

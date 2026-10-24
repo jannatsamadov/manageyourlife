@@ -1,8 +1,10 @@
-// Telegram bot webhook (P-19): every message from a linked chat lands in the Inbox as it came — no AI, no parsing.
+// Telegram bot webhook (P-19, P-57): what you send lands in today's draft note — Drafts/<date>.md in your notes — under a
+// heading per kind (Ideas, Questions, To-dos, Resources, Notes), one list item per message. No AI, no parsing.
 // "/start <code>" (or the bare code) links the chat to an account (the code comes from Settings → Telegram).
-// "/idea", "/question", "/todo", "/resource" in front of the text set the item's kind; the buttons under ✓ set or change it.
-// Files are copied into Storage (bucket inbox-files) after the reply, so the bot answers at once.
+// "/idea", "/question", "/todo", "/resource" in front of the text set the kind; the buttons under ✓ move it, Undo removes it.
+// Photos and files go to Drafts/files/ after the reply (so the bot answers at once) and are embedded in the item.
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
+import { addItem, DRAFT_SECTIONS, editNote, hasItem, putFile, removeItem, replaceItem, safeName, sectionOfItem, trashFile } from "../_shared/vault.ts";
 
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void } | undefined;
 
@@ -13,10 +15,11 @@ const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPAB
 });
 
 const HOW_TO_LINK = "ManageYourLife → Settings → Telegram → Connect, then send me the code shown there.";
-const LINKED = "✓ Connected. Send me anything. Start with /idea, /question, /todo or /resource to file it.";
+const LINKED = "✓ Connected. Send me anything: it goes to today's draft in your notes. Start with /idea, /question, /todo or /resource to file it.";
 const KINDS: Record<string, string> = { idea: "💡", question: "❓", todo: "✅", resource: "📚" };
 const KIND_COMMAND = /^\/(idea|question|todo|resource)(@\w+)?(\s+|$)/i;
 const TELEGRAM_FILE_LIMIT = 20 * 1024 * 1024; // bots can download up to 20 MB
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
 // Constant-time compare of Telegram's secret header.
 function sameSecret(given: string | null, expected: string) {
@@ -39,35 +42,57 @@ const answer = (method: string, body: Record<string, unknown>) =>
 const done = () => new Response("ok");
 const say = (chatId: number, text: string) => answer("sendMessage", { chat_id: chatId, text });
 
-// ✓ (+ kind) with the kind buttons and Undo.
-const receipt = (itemId: string, kind: string | null) => ({
+// ✓ (+ kind) with the kind buttons and Undo; the buttons carry the draft's date and the message id.
+const receipt = (day: string, messageId: number, kind: string | null) => ({
   text: kind ? `✓ ${KINDS[kind]}` : "✓",
   reply_markup: {
     inline_keyboard: [
-      Object.entries(KINDS).map(([k, emoji]) => ({ text: k === kind ? `[${emoji}]` : emoji, callback_data: `kind:${itemId}:${k}` })),
-      [{ text: "Undo", callback_data: `undo:${itemId}` }],
+      Object.entries(KINDS).map(([k, emoji]) => ({ text: k === kind ? `[${emoji}]` : emoji, callback_data: `kind:${day}:${messageId}:${k}` })),
+      [{ text: "Undo", callback_data: `undo:${day}:${messageId}` }],
     ],
   },
 });
 
-async function linkedUser(chatId: number): Promise<string | null> {
-  const { data, error } = await supabase.from("telegram_links").select("user_id").eq("chat_id", chatId).maybeSingle();
+async function linkedUser(chatId: number) {
+  const { data, error } = await supabase.from("telegram_links").select("user_id, time_zone").eq("chat_id", chatId).maybeSingle();
   if (error) throw error;
-  return data?.user_id ?? null;
+  return data ? { userId: data.user_id as string, timeZone: (data.time_zone as string) || "UTC" } : null;
 }
 
-function attachmentsOf(msg: any) {
-  const list: Record<string, unknown>[] = [];
-  const add = (type: string, f: any) =>
-    f && list.push({
+// The message's day and time in the user's own time zone.
+function localTime(unix: number, timeZone: string) {
+  const at = new Date(unix * 1000);
+  const format = (tz: string) => ({
+    day: new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).format(at),
+    time: new Intl.DateTimeFormat("en-GB", { timeZone: tz, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(at),
+  });
+  try {
+    return format(timeZone);
+  } catch {
+    return format("UTC");
+  }
+}
+
+type Attachment = { type: string; file_id: string; file_size: number | null; mime: string; name: string };
+
+const DEFAULT_NAMES: Record<string, string> = {
+  photo: "photo.jpg", video: "video.mp4", audio: "audio.mp3", voice: "voice.ogg", video_note: "video.mp4", animation: "animation.mp4", document: "file",
+};
+
+// The message's files, each with the name it gets in Drafts/files/ (the same name every time, so an edit finds them).
+function attachmentsOf(msg: any, day: string): Attachment[] {
+  const list: Attachment[] = [];
+  const add = (type: string, f: any) => {
+    if (!f) return;
+    const i = list.length;
+    list.push({
       type,
       file_id: f.file_id,
-      file_unique_id: f.file_unique_id,
-      file_name: f.file_name ?? null,
-      mime_type: f.mime_type ?? (type === "photo" ? "image/jpeg" : null),
       file_size: f.file_size ?? null,
-      path: null, // set once the file is in Storage
+      mime: f.mime_type ?? (type === "photo" ? "image/jpeg" : "application/octet-stream"),
+      name: `${day}-${msg.message_id}-${i}-${safeName(f.file_name ?? DEFAULT_NAMES[type]) || DEFAULT_NAMES[type]}`,
     });
+  };
   if (msg.photo?.length) add("photo", msg.photo[msg.photo.length - 1]);
   add("document", msg.document);
   add("video", msg.video);
@@ -76,16 +101,6 @@ function attachmentsOf(msg: any) {
   add("video_note", msg.video_note);
   add("animation", msg.animation);
   return list;
-}
-
-// URLs in the text, including hidden ones behind a word (text_link).
-function linksOf(text: string, entities: any[] = []) {
-  const links: string[] = [];
-  for (const e of entities) {
-    if (e.type === "text_link") links.push(e.url);
-    if (e.type === "url") links.push(text.substr(e.offset, e.length));
-  }
-  return [...new Set(links)];
 }
 
 function forwardOf(msg: any) {
@@ -105,49 +120,62 @@ function forwardOf(msg: any) {
 function contentOf(msg: any) {
   const text: string = msg.text ?? msg.caption ?? "";
   const command = text.match(KIND_COMMAND);
-  return { text, content: command ? text.slice(command[0].length) : text, kind: command ? command[1].toLowerCase() : null };
+  return { content: command ? text.slice(command[0].length) : text, kind: command ? command[1].toLowerCase() : null };
 }
 
-function metaOf(msg: any, text: string) {
+const kindOfSection = (section: string | null) => Object.keys(KINDS).find((k) => DRAFT_SECTIONS[k] === section) ?? null;
+
+// One list item: "- 14:32 text ^tg<id>" (a to-do: "- [ ] text ^tg<id>"), more lines indented under it.
+function itemOf(o: { kind: string | null; time: string; text: string; marker: string; checked?: boolean; more: string[] }) {
+  const [first = "", ...rest] = o.text.trim().split(/\r?\n/);
+  const head = o.kind === "todo" ? `- [${o.checked ? "x" : " "}] ${first}` : `- ${o.time} ${first}`;
+  const lines = [...rest, ...o.more].map((l) => l.trim()).filter(Boolean);
+  return [`${head.trimEnd()} ^${o.marker}`, ...lines.map((l) => `  ${l}`)].join("\n");
+}
+
+function moreOf(msg: any, files: Attachment[]) {
   const forward = forwardOf(msg);
-  return {
-    source_url: forward.url,
-    meta: { links: linksOf(text, msg.entities ?? msg.caption_entities), forwarded_from: forward.from, telegram: msg },
-  };
+  const more: string[] = [];
+  if (forward.from || forward.url) more.push(`— ${[forward.from, forward.url].filter(Boolean).join(" ")}`);
+  for (const f of files) {
+    more.push(f.file_size && f.file_size > TELEGRAM_FILE_LIMIT ? `(${f.type} over 20 MB, kept in Telegram)` : `![[${f.name}]]`);
+  }
+  return more;
 }
 
-// Copies the item's files from Telegram into Storage and records their paths.
-async function storeFiles(userId: string, itemId: string, attachments: any[]) {
-  const stored = [];
-  for (const [i, a] of attachments.entries()) {
-    try {
-      if (a.file_size && a.file_size > TELEGRAM_FILE_LIMIT) {
-        stored.push({ ...a, too_big: true });
-        continue;
-      }
-      const info = await (await callTelegram("getFile", { file_id: a.file_id })).json();
-      if (!info.ok) throw new Error(info.description);
-      const file = await fetch(`https://api.telegram.org/file/bot${BOT_TOKEN}/${info.result.file_path}`);
-      if (!file.ok) throw new Error(`download ${file.status}`);
-      const ext = String(info.result.file_path).match(/\.\w+$/)?.[0] ?? "";
-      const name = (a.file_name ?? `${a.type}${ext}`).replace(/[^\w.\-]+/g, "_").slice(-100);
-      const path = `${userId}/${itemId}/${i}-${name}`;
-      const { error } = await supabase.storage.from("inbox-files")
-        .upload(path, await file.arrayBuffer(), { contentType: a.mime_type ?? "application/octet-stream", upsert: true });
-      if (error) throw error;
-      stored.push({ ...a, path });
-    } catch (e) {
-      console.error("telegram file:", e);
-      stored.push(a);
-    }
-  }
-  await supabase.from("inbox_items").update({ attachments: stored }).eq("id", itemId);
+// The parts of an item already in the draft (to change its kind without losing its text).
+function parseItem(text: string, marker: string) {
+  const lines = text.split("\n");
+  const start = lines.findIndex((l) => l.trimEnd().endsWith(` ^${marker}`));
+  if (start < 0) return null;
+  const m = lines[start].trimEnd().slice(0, -` ^${marker}`.length).match(/^- (?:\[( |x)\] )?(?:(\d{2}:\d{2}) )?(.*)$/);
+  const more: string[] = [];
+  for (let i = start + 1; i < lines.length && /^ {2,}\S/.test(lines[i]); i++) more.push(lines[i].trim());
+  return { checked: m?.[1] === "x", time: m?.[2] ?? "", text: m?.[3] ?? "", more };
 }
+
+const draftPath = (day: string) => `Drafts/${day}.md`;
 
 const inBackground = (job: Promise<unknown>) => {
   if (typeof EdgeRuntime !== "undefined") EdgeRuntime.waitUntil(job);
   else job.catch(console.error);
 };
+
+// Copies the message's files from Telegram into Drafts/files/.
+async function storeFiles(userId: string, files: Attachment[]) {
+  for (const f of files) {
+    try {
+      if (f.file_size && f.file_size > TELEGRAM_FILE_LIMIT) continue;
+      const info = await (await callTelegram("getFile", { file_id: f.file_id })).json();
+      if (!info.ok) throw new Error(info.description);
+      const file = await fetch(`https://api.telegram.org/file/bot${BOT_TOKEN}/${info.result.file_path}`);
+      if (!file.ok) throw new Error(`download ${file.status}`);
+      await putFile(supabase, userId, `Drafts/files/${f.name}`, await file.arrayBuffer(), f.mime);
+    } catch (e) {
+      console.error("telegram file:", e);
+    }
+  }
+}
 
 async function onMessage(msg: any) {
   const chatId: number = msg.chat.id;
@@ -170,82 +198,78 @@ async function onMessage(msg: any) {
     return say(chatId, (await linkedUser(chatId)) ? LINKED : HOW_TO_LINK);
   }
 
-  const userId = await linkedUser(chatId);
-  if (!userId) return say(chatId, HOW_TO_LINK);
+  const user = await linkedUser(chatId);
+  if (!user) return say(chatId, HOW_TO_LINK);
 
-  const { text: original, content, kind } = contentOf(msg);
-  const attachments = attachmentsOf(msg);
-  if (!content.trim() && !attachments.length) {
-    return say(chatId, kind ? `/${kind} your text` : "Nothing to save.");
-  }
+  const { content, kind } = contentOf(msg);
+  const { day, time } = localTime(msg.date, user.timeZone);
+  const files = attachmentsOf(msg, day);
+  if (!content.trim() && !files.length) return say(chatId, kind ? `/${kind} your text` : "Nothing to save.");
 
-  const { data: inserted, error } = await supabase
-    .from("inbox_items")
-    .upsert({
-      user_id: userId,
-      source: "telegram",
-      source_ref: `${chatId}:${msg.message_id}`,
-      content,
-      kind,
-      attachments,
-      ...metaOf(msg, original),
-    }, { onConflict: "user_id,source,source_ref", ignoreDuplicates: true })
-    .select("id");
-  if (error) throw error;
-  // A retried update is already saved: no second ✓.
-  if (!inserted?.length) return done();
-  const itemId = inserted[0].id;
-  if (attachments.length) inBackground(storeFiles(userId, itemId, attachments));
+  const marker = `tg${msg.message_id}`;
+  let fresh = false;
+  await editNote(supabase, user.userId, draftPath(day), (draft) => {
+    fresh = !hasItem(draft, marker); // a retried update is already in the draft: no second ✓
+    if (!fresh) return null;
+    return addItem(draft, DRAFT_SECTIONS[kind ?? "note"], itemOf({ kind, time, text: content, marker, more: moreOf(msg, files) }));
+  });
+  if (!fresh) return done();
+  if (files.length) inBackground(storeFiles(user.userId, files));
 
   return answer("sendMessage", {
     chat_id: chatId,
     disable_notification: true,
     reply_parameters: { message_id: msg.message_id, allow_sending_without_reply: true },
-    ...receipt(itemId, kind),
+    ...receipt(day, msg.message_id, kind),
   });
 }
 
-// An edited message updates its Inbox item while it is still unsorted (files and kind stay unless a command is added).
+// An edited message updates its item (a command added to the text moves it to that kind).
 async function onEdit(msg: any) {
   if (msg.chat.type !== "private") return done();
-  const userId = await linkedUser(msg.chat.id);
-  if (!userId) return done();
-  const { text, content, kind } = contentOf(msg);
-  const { error } = await supabase
-    .from("inbox_items")
-    .update({ content, ...(kind ? { kind } : {}), ...metaOf(msg, text) })
-    .eq("user_id", userId)
-    .eq("source", "telegram")
-    .eq("source_ref", `${msg.chat.id}:${msg.message_id}`)
-    .is("sorted_at", null);
-  if (error) throw error;
+  const user = await linkedUser(msg.chat.id);
+  if (!user) return done();
+  const { content, kind } = contentOf(msg);
+  const { day, time } = localTime(msg.date, user.timeZone);
+  const marker = `tg${msg.message_id}`;
+  await editNote(supabase, user.userId, draftPath(day), (draft) => {
+    if (!draft || !hasItem(draft, marker)) return null;
+    const section = sectionOfItem(draft, marker);
+    const old = parseItem(draft, marker);
+    const item = itemOf({ kind: kind ?? kindOfSection(section), time, text: content, marker, checked: old?.checked, more: moreOf(msg, attachmentsOf(msg, day)) });
+    return kind && DRAFT_SECTIONS[kind] !== section ? addItem(removeItem(draft, marker), DRAFT_SECTIONS[kind], item) : replaceItem(draft, marker, item);
+  });
   return done();
 }
 
 async function onCallback(cq: any) {
-  const [action, id, kind] = String(cq.data ?? "").split(":");
+  const [action, day, messageId, kind] = String(cq.data ?? "").split(":");
   const chatId: number | undefined = cq.message?.chat?.id;
-  const userId = chatId && id ? await linkedUser(chatId) : null;
-  if (!userId || !["undo", "kind"].includes(action)) return answer("answerCallbackQuery", { callback_query_id: cq.id });
+  const valid = ["undo", "kind"].includes(action) && DAY.test(day ?? "") && /^\d+$/.test(messageId ?? "");
+  const user = chatId && valid ? await linkedUser(chatId) : null;
+  if (!user) return answer("answerCallbackQuery", { callback_query_id: cq.id });
+  const marker = `tg${messageId}`;
+  const sentAt = cq.message?.reply_to_message?.date;
 
   if (action === "kind" && KINDS[kind]) {
-    const { data, error } = await supabase.from("inbox_items").update({ kind })
-      .eq("id", id).eq("user_id", userId).is("sorted_at", null).select("id");
-    if (error) throw error;
-    if (data?.length) await callTelegram("editMessageText", { chat_id: chatId, message_id: cq.message.message_id, ...receipt(id, kind) });
-    return answer("answerCallbackQuery", { callback_query_id: cq.id, text: data?.length ? `${KINDS[kind]} ${kind}` : "Already sorted in the app" });
+    const saved = await editNote(supabase, user.userId, draftPath(day), (draft) => {
+      const old = draft ? parseItem(draft, marker) : null;
+      if (!draft || !old) return null;
+      const time = old.time || (sentAt ? localTime(sentAt, user.timeZone).time : "");
+      return addItem(removeItem(draft, marker), DRAFT_SECTIONS[kind], itemOf({ kind, time, text: old.text, marker, checked: old.checked, more: old.more }));
+    });
+    if (saved) await callTelegram("editMessageText", { chat_id: chatId, message_id: cq.message.message_id, ...receipt(day, Number(messageId), kind) });
+    return answer("answerCallbackQuery", { callback_query_id: cq.id, text: saved ? `${KINDS[kind]} ${kind}` : "Not in the draft any more" });
   }
 
-  const { data, error } = await supabase.from("inbox_items").delete()
-    .eq("id", id).eq("user_id", userId).is("sorted_at", null).select("attachments");
-  if (error) throw error;
-  const removed = !!data?.length;
+  const removed = await editNote(supabase, user.userId, draftPath(day), (draft) => (draft && hasItem(draft, marker) ? removeItem(draft, marker) : null));
   if (removed) {
-    const paths = (data[0].attachments ?? []).map((a: any) => a.path).filter(Boolean);
-    if (paths.length) await supabase.storage.from("inbox-files").remove(paths);
+    const { data } = await supabase.from("vault_files").select("path").eq("user_id", user.userId).is("trashed_at", null)
+      .like("path", `Drafts/files/${day}-${messageId}-%`);
+    for (const f of data ?? []) await trashFile(supabase, user.userId, f.path);
     await callTelegram("editMessageText", { chat_id: chatId, message_id: cq.message.message_id, text: "↩ Removed" });
   }
-  return answer("answerCallbackQuery", { callback_query_id: cq.id, text: removed ? "Removed" : "Already sorted in the app" });
+  return answer("answerCallbackQuery", { callback_query_id: cq.id, text: removed ? "Removed" : "Not in the draft any more" });
 }
 
 Deno.serve(async (req) => {

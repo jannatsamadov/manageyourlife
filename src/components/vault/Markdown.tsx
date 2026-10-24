@@ -15,6 +15,7 @@ const wiki = (target: string) => `wiki:${encodeURIComponent(target.trim())}`;
 function toMarkdown(text: string) {
   return text
     .replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/, "") // frontmatter: its tags show above the note
+    .replace(/[ \t]\^[\w-]+$/gm, "") // block ids (^tg123 marks a Telegram item) stay in the file, not on screen
     .replace(/!\[\[([^\]|#\n]+)(?:#[^\]|\n]*)?(?:\|([^\]\n]*))?\]\]/g, (_, target: string, size?: string) =>
       isImage(target) ? `![${/^\d+(x\d+)?$/.test(size ?? "") ? size : ""}](${wiki(target)})` : `[${label(target)}](${wiki(target)})`)
     .replace(/\[\[([^\]|#\n]+)(#[^\]|\n]*)?(?:\|([^\]\n]*))?\]\]/g, (_, target: string, heading?: string, alias?: string) =>

@@ -5,6 +5,7 @@ import type { Tables } from "@/integrations/supabase/types";
 import { useAuth } from "@/context/AuthContext";
 import { useAppState } from "@/context/AppContext";
 import { toast } from "@/hooks/use-toast";
+import { INBOX, safeName, vault } from "@/lib/vault";
 import { ToastAction } from "@/components/ui/toast";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -156,16 +157,17 @@ export default function Inbox() {
     if (!user) return;
     setBusy(item.id);
     try {
+      // A note is a file in the Inbox folder (P-57); " 2", " 3"… when the name is taken.
       const { title } = splitTitle(item.content, 80);
       const source = item.source_url ? `\n\nSource: ${item.source_url}` : "";
-      const { data, error } = await supabase
-        .from("notes")
-        .insert({ user_id: user.id, title: title || "Inbox note", content: item.content.trim() + source })
-        .select("id, title")
-        .single();
-      if (error) throw error;
-      await markSorted(item, "note", data.id);
-      toast({ title: "Moved to notes", description: data.title });
+      const name = safeName(title) || "Inbox note";
+      let saved: { id?: string; conflict?: boolean } = { conflict: true };
+      for (let n = 1; saved.conflict && n < 20; n++) {
+        saved = await vault("write", { path: `${INBOX}/${name}${n > 1 ? ` ${n}` : ""}.md`, text: item.content.trim() + source, etag: null });
+      }
+      if (!saved.id) throw new Error("A note with this name already exists");
+      await markSorted(item, "note", saved.id);
+      toast({ title: "Moved to notes", description: name });
     } catch (e: any) {
       toast({ title: "Failed", description: e.message, variant: "destructive" });
     } finally {

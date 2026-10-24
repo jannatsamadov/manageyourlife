@@ -1,6 +1,7 @@
 // MCP tools (P-18). Every query is filtered by the token owner's user_id (the client is the service role).
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2.45.4";
 import { CHILD_KIND, NODE_COLS, loadTree, present } from "./strategy.ts";
+import { editNote, moveFile, noteById, readNote, safeName, syncTodos, VaultError, writeNote } from "../_shared/vault.ts";
 
 export type Ctx = { db: SupabaseClient; userId: string };
 
@@ -117,12 +118,30 @@ async function ownNode(db: SupabaseClient, userId: string, id: unknown) {
   return node as any;
 }
 
-async function ownNote(db: SupabaseClient, userId: string, id: unknown, cols = "id, title, content, created_at, updated_at") {
-  need(isUuid(id), "note id: uuid");
-  const note = check(await db.from("notes").select(cols).eq("user_id", userId).eq("id", id).is("deleted_at", null).maybeSingle());
-  need(note, "note not found");
-  return note as any;
+// Notes are the files of the user's vault (P-57); a missing note or a bad path is the caller's mistake.
+async function inVault<T>(f: () => Promise<T>) {
+  try {
+    return await f();
+  } catch (e) {
+    if (e instanceof VaultError) throw new ToolError(e.message);
+    throw e;
+  }
 }
+
+async function ownNote(db: SupabaseClient, userId: string, id: unknown) {
+  need(isUuid(id), "note id: uuid");
+  return inVault(async () => {
+    const { path } = await noteById(db, userId, id);
+    const note = await readNote(db, userId, path);
+    return { id: note.id!, path, title: path.split("/").pop()!.replace(/\.md$/i, ""), content: note.text };
+  });
+}
+
+const NOTE_FOLDER = "Inbox"; // where new notes go unless a folder is given
+const notePath = (folder: unknown, title: string) => {
+  const dir = typeof folder === "string" ? folder.trim().replace(/^\/+|\/+$/g, "") : NOTE_FOLDER;
+  return `${dir ? `${dir}/` : ""}${safeName(title) || "Untitled"}.md`;
+};
 
 const READ = { readOnlyHint: true, openWorldHint: false };
 const WRITE = { readOnlyHint: false, destructiveHint: false, openWorldHint: false };
@@ -190,8 +209,9 @@ export const TOOLS: Tool[] = [
     run: async ({ id }, { db, userId }) => {
       const task = await ownTask(db, userId, id);
       const subtasks = check(await db.from("subtasks").select("id, title, completed, position").eq("user_id", userId).eq("parent_task_id", id).order("position"));
-      const links = check(await db.from("note_task_links").select("notes(id, title)").eq("user_id", userId).eq("task_id", id));
-      return { ...taskOut(task), subtasks, notes: (links as any[]).map((l) => l.notes).filter(Boolean) };
+      const links = check(await db.from("note_task_links").select("vault_files(id, title, path, trashed_at)").eq("user_id", userId).eq("task_id", id));
+      const notes = (links as any[]).map((l) => l.vault_files).filter((n) => n && !n.trashed_at).map(({ trashed_at: _, ...n }) => n);
+      return { ...taskOut(task), subtasks, notes };
     },
   },
   {
@@ -271,19 +291,26 @@ export const TOOLS: Tool[] = [
   {
     name: "notes_search",
     title: "Search notes",
-    description: "Find notes by text in the title or content (Markdown). Without query: the most recently edited notes.",
+    description:
+      "Find notes (all of the user's notes: Markdown files in folders, Obsidian style) by text in the name, path or content; " +
+      "folder narrows to one folder and its sub-folders. Without query: the most recently changed notes.",
     scope: "read",
-    inputSchema: { type: "object", properties: { query: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 100, default: 20 } } },
+    inputSchema: {
+      type: "object",
+      properties: { query: { type: "string" }, folder: { type: "string", description: "e.g. \"Notes/İdeyalar\"" }, limit: { type: "integer", minimum: 1, maximum: 100, default: 20 } },
+    },
     annotations: READ,
-    run: async ({ query, limit }, { db, userId }) => {
-      let q = db.from("notes").select("id, title, content, updated_at").eq("user_id", userId).is("deleted_at", null);
+    run: async ({ query, folder, limit }, { db, userId }) => {
+      let q = db.from("vault_files").select("id, path, title, tags, body, modified_at").eq("user_id", userId).is("trashed_at", null).ilike("path", "%.md");
       const term = searchTerm(query);
-      if (term) q = q.or(`title.ilike.*${term}*,content.ilike.*${term}*`);
-      const rows = check(await q.order("updated_at", { ascending: false }).limit(limitOf(limit, 20, 100))) as any[];
+      if (term) q = q.or(`path.ilike.*${term}*,body.ilike.*${term}*`);
+      if (typeof folder === "string" && folder.trim()) q = q.like("path", `${folder.trim().replace(/^\/+|\/+$/g, "").replace(/[%_\\]/g, "\\$&")}/%`);
+      const rows = check(await q.order("modified_at", { ascending: false }).limit(limitOf(limit, 20, 100))) as any[];
       return {
-        notes: rows.map(({ content, ...n }) => {
-          const at = term ? Math.max(content.toLowerCase().indexOf(term.toLowerCase()) - 80, 0) : 0;
-          return { ...n, snippet: content.slice(at, at + 300) };
+        notes: rows.map(({ body, modified_at, ...n }) => {
+          const text = body ?? "";
+          const at = term ? Math.max(text.toLowerCase().indexOf(term.toLowerCase()) - 80, 0) : 0;
+          return { ...n, updated_at: modified_at, snippet: text.slice(at, at + 300) };
         }),
       };
     },
@@ -304,40 +331,59 @@ export const TOOLS: Tool[] = [
   {
     name: "note_create",
     title: "Create a note",
-    description: "Create a Markdown note (\"- [ ] item\" lines become to-dos in the app).",
+    description:
+      "Create a Markdown note (a file; the title is its file name). Goes to the Inbox folder unless folder is given (\"\" = top level). " +
+      "\"- [ ] item\" lines are to-dos; [[Note name]] links to another note.",
     scope: "write",
-    inputSchema: { type: "object", properties: { title: { type: "string" }, content: { type: "string" } }, required: ["title"] },
+    inputSchema: {
+      type: "object",
+      properties: { title: { type: "string" }, content: { type: "string" }, folder: { type: "string", description: "Default \"Inbox\"" } },
+      required: ["title"],
+    },
     annotations: WRITE,
-    run: async ({ title, content }, { db, userId }) => {
-      need(isText(title, 500), "title: 1–500 characters");
+    run: async ({ title, content, folder }, { db, userId }) => {
+      need(isText(title, 150), "title: 1–150 characters");
       need(content === undefined || (typeof content === "string" && content.length <= 200000), "content: text up to 200000 characters");
-      return check(await db.from("notes").insert({ user_id: userId, title: title.trim(), content: content ?? "" })
-        .select("id, title, content, created_at, updated_at").single()) as Record<string, unknown>;
+      const r = await inVault(() => writeNote(db, userId, notePath(folder, title), content ?? "", null));
+      need(!("conflict" in r), "a note with this name is already in that folder");
+      return r as Record<string, unknown>;
     },
   },
   {
     name: "note_update",
     title: "Update a note",
-    description: "Rename a note, replace its content, or append text to the end (append keeps what is there).",
+    description:
+      "Rename a note, move it to another folder, replace its content, or append text to the end (append keeps what is there).",
     scope: "write",
     inputSchema: {
       type: "object",
-      properties: { id: ID, title: { type: "string" }, content: { type: "string", description: "New full content" }, append: { type: "string", description: "Text added at the end" } },
+      properties: {
+        id: ID,
+        title: { type: "string" },
+        folder: { type: "string", description: "Move to this folder (\"\" = top level)" },
+        content: { type: "string", description: "New full content" },
+        append: { type: "string", description: "Text added at the end" },
+      },
       required: ["id"],
     },
     annotations: WRITE,
-    run: async ({ id, title, content, append }, { db, userId }) => {
+    run: async ({ id, title, folder, content, append }, { db, userId }) => {
       const note = await ownNote(db, userId, id);
       need(!(content !== undefined && append !== undefined), "use content or append, not both");
-      const row: Record<string, unknown> = {};
-      if (title !== undefined) { need(isText(title, 500), "title: 1–500 characters"); row.title = title.trim(); }
-      if (content !== undefined) { need(typeof content === "string" && content.length <= 200000, "content: text up to 200000 characters"); row.content = content; }
-      if (append !== undefined) {
-        need(isText(append, 200000), "append: non-empty text");
-        row.content = note.content ? `${note.content.replace(/\s+$/, "")}\n\n${append}` : append;
+      need(title !== undefined || folder !== undefined || content !== undefined || append !== undefined, "nothing to change");
+      if (title !== undefined) need(isText(title, 150), "title: 1–150 characters");
+      if (content !== undefined) need(typeof content === "string" && content.length <= 200000, "content: text up to 200000 characters");
+      if (append !== undefined) need(isText(append, 200000), "append: non-empty text");
+      let path = note.path;
+      if (title !== undefined || folder !== undefined) {
+        const dir = folder !== undefined ? folder : path.split("/").slice(0, -1).join("/");
+        path = (await inVault(() => moveFile(db, userId, note.path, notePath(dir, title ?? note.title)))).path;
       }
-      need(Object.keys(row).length, "nothing to change");
-      return check(await db.from("notes").update(row).eq("user_id", userId).eq("id", id).select("id, title, content, updated_at").single()) as Record<string, unknown>;
+      if (content !== undefined || append !== undefined) {
+        await inVault(() => editNote(db, userId, path, (text) =>
+          content !== undefined ? content : text?.trim() ? `${text.replace(/\s+$/, "")}\n\n${append}\n` : `${append}\n`));
+      }
+      return ownNote(db, userId, id);
     },
   },
   {
@@ -348,9 +394,10 @@ export const TOOLS: Tool[] = [
     inputSchema: { type: "object", properties: { note_id: ID, task_id: ID }, required: ["note_id", "task_id"] },
     annotations: { ...WRITE, idempotentHint: true },
     run: async ({ note_id, task_id }, { db, userId }) => {
-      await ownNote(db, userId, note_id, "id");
+      const note = await ownNote(db, userId, note_id);
       await ownTask(db, userId, task_id);
       check(await db.from("note_task_links").upsert({ user_id: userId, note_id, task_id }, { onConflict: "note_id,task_id", ignoreDuplicates: true }));
+      await syncTodos(db, userId, note.id, note.content); // the note's "- [ ]" lines become the task's subtasks
       return { note_id, task_id, linked: true };
     },
   },

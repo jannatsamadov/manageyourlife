@@ -3,6 +3,8 @@ import { Trash2, Undo2, AlertTriangle, Loader2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/context/AuthContext";
 import { queueCalendarSync } from "@/lib/gcal";
+import { vault } from "@/lib/vault";
+import { toast } from "@/hooks/use-toast";
 
 interface TrashTask {
   id: string;
@@ -35,16 +37,16 @@ export default function Trash() {
           .eq("user_id", user.id)
           .not("deleted_at", "is", null as any)
           .order("deleted_at", { ascending: false }) as any,
+        // Notes are files now (P-57): the trashed ones of the vault.
         supabase
-          .from("notes" as any)
-          .select("id,title,deleted_at" as any)
-          .eq("user_id", user.id)
-          .not("deleted_at", "is", null as any)
-          .order("deleted_at", { ascending: false }) as any,
+          .from("vault_files")
+          .select("id, title, trashed_at")
+          .not("trashed_at", "is", null)
+          .order("trashed_at", { ascending: false }),
       ]);
 
       if (!taskRes.error && taskRes.data) setTasks(taskRes.data as TrashTask[]);
-      if (!noteRes.error && noteRes.data) setNotes(noteRes.data as TrashNote[]);
+      if (!noteRes.error && noteRes.data) setNotes(noteRes.data.map((n) => ({ id: n.id, title: n.title, deleted_at: n.trashed_at! })));
       setLoading(false);
     })();
   }, [user]);
@@ -61,12 +63,11 @@ export default function Trash() {
   };
 
   const restoreNote = async (id: string) => {
-    const { error } = await (supabase
-      .from("notes" as any)
-      .update({ deleted_at: null } as any)
-      .eq("id", id) as any);
-    if (!error) {
+    try {
+      await vault("restore", { id });
       setNotes((prev) => prev.filter((n) => n.id !== id));
+    } catch (e) {
+      toast({ title: "Not restored", description: (e as Error).message, variant: "destructive" });
     }
   };
 
@@ -78,9 +79,11 @@ export default function Trash() {
   };
 
   const wipeNote = async (id: string) => {
-    const { error } = await (supabase.from("notes" as any).delete().eq("id", id) as any);
-    if (!error) {
+    try {
+      await vault("purge", { id });
       setNotes((prev) => prev.filter((n) => n.id !== id));
+    } catch (e) {
+      toast({ title: "Not deleted", description: (e as Error).message, variant: "destructive" });
     }
   };
 

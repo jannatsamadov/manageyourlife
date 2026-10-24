@@ -1,0 +1,481 @@
+/* The owner's folder card (notes/design/folder-card-reference.html), ported as it is. Changes, and why:
+   - every rule sits under .fc (the reference's class names such as .header / .paper / .footer would leak into the app);
+   - :root variables live on .fc and a card overrides them for its colour; the glow colour became a variable too;
+   - the checkbox state (:checked) became .is-open (the card opens the folder) and .is-drop (a note dragged over it);
+   - owner: the 3-dot and settings icons show on hover only;
+   - room above the card for the paper to rise (min-height), the to-do counter is plain text (no CSS counters). */
+.fc {
+  --bg-color: #f2f2f6;
+  --folder-back-color: #469cf4;
+  --folder-front-grad-start: #6db6fb;
+  --folder-front-grad-end: #3b93ee;
+  --folder-glow: rgba(56, 166, 253, 0.45);
+  --paper-color: #ffffff;
+  --text-main: #ffffff;
+  --text-sub: rgba(255, 255, 255, 0.75);
+  --font-sans: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", SFMono-Regular, Consolas, monospace;
+}
+
+.fc.card-viewport {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 380px;
+  width: 100%;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+  font-family: var(--font-sans);
+  background: transparent;
+}
+
+.fc .folder-container {
+  position: relative;
+  width: 320px;
+  height: 270px;
+  filter: drop-shadow(0 15px 25px rgba(0, 0, 0, 0.12));
+  perspective: 1000px;
+  transform-style: preserve-3d;
+  transition: transform 0.6s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.fc .folder-container:hover {
+  transform: translateY(-4px) rotateX(4deg);
+}
+
+.fc.is-open .folder-container,
+.fc.is-drop .folder-container {
+  transform: translateY(-2px) rotateX(2deg);
+}
+
+.fc .folder-glow {
+  position: absolute;
+  top: 25px;
+  left: 15px;
+  width: 290px;
+  height: 220px;
+  border-radius: 24px;
+  filter: blur(48px);
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0;
+  background-color: var(--folder-glow);
+  transform: scale(0.9);
+  transition:
+    opacity 0.8s cubic-bezier(0.16, 1, 0.3, 1),
+    transform 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.fc .folder-container:hover .folder-glow {
+  opacity: 0.22;
+  transform: scale(1.02);
+}
+
+.fc.is-open .folder-glow,
+.fc.is-drop .folder-glow {
+  opacity: 0.38;
+  transform: scale(1.08);
+}
+
+.fc .back-cover {
+  position: absolute;
+  top: 30px;
+  left: 0;
+  width: 100%;
+  height: 240px;
+  background-color: var(--folder-back-color);
+  border-radius: 0 18px 18px 18px;
+  z-index: 1;
+}
+
+.fc .back-tab {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 130px;
+  height: 50px;
+  background-color: var(--folder-back-color);
+  border-radius: 14px 14px 0 0;
+  z-index: 1;
+}
+
+.fc .swoop {
+  position: absolute;
+  top: 14px;
+  left: 130px;
+  width: 16px;
+  height: 16px;
+  background: radial-gradient(circle at top right, transparent 16px, var(--folder-back-color) 16.5px);
+  z-index: 1;
+}
+
+.fc .paper {
+  position: absolute;
+  top: 40px;
+  left: 12px;
+  right: 12px;
+  height: 200px;
+  background-color: var(--paper-color);
+  background-image: radial-gradient(#e5e7eb 1px, transparent 1px);
+  background-size: 8px 8px;
+  border-radius: 14px 14px 0 0;
+  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.04);
+  z-index: 2;
+  overflow: hidden;
+  transition:
+    transform 0.5s cubic-bezier(0.25, 1, 0.5, 1),
+    opacity 0.4s ease,
+    box-shadow 0.4s ease;
+}
+
+.fc.is-open .paper {
+  transform: translateY(-90px) rotate(-2deg) rotateY(5deg) scale(1.02);
+  z-index: 3;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.22);
+  transition:
+    transform 0.65s cubic-bezier(0.34, 1.8, 0.55, 1) 0.08s,
+    box-shadow 0.65s ease 0.08s;
+}
+
+.fc .front-cover {
+  position: absolute;
+  top: 72px;
+  left: 0;
+  width: 100%;
+  height: 198px;
+  background: linear-gradient(150deg, var(--folder-front-grad-start) 0%, var(--folder-front-grad-end) 100%);
+  border-radius: 18px;
+  box-shadow:
+    inset 1.5px 2px 4px rgba(255, 255, 255, 0.45),
+    inset -1px -1px 3px rgba(0, 0, 0, 0.1),
+    0 -2px 10px rgba(0, 0, 0, 0.06),
+    0 8px 20px rgba(0, 0, 0, 0.1);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  box-sizing: border-box;
+  padding: 22px 24px;
+  z-index: 5;
+  transform-origin: bottom center;
+  transform: perspective(1000px) rotateX(0deg);
+  transition:
+    transform 0.6s cubic-bezier(0.25, 1, 0.5, 1) 0.12s,
+    box-shadow 0.6s cubic-bezier(0.25, 1, 0.5, 1) 0.12s;
+  cursor: pointer;
+}
+
+.fc .cover-highlight {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.18) 0%, rgba(255, 255, 255, 0) 60%);
+  border-radius: 18px;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.fc .header {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  width: 100%;
+}
+
+.fc .title-group {
+  display: flex;
+  flex-direction: column;
+  text-align: left;
+  min-width: 0;
+}
+
+.fc .cover-main-title {
+  color: var(--text-main);
+  font-size: 23px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.fc .cover-subtitle {
+  margin-top: 4px;
+  color: var(--text-sub);
+  font-size: 13.5px;
+  font-weight: 400;
+  letter-spacing: 0.2px;
+}
+
+.fc .icon-group {
+  display: flex;
+  gap: 14px;
+  padding-top: 4px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.fc .folder-container:hover .icon-group,
+.fc .icon-group:focus-within {
+  opacity: 1;
+}
+
+.fc .fc-icon {
+  display: flex;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.fc .icon-group svg {
+  width: 20px;
+  height: 20px;
+  fill: var(--text-main);
+  opacity: 0.85;
+  transition:
+    opacity 0.2s ease,
+    transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.fc .folder-container:hover .icon-group .fc-icon:last-child svg {
+  transform: rotate(45deg);
+  opacity: 1;
+}
+
+.fc .footer {
+  position: relative;
+  z-index: 2;
+  text-align: left;
+}
+
+.fc .cover-notes-count {
+  color: rgba(255, 255, 255, 0.95);
+  font-size: 14.5px;
+  font-weight: 500;
+}
+
+.fc .folder-container:hover .front-cover {
+  transform: perspective(1000px) rotateX(-12deg);
+  transition-delay: 0s;
+}
+
+.fc.is-open .front-cover,
+.fc.is-drop .front-cover {
+  transform: perspective(1000px) rotateX(-28deg);
+  box-shadow:
+    inset 1.5px 2px 4px rgba(255, 255, 255, 0.45),
+    inset -1px -1px 3px rgba(0, 0, 0, 0.1),
+    0 -2px 10px rgba(0, 0, 0, 0.04),
+    0 16px 36px rgba(10, 115, 219, 0.26);
+  transition:
+    transform 0.6s cubic-bezier(0.2, 1.35, 0.4, 1) 0s,
+    box-shadow 0.6s cubic-bezier(0.2, 1.35, 0.4, 1) 0s;
+}
+
+.fc .memo-header {
+  background-color: #ffd043;
+  height: 34px;
+  padding: 0 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1.5px dashed rgba(94, 72, 0, 0.22);
+  box-sizing: border-box;
+}
+
+.fc .memo-date {
+  font-size: 7.5px;
+  color: #5e4800;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+}
+
+.fc .time-badge {
+  background-color: rgba(255, 255, 255, 0.4);
+  color: #5e4800;
+  border-radius: 8px;
+  padding: 1px 5px;
+  font-weight: 700;
+  margin-left: 5px;
+  display: inline-block;
+}
+
+.fc .memo-header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fc .header-dots-icon {
+  width: 10px;
+  height: 10px;
+  color: #5e4800;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.fc .folder-container:hover .header-dots-icon {
+  opacity: 0.7;
+}
+
+.fc .memo-done-btn {
+  font-size: 7.5px;
+  color: #5e4800;
+  background: rgba(255, 255, 255, 0.35);
+  border-radius: 10px;
+  padding: 2.5px 8px;
+  font-weight: 700;
+}
+
+.fc .memo-body {
+  padding: 12px 10px;
+  display: flex;
+  flex-direction: column;
+  height: calc(100% - 34px);
+  box-sizing: border-box;
+  position: relative;
+  background-color: #ffffff;
+}
+
+.fc .memo-body::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 28px;
+  width: 1px;
+  background-color: rgba(239, 68, 68, 0.3);
+  z-index: 1;
+  pointer-events: none;
+}
+
+.fc .memo-title {
+  order: -2;
+  font-size: 11px;
+  font-weight: 700;
+  color: #1f2937;
+  margin-top: 4px;
+  margin-bottom: 8px;
+  display: block;
+  text-align: left;
+}
+
+.fc .todo-list {
+  order: -1;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  flex-grow: 1;
+  overflow-y: hidden;
+  background: linear-gradient(rgba(0, 0, 0, 0) 96%, #e5e7eb 96%);
+  background-size: 100% 22px;
+  padding-left: 28px;
+  box-sizing: border-box;
+}
+
+.fc .todo-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 9px;
+  color: #374151;
+  height: 22px;
+  min-height: 22px;
+  box-sizing: border-box;
+  position: relative;
+  z-index: 2;
+}
+
+.fc .todo-text {
+  position: relative;
+  transition: color 0.3s ease;
+  font-family: var(--font-sans);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fc .todo-text::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 0;
+  height: 1px;
+  background-color: #9ca3af;
+  transition: width 0.3s ease-in-out;
+}
+
+.fc .todo-checkbox:checked ~ .todo-text::before {
+  width: 100%;
+}
+
+.fc .todo-checkbox:checked ~ .todo-text {
+  color: #9ca3af;
+}
+
+.fc .todo-checkbox {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 11px;
+  height: 11px;
+  border: 1px solid #f59e0b;
+  border-radius: 50%;
+  outline: none;
+  position: relative;
+  background-color: #fff;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
+.fc .todo-checkbox:checked {
+  background-color: #f59e0b;
+  border-color: #f59e0b;
+}
+
+.fc .todo-checkbox::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 3.5px;
+  width: 2.5px;
+  height: 4.5px;
+  border: solid white;
+  border-width: 0 1.2px 1.2px 0;
+  transform: rotate(45deg) scale(0);
+  transition: transform 0.15s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.fc .todo-checkbox:checked::after {
+  transform: rotate(45deg) scale(1);
+}
+
+.fc .memo-footer {
+  border-top: 1px solid #f3f4f6;
+  padding-top: 6px;
+  margin-top: 6px;
+}
+
+.fc .footer-txt {
+  font-size: 7.5px;
+  color: #4b5563;
+  display: block;
+  text-align: center;
+}
+
+.fc .hashtag {
+  color: #db2777;
+  background-color: #fce7f3;
+  padding: 1.5px 5.5px;
+  border-radius: 4px;
+  font-weight: 700;
+  display: inline-block;
+}
