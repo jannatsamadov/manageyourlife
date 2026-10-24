@@ -8,7 +8,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 const BOT = import.meta.env.VITE_TELEGRAM_BOT_USERNAME as string;
 const WAIT_MS = 15 * 60 * 1000; // link code lifetime
 
-// Settings card: link a Telegram chat; the bot puts every message into today's draft note, Drafts/<date> (P-19, P-57).
+// Settings card: link a Telegram chat; the bot puts every message into today's Inbox note, Inbox/<date> (P-19, P-57).
 export default function TelegramConnect() {
   const { user } = useAuth();
   const [link, setLink] = useState<{ chat_id: number; username: string | null } | null>(null);

@@ -1,7 +1,10 @@
 // MCP tools (P-18). Every query is filtered by the token owner's user_id (the client is the service role).
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2.45.4";
 import { CHILD_KIND, NODE_COLS, loadTree, present } from "./strategy.ts";
-import { editNote, moveFile, noteById, readNote, safeName, syncTodos, VaultError, writeNote } from "../_shared/vault.ts";
+import {
+  addItem, CAPTURE_SECTIONS, captureItem, editNote, INBOX, inboxNotePath, localTime, moveFile, noteById, readNote, safeName, syncTodos, userTimeZone,
+  VaultError, writeNote,
+} from "../_shared/vault.ts";
 
 export type Ctx = { db: SupabaseClient; userId: string };
 
@@ -137,7 +140,7 @@ async function ownNote(db: SupabaseClient, userId: string, id: unknown) {
   });
 }
 
-const NOTE_FOLDER = "Inbox"; // where new notes go unless a folder is given
+const NOTE_FOLDER = INBOX; // where new notes go unless a folder is given
 const notePath = (folder: unknown, title: string) => {
   const dir = typeof folder === "string" ? folder.trim().replace(/^\/+|\/+$/g, "") : NOTE_FOLDER;
   return `${dir ? `${dir}/` : ""}${safeName(title) || "Untitled"}.md`;
@@ -150,7 +153,7 @@ export const TOOLS: Tool[] = [
   {
     name: "today",
     title: "Today's plan",
-    description: "Tasks planned for a day, overdue tasks and the number of unsorted Inbox items. Pass the user's local date.",
+    description: "Tasks planned for a day, overdue tasks and the number of notes waiting in the Inbox folder. Pass the user's local date.",
     scope: "read",
     inputSchema: { type: "object", properties: { date: { ...DATE, description: "The user's local date; default: today in UTC" } } },
     annotations: READ,
@@ -160,9 +163,10 @@ export const TOOLS: Tool[] = [
         .eq("date", day).neq("status", "abandoned").order("position"));
       const overdue = check(await db.from("tasks").select(TASK_COLS).eq("user_id", userId).is("deleted_at", null)
         .neq("deadline", "").lt("deadline", day).not("status", "in", "(complete,abandoned)").order("deadline"));
-      const { count, error } = await db.from("inbox_items").select("id", { count: "exact", head: true }).eq("user_id", userId).is("sorted_at", null);
+      const { count, error } = await db.from("vault_files").select("id", { count: "exact", head: true }).eq("user_id", userId)
+        .is("trashed_at", null).like("path", `${INBOX}/%`).ilike("path", "%.md");
       if (error) throw error;
-      return { date: day, planned: (planned as any[]).map(taskOut), overdue: (overdue as any[]).map(taskOut), inbox_unsorted: count ?? 0 };
+      return { date: day, planned: (planned as any[]).map(taskOut), overdue: (overdue as any[]).map(taskOut), inbox_notes: count ?? 0 };
     },
   },
   {
@@ -404,34 +408,47 @@ export const TOOLS: Tool[] = [
   {
     name: "inbox_list",
     title: "List the Inbox",
-    description: "Unsorted Inbox items (captured from Telegram, Google Tasks, MCP, typed in the app…), newest first. kind: idea / question / todo / resource or null.",
+    description:
+      "The Inbox = the notes in the Inbox folder, waiting to be sorted: the daily capture notes (Inbox/<date>.md — Telegram and inbox_add, " +
+      "sections Ideas / Questions / To-dos / Resources / Notes) and new notes. Newest first, with the start of the text; read one with note_get, " +
+      "sort it by moving it (note_update folder) or making tasks.",
     scope: "read",
-    inputSchema: { type: "object", properties: { kind: { type: "string", enum: KINDS }, limit: { type: "integer", minimum: 1, maximum: 200, default: 50 } } },
+    inputSchema: { type: "object", properties: { limit: { type: "integer", minimum: 1, maximum: 200, default: 50 } } },
     annotations: READ,
-    run: async ({ kind, limit }, { db, userId }) => {
-      need(kind === undefined || KINDS.includes(kind), `kind: one of ${KINDS.join(", ")}`);
-      let q = db.from("inbox_items").select("id, kind, source, content, source_url, attachments, created_at").eq("user_id", userId).is("sorted_at", null);
-      if (kind) q = q.eq("kind", kind);
-      return { items: check(await q.order("created_at", { ascending: false }).limit(limitOf(limit, 50, 200))) };
+    run: async ({ limit }, { db, userId }) => {
+      const rows = check(await db.from("vault_files").select("id, path, title, body, modified_at").eq("user_id", userId).is("trashed_at", null)
+        .like("path", `${INBOX}/%`).ilike("path", "%.md").order("modified_at", { ascending: false }).limit(limitOf(limit, 50, 200))) as any[];
+      return { notes: rows.map(({ body, modified_at, ...n }) => ({ ...n, updated_at: modified_at, snippet: (body ?? "").slice(0, 500) })) };
     },
   },
   {
     name: "inbox_add",
     title: "Add to the Inbox",
-    description: "Capture something into the Inbox as is, to be sorted later by the user.",
+    description:
+      "Capture something into the Inbox as is, to be sorted later by the user: one item in today's capture note (Inbox/<date>.md), " +
+      "under the section of its kind (a to-do becomes a \"- [ ]\" line). Pass the user's local date.",
     scope: "write",
     inputSchema: {
       type: "object",
-      properties: { content: { type: "string" }, kind: { type: "string", enum: KINDS }, url: { type: "string", description: "Link back to the source" } },
+      properties: {
+        content: { type: "string" },
+        kind: { type: "string", enum: KINDS },
+        url: { type: "string", description: "Link back to the source" },
+        date: { ...DATE, description: "The user's local date; default: today in the user's time zone" },
+      },
       required: ["content"],
     },
     annotations: WRITE,
-    run: async ({ content, kind, url }, { db, userId }) => {
+    run: async ({ content, kind, url, date }, { db, userId }) => {
       need(isText(content, 20000), "content: 1–20000 characters");
       need(kind === undefined || KINDS.includes(kind), `kind: one of ${KINDS.join(", ")}`);
       need(url === undefined || (typeof url === "string" && url.length <= 2000), "url: up to 2000 characters");
-      return check(await db.from("inbox_items").insert({ user_id: userId, source: "mcp", content, kind: kind ?? null, source_url: url ?? null })
-        .select("id, kind, source, content, source_url, created_at").single()) as Record<string, unknown>;
+      const now = localTime(new Date(), await userTimeZone(db, userId));
+      const path = inboxNotePath(isDate(date) ? date : now.day);
+      const section = CAPTURE_SECTIONS[kind ?? "note"];
+      const item = captureItem({ kind: kind ?? null, time: now.time, text: content, marker: `mcp${Date.now()}`, more: url ? [url] : [] });
+      const saved = await inVault(() => editNote(db, userId, path, (text) => addItem(text, section, item)));
+      return { note_id: saved?.id, path, section };
     },
   },
   {

@@ -87,27 +87,45 @@ async function importTasks(userId: string) {
     const tasks = all.filter((t) => !t.deleted && t.status !== "completed" && (t.title?.trim() || t.notes?.trim()));
     found += tasks.length;
     if (!tasks.length) continue;
-    const rows = tasks.map((t) => ({
-      user_id: userId,
-      source: "google_tasks",
-      kind: "todo",
-      source_ref: t.id,
-      source_url: t.webViewLink ?? null,
-      content: [t.title?.trim(), t.notes?.trim()].filter(Boolean).join("\n\n"),
-      meta: { list: list.title, list_id: list.id, due: t.due ?? null, parent: t.parent ?? null, links: (t.links ?? []).map((l: any) => l.link), updated: t.updated },
-    }));
-    const { data, error } = await db.from("inbox_items")
-      .upsert(rows, { onConflict: "user_id,source,source_ref", ignoreDuplicates: true })
-      .select("id");
-    if (error) throw error;
-    added += data.length;
+    // New Google tasks become app tasks at once (unscheduled): to-dos are sorted by project, not in the Inbox (owner,
+    // 2026-10-25). The inbox_items row stays as the link Google task ↔ app task, so "done" syncs both ways.
+    const { data: known, error: knownError } = await db.from("inbox_items").select("source_ref").eq("user_id", userId)
+      .eq("source", "google_tasks").in("source_ref", tasks.map((t) => t.id));
+    if (knownError) throw knownError;
+    const seen = new Set(known.map((k) => k.source_ref));
+    for (const t of tasks.filter((t) => !seen.has(t.id))) {
+      const title = t.title?.trim() || String(t.notes).trim().split("\n")[0];
+      const { data: task, error } = await db.from("tasks").insert({
+        user_id: userId,
+        title: title.slice(0, 500),
+        description: t.title?.trim() ? (t.notes?.trim() ?? "") : "",
+        deadline: t.due ? String(t.due).slice(0, 10) : "",
+        link: t.webViewLink ?? "",
+        status: "idle",
+      }).select("id").single();
+      if (error) throw error;
+      const { error: linkError } = await db.from("inbox_items").insert({
+        user_id: userId,
+        source: "google_tasks",
+        kind: "todo",
+        source_ref: t.id,
+        source_url: t.webViewLink ?? null,
+        content: [t.title?.trim(), t.notes?.trim()].filter(Boolean).join("\n\n"),
+        meta: { list: list.title, list_id: list.id, due: t.due ?? null, parent: t.parent ?? null, links: (t.links ?? []).map((l: any) => l.link), updated: t.updated },
+        sorted_at: new Date().toISOString(),
+        result_type: "task",
+        result_id: task.id,
+      });
+      if (linkError) throw linkError;
+      added++;
+    }
   }
   const done = await closeFromGoogle(userId, closed);
   await db.from("google_connections").update({ last_tasks_import_at: startedAt }).eq("user_id", userId);
   return { lists: lists.length, found, added, done };
 }
 
-// Completed or deleted in Google Tasks: an unsorted Inbox item leaves the Inbox; a task made from it is marked done
+// Completed or deleted in Google Tasks: an (older) unsorted Inbox item is closed; a task made from it is marked done
 // (completed only — a task deleted in Google stays as it is in the app).
 async function closeFromGoogle(userId: string, closed: any[]) {
   let done = 0;

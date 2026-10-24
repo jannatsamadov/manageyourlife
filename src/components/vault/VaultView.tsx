@@ -105,8 +105,10 @@ export default function VaultView() {
   const [mode, setMode] = useState<Mode>(() => (remember.get("notes.view") === "gallery" ? "gallery" : "list"));
   const [selected, setSelected] = useState<string | null>(() => remember.get("vault.open"));
   const [fresh, setFresh] = useState<string | null>(null); // a note just made here opens in edit mode
-  const [open, setOpen] = useState<Set<string>>(new Set());
-  const [folder, setFolder] = useState(() => remember.get("notes.folder") ?? "");
+  // ?folder=Inbox (the old /inbox link) opens that folder.
+  const [asked] = useState(() => new URLSearchParams(window.location.search).get("folder"));
+  const [open, setOpen] = useState<Set<string>>(() => new Set(asked ? asked.split("/").map((_, i, a) => a.slice(0, i + 1).join("/")) : []));
+  const [folder, setFolder] = useState(() => asked ?? remember.get("notes.folder") ?? "");
   const [q, setQ] = useState("");
   const [textHits, setTextHits] = useState<Set<string> | null>(null);
   const [naming, setNaming] = useState<string | null>(null);

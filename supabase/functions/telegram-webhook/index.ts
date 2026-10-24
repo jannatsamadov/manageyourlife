@@ -1,10 +1,13 @@
-// Telegram bot webhook (P-19, P-57): what you send lands in today's draft note — Drafts/<date>.md in your notes — under a
-// heading per kind (Ideas, Questions, To-dos, Resources, Notes), one list item per message. No AI, no parsing.
+// Telegram bot webhook (P-19, P-57): what you send lands in the Inbox — today's capture note Inbox/<date>.md in your
+// notes — under a heading per kind (Ideas, Questions, To-dos, Resources, Notes), one list item per message. No AI.
 // "/start <code>" (or the bare code) links the chat to an account (the code comes from Settings → Telegram).
 // "/idea", "/question", "/todo", "/resource" in front of the text set the kind; the buttons under ✓ move it, Undo removes it.
-// Photos and files go to Drafts/files/ after the reply (so the bot answers at once) and are embedded in the item.
+// Photos and files go to Inbox/files/ after the reply (so the bot answers at once) and are embedded in the item.
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
-import { addItem, DRAFT_SECTIONS, editNote, hasItem, putFile, removeItem, replaceItem, safeName, sectionOfItem, trashFile } from "../_shared/vault.ts";
+import {
+  addItem, CAPTURE_SECTIONS, captureItem, editNote, hasItem, INBOX, inboxNotePath, localTime, putFile, removeItem, replaceItem, safeName,
+  sectionOfItem, trashFile,
+} from "../_shared/vault.ts";
 
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void } | undefined;
 
@@ -15,8 +18,8 @@ const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPAB
 });
 
 const HOW_TO_LINK = "ManageYourLife → Settings → Telegram → Connect, then send me the code shown there.";
-const LINKED = "✓ Connected. Send me anything: it goes to today's draft in your notes. Start with /idea, /question, /todo or /resource to file it.";
-const KINDS: Record<string, string> = { idea: "💡", question: "❓", todo: "✅", resource: "📚" };
+const LINKED = "✓ Connected. Send me anything: it goes to today's note in your Inbox. Start with /idea, /question, /todo or /resource to file it.";
+const KINDS: Record<string, string> = { idea: "Idea", question: "Question", todo: "To-do", resource: "Resource" };
 const KIND_COMMAND = /^\/(idea|question|todo|resource)(@\w+)?(\s+|$)/i;
 const TELEGRAM_FILE_LIMIT = 20 * 1024 * 1024; // bots can download up to 20 MB
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
@@ -42,12 +45,12 @@ const answer = (method: string, body: Record<string, unknown>) =>
 const done = () => new Response("ok");
 const say = (chatId: number, text: string) => answer("sendMessage", { chat_id: chatId, text });
 
-// ✓ (+ kind) with the kind buttons and Undo; the buttons carry the draft's date and the message id.
+// ✓ (+ kind) with the kind buttons and Undo; the buttons carry the capture note's date and the message id.
 const receipt = (day: string, messageId: number, kind: string | null) => ({
   text: kind ? `✓ ${KINDS[kind]}` : "✓",
   reply_markup: {
     inline_keyboard: [
-      Object.entries(KINDS).map(([k, emoji]) => ({ text: k === kind ? `[${emoji}]` : emoji, callback_data: `kind:${day}:${messageId}:${k}` })),
+      Object.entries(KINDS).map(([k, word]) => ({ text: k === kind ? `${word} ✓` : word, callback_data: `kind:${day}:${messageId}:${k}` })),
       [{ text: "Undo", callback_data: `undo:${day}:${messageId}` }],
     ],
   },
@@ -60,18 +63,7 @@ async function linkedUser(chatId: number) {
 }
 
 // The message's day and time in the user's own time zone.
-function localTime(unix: number, timeZone: string) {
-  const at = new Date(unix * 1000);
-  const format = (tz: string) => ({
-    day: new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).format(at),
-    time: new Intl.DateTimeFormat("en-GB", { timeZone: tz, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(at),
-  });
-  try {
-    return format(timeZone);
-  } catch {
-    return format("UTC");
-  }
-}
+const timeOf = (unix: number, timeZone: string) => localTime(new Date(unix * 1000), timeZone);
 
 type Attachment = { type: string; file_id: string; file_size: number | null; mime: string; name: string };
 
@@ -79,7 +71,7 @@ const DEFAULT_NAMES: Record<string, string> = {
   photo: "photo.jpg", video: "video.mp4", audio: "audio.mp3", voice: "voice.ogg", video_note: "video.mp4", animation: "animation.mp4", document: "file",
 };
 
-// The message's files, each with the name it gets in Drafts/files/ (the same name every time, so an edit finds them).
+// The message's files, each with the name it gets in Inbox/files/ (the same name every time, so an edit finds them).
 function attachmentsOf(msg: any, day: string): Attachment[] {
   const list: Attachment[] = [];
   const add = (type: string, f: any) => {
@@ -123,15 +115,8 @@ function contentOf(msg: any) {
   return { content: command ? text.slice(command[0].length) : text, kind: command ? command[1].toLowerCase() : null };
 }
 
-const kindOfSection = (section: string | null) => Object.keys(KINDS).find((k) => DRAFT_SECTIONS[k] === section) ?? null;
-
-// One list item: "- 14:32 text ^tg<id>" (a to-do: "- [ ] text ^tg<id>"), more lines indented under it.
-function itemOf(o: { kind: string | null; time: string; text: string; marker: string; checked?: boolean; more: string[] }) {
-  const [first = "", ...rest] = o.text.trim().split(/\r?\n/);
-  const head = o.kind === "todo" ? `- [${o.checked ? "x" : " "}] ${first}` : `- ${o.time} ${first}`;
-  const lines = [...rest, ...o.more].map((l) => l.trim()).filter(Boolean);
-  return [`${head.trimEnd()} ^${o.marker}`, ...lines.map((l) => `  ${l}`)].join("\n");
-}
+const kindOfSection = (section: string | null) => Object.keys(KINDS).find((k) => CAPTURE_SECTIONS[k] === section) ?? null;
+const itemOf = captureItem;
 
 function moreOf(msg: any, files: Attachment[]) {
   const forward = forwardOf(msg);
@@ -154,14 +139,14 @@ function parseItem(text: string, marker: string) {
   return { checked: m?.[1] === "x", time: m?.[2] ?? "", text: m?.[3] ?? "", more };
 }
 
-const draftPath = (day: string) => `Drafts/${day}.md`;
+const draftPath = inboxNotePath;
 
 const inBackground = (job: Promise<unknown>) => {
   if (typeof EdgeRuntime !== "undefined") EdgeRuntime.waitUntil(job);
   else job.catch(console.error);
 };
 
-// Copies the message's files from Telegram into Drafts/files/.
+// Copies the message's files from Telegram into Inbox/files/.
 async function storeFiles(userId: string, files: Attachment[]) {
   for (const f of files) {
     try {
@@ -170,7 +155,7 @@ async function storeFiles(userId: string, files: Attachment[]) {
       if (!info.ok) throw new Error(info.description);
       const file = await fetch(`https://api.telegram.org/file/bot${BOT_TOKEN}/${info.result.file_path}`);
       if (!file.ok) throw new Error(`download ${file.status}`);
-      await putFile(supabase, userId, `Drafts/files/${f.name}`, await file.arrayBuffer(), f.mime);
+      await putFile(supabase, userId, `${INBOX}/files/${f.name}`, await file.arrayBuffer(), f.mime);
     } catch (e) {
       console.error("telegram file:", e);
     }
@@ -202,7 +187,7 @@ async function onMessage(msg: any) {
   if (!user) return say(chatId, HOW_TO_LINK);
 
   const { content, kind } = contentOf(msg);
-  const { day, time } = localTime(msg.date, user.timeZone);
+  const { day, time } = timeOf(msg.date, user.timeZone);
   const files = attachmentsOf(msg, day);
   if (!content.trim() && !files.length) return say(chatId, kind ? `/${kind} your text` : "Nothing to save.");
 
@@ -211,7 +196,7 @@ async function onMessage(msg: any) {
   await editNote(supabase, user.userId, draftPath(day), (draft) => {
     fresh = !hasItem(draft, marker); // a retried update is already in the draft: no second ✓
     if (!fresh) return null;
-    return addItem(draft, DRAFT_SECTIONS[kind ?? "note"], itemOf({ kind, time, text: content, marker, more: moreOf(msg, files) }));
+    return addItem(draft, CAPTURE_SECTIONS[kind ?? "note"], itemOf({ kind, time, text: content, marker, more: moreOf(msg, files) }));
   });
   if (!fresh) return done();
   if (files.length) inBackground(storeFiles(user.userId, files));
@@ -230,14 +215,14 @@ async function onEdit(msg: any) {
   const user = await linkedUser(msg.chat.id);
   if (!user) return done();
   const { content, kind } = contentOf(msg);
-  const { day, time } = localTime(msg.date, user.timeZone);
+  const { day, time } = timeOf(msg.date, user.timeZone);
   const marker = `tg${msg.message_id}`;
   await editNote(supabase, user.userId, draftPath(day), (draft) => {
     if (!draft || !hasItem(draft, marker)) return null;
     const section = sectionOfItem(draft, marker);
     const old = parseItem(draft, marker);
     const item = itemOf({ kind: kind ?? kindOfSection(section), time, text: content, marker, checked: old?.checked, more: moreOf(msg, attachmentsOf(msg, day)) });
-    return kind && DRAFT_SECTIONS[kind] !== section ? addItem(removeItem(draft, marker), DRAFT_SECTIONS[kind], item) : replaceItem(draft, marker, item);
+    return kind && CAPTURE_SECTIONS[kind] !== section ? addItem(removeItem(draft, marker), CAPTURE_SECTIONS[kind], item) : replaceItem(draft, marker, item);
   });
   return done();
 }
@@ -255,21 +240,21 @@ async function onCallback(cq: any) {
     const saved = await editNote(supabase, user.userId, draftPath(day), (draft) => {
       const old = draft ? parseItem(draft, marker) : null;
       if (!draft || !old) return null;
-      const time = old.time || (sentAt ? localTime(sentAt, user.timeZone).time : "");
-      return addItem(removeItem(draft, marker), DRAFT_SECTIONS[kind], itemOf({ kind, time, text: old.text, marker, checked: old.checked, more: old.more }));
+      const time = old.time || (sentAt ? timeOf(sentAt, user.timeZone).time : "");
+      return addItem(removeItem(draft, marker), CAPTURE_SECTIONS[kind], itemOf({ kind, time, text: old.text, marker, checked: old.checked, more: old.more }));
     });
     if (saved) await callTelegram("editMessageText", { chat_id: chatId, message_id: cq.message.message_id, ...receipt(day, Number(messageId), kind) });
-    return answer("answerCallbackQuery", { callback_query_id: cq.id, text: saved ? `${KINDS[kind]} ${kind}` : "Not in the draft any more" });
+    return answer("answerCallbackQuery", { callback_query_id: cq.id, text: saved ? `${KINDS[kind]}` : "Not in the Inbox note any more" });
   }
 
   const removed = await editNote(supabase, user.userId, draftPath(day), (draft) => (draft && hasItem(draft, marker) ? removeItem(draft, marker) : null));
   if (removed) {
     const { data } = await supabase.from("vault_files").select("path").eq("user_id", user.userId).is("trashed_at", null)
-      .like("path", `Drafts/files/${day}-${messageId}-%`);
+      .like("path", `${INBOX}/files/${day}-${messageId}-%`);
     for (const f of data ?? []) await trashFile(supabase, user.userId, f.path);
     await callTelegram("editMessageText", { chat_id: chatId, message_id: cq.message.message_id, text: "↩ Removed" });
   }
-  return answer("answerCallbackQuery", { callback_query_id: cq.id, text: removed ? "Removed" : "Not in the draft any more" });
+  return answer("answerCallbackQuery", { callback_query_id: cq.id, text: removed ? "Removed" : "Not in the Inbox note any more" });
 }
 
 Deno.serve(async (req) => {

@@ -15,7 +15,7 @@ const NEEDED = [
 const when = (iso: string | null) =>
   iso ? new Date(iso).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "never";
 
-// Settings card: one Google account for Calendar (tasks → events) and Google Tasks (→ Inbox). P-17, P-50.
+// Settings card: one Google account for Calendar (tasks → events) and Google Tasks (→ tasks). P-17, P-50.
 export default function GoogleConnect() {
   const [conn, setConn] = useState<Tables<"google_connections"> | null>(null);
   const [loading, setLoading] = useState(true);
@@ -59,7 +59,7 @@ export default function GoogleConnect() {
   const importTasks = () =>
     run("import", async () => {
       const r = await googleAction.importTasks();
-      toast({ title: `${r.added} new in the Inbox${r.done ? ` · ${r.done} done` : ""}` });
+      toast({ title: `${r.added} new tasks${r.done ? ` · ${r.done} done` : ""}` });
       load();
     });
 
@@ -156,7 +156,7 @@ export default function GoogleConnect() {
                   Tasks
                 </button>
               </TooltipTrigger>
-              <TooltipContent>Open Google Tasks → Inbox. Last: {when(conn.last_tasks_import_at)}</TooltipContent>
+              <TooltipContent>Open Google Tasks → tasks. Last: {when(conn.last_tasks_import_at)}</TooltipContent>
             </Tooltip>
             <button
               onClick={disconnect}

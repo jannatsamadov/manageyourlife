@@ -10,7 +10,6 @@ import AppLayout from "@/components/AppLayout";
 import SchedulePlanning from "@/pages/SchedulePlanning";
 import SettingsPage from "@/pages/Settings";
 import Notes from "@/pages/Notes";
-import Inbox from "@/pages/Inbox";
 import Trash from "@/pages/Trash";
 import Auth from "@/pages/Auth";
 import ResetPassword from "@/pages/ResetPassword";
@@ -53,7 +52,8 @@ const AppRoutes = () => (
                   <Route path="/" element={<SchedulePlanning />} />
                   
                   <Route path="/schedule" element={<Navigate to="/" replace />} />
-                  <Route path="/inbox" element={<Inbox />} />
+                  {/* The Inbox is the Inbox folder of the notes now (P-49, P-57). */}
+                  <Route path="/inbox" element={<Navigate to="/notes?folder=Inbox" replace />} />
                   <Route
                     path="/strategy"
                     element={

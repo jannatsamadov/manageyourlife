@@ -233,6 +233,13 @@ export async function scan(db: SupabaseClient, userId: string) {
     check(await db.from("vault_files").update({ trashed_at: new Date().toISOString(), trash_key: null }).in("id", vanished.slice(i, i + 100)));
   }
   counts.removed = vanished.length;
+
+  // Notes indexed before the excerpt existed get one now (nothing to do once all have it).
+  const missing = check(await db.from("vault_files").select("id, body").eq("user_id", userId).is("trashed_at", null)
+    .is("excerpt", null).not("body", "is", null).limit(2000)) as { id: string; body: string }[];
+  await pool(missing, 16, async (r) => {
+    check(await db.from("vault_files").update({ excerpt: parse(r.body).excerpt }).eq("id", r.id));
+  });
   return counts;
 }
 
@@ -388,9 +395,38 @@ export async function toggleTodo(db: SupabaseClient, userId: string, noteId: unk
   });
 }
 
-// ── daily drafts (Telegram): Drafts/<date>.md with a section per kind; an item is a list line ending in ^<marker> ──
-export const DRAFT_SECTIONS: Record<string, string> = { idea: "Ideas", question: "Questions", todo: "To-dos", resource: "Resources", note: "Notes" };
-const HEADINGS = new Set(Object.values(DRAFT_SECTIONS).map((s) => `## ${s}`));
+// ── the Inbox (P-49, P-57): the one capture place is the Inbox folder of the notes. Telegram and MCP captures go to
+// the day's capture note, Inbox/<date>.md, a section per kind; an item is a list line ending in ^<marker>. ──
+export const INBOX = "Inbox";
+export const inboxNotePath = (day: string) => `${INBOX}/${day}.md`;
+export const CAPTURE_SECTIONS: Record<string, string> = { idea: "Ideas", question: "Questions", todo: "To-dos", resource: "Resources", note: "Notes" };
+const HEADINGS = new Set(Object.values(CAPTURE_SECTIONS).map((s) => `## ${s}`));
+
+// The day and time of a moment in the user's own time zone (set by the app; UTC until then).
+export function localTime(at: Date, timeZone: string) {
+  const format = (tz: string) => ({
+    day: new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).format(at),
+    time: new Intl.DateTimeFormat("en-GB", { timeZone: tz, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(at),
+  });
+  try {
+    return format(timeZone);
+  } catch {
+    return format("UTC");
+  }
+}
+
+export async function userTimeZone(db: SupabaseClient, userId: string) {
+  const row = check(await db.from("telegram_links").select("time_zone").eq("user_id", userId).maybeSingle()) as { time_zone: string } | null;
+  return row?.time_zone || "UTC";
+}
+
+// One captured item: "- 14:32 text ^marker" (a to-do: "- [ ] text ^marker"), more lines indented under it.
+export function captureItem(o: { kind: string | null; time: string; text: string; marker: string; checked?: boolean; more?: string[] }) {
+  const [first = "", ...rest] = o.text.trim().split(/\r?\n/);
+  const head = o.kind === "todo" ? `- [${o.checked ? "x" : " "}] ${first}` : `- ${o.time} ${first}`;
+  const lines = [...rest, ...(o.more ?? [])].map((l) => l.trim()).filter(Boolean);
+  return [`${head.trimEnd()} ^${o.marker}`, ...lines.map((l) => `  ${l}`)].join("\n");
+}
 
 // Line numbers of an item: its first line and the indented lines under it.
 function itemRange(lines: string[], marker: string) {
