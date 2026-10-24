@@ -114,8 +114,10 @@ async function handle(msg: any, auth: Auth) {
         capabilities: { tools: { listChanged: false } },
         serverInfo: { name: "manageyourlife", title: "ManageYourLife", version: "1.0.0" },
         instructions:
-          "Tasks, notes and the Inbox of the user's ManageYourLife account. Dates are YYYY-MM-DD in the user's local time " +
-          "(pass the local date to `today`). Notes are Markdown. Inbox items are raw captures the user sorts later.",
+          "Tasks, notes, the Inbox and the strategy of the user's ManageYourLife account. Dates are YYYY-MM-DD in the user's local time " +
+          "(pass the local date to `today`). Notes are Markdown. Inbox items are raw captures the user sorts later. " +
+          "The strategy is a tree: areas of life → goals → missions → steps (steps nest); daily tasks can serve a goal, mission or step (node_id). " +
+          "Read `strategy_tree` before changing it.",
       });
     }
     case "ping":
