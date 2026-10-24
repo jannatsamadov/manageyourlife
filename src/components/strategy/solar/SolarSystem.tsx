@@ -423,8 +423,13 @@ function CameraRig({ goalId, outer }: { goalId: string; outer: number }) {
     const r = outerRef.current;
     controls?.setLookAt(0, r * 0.48, r * 0.92, 0, 0, 0, smooth);
   };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => overview(false), [controls, goalId]);
+  // A new system: start far out and fly in.
+  useEffect(() => {
+    const r = outerRef.current;
+    controls?.setLookAt(0, r * 1.7, r * 2.8, 0, 0, 0, false);
+    overview(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [controls, goalId]);
   useEffect(() => {
     if (!controls) return;
     const obj = scene.selectedId ? scene.objects.get(scene.selectedId) : undefined;
