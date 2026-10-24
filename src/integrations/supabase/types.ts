@@ -653,6 +653,51 @@ export type Database = {
         }
         Relationships: []
       }
+      vault_files: {
+        Row: {
+          body: string | null
+          etag: string
+          indexed_at: string
+          links: string[]
+          modified_at: string
+          path: string
+          size: number
+          tags: string[]
+          title: string
+          todo_done: number
+          todo_open: number
+          user_id: string
+        }
+        Insert: {
+          body?: string | null
+          etag: string
+          indexed_at?: string
+          links?: string[]
+          modified_at: string
+          path: string
+          size: number
+          tags?: string[]
+          title: string
+          todo_done?: number
+          todo_open?: number
+          user_id: string
+        }
+        Update: {
+          body?: string | null
+          etag?: string
+          indexed_at?: string
+          links?: string[]
+          modified_at?: string
+          path?: string
+          size?: number
+          tags?: string[]
+          title?: string
+          todo_done?: number
+          todo_open?: number
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

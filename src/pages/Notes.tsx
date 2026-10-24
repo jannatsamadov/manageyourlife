@@ -1,10 +1,16 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, lazy, Suspense } from "react";
 import { Plus, Search, Loader2, FileText } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/context/AuthContext";
 import { toast } from "@/hooks/use-toast";
 import NoteCard from "@/components/NoteCard";
 import NoteEditorModal from "@/components/NoteEditorModal";
+
+// The vault as files (P-21), loaded only when opened.
+const VaultView = lazy(() => import("@/components/vault/VaultView"));
+type Mode = "cards" | "files";
+const MODE_KEY = "notes.mode";
 
 interface Note {
   id: string;
@@ -19,6 +25,13 @@ export default function Notes() {
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [editingNote, setEditingNote] = useState<Note | null>(null);
+  const [mode, setMode] = useState<Mode>(() => {
+    try { return localStorage.getItem(MODE_KEY) === "files" ? "files" : "cards"; } catch { return "cards"; }
+  });
+  const switchMode = (m: Mode) => {
+    setMode(m);
+    try { localStorage.setItem(MODE_KEY, m); } catch { /* storage blocked */ }
+  };
 
   useEffect(() => {
     if (!user) return;
@@ -84,8 +97,22 @@ export default function Notes() {
       {/* Fixed Header */}
       <div className="sticky top-0 z-10 bg-background/80 backdrop-blur-md border-b border-border mb-6 pb-4 pt-2">
         <div className="flex items-center justify-between gap-4">
-          <h1 className="text-xl font-bold text-foreground">Notes</h1>
-          <div className="flex items-center gap-3 flex-1 max-w-md">
+          <div className="flex items-center gap-3">
+            <h1 className="text-xl font-bold text-foreground">Notes</h1>
+            <div className="flex overflow-hidden rounded-lg border border-border">
+              {(["cards", "files"] as Mode[]).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => switchMode(m)}
+                  className={cn("px-2.5 py-1 text-xs font-medium capitalize transition-colors", mode === m ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted/30 hover:text-foreground")}
+                >
+                  {m}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className={cn("flex items-center gap-3 flex-1 max-w-md", mode === "files" && "hidden")}>
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <input
@@ -106,8 +133,11 @@ export default function Notes() {
         </div>
       </div>
 
-      {/* Grid Layout */}
-      {filteredNotes.length === 0 ? (
+      {mode === "files" ? (
+        <Suspense fallback={<div className="flex justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>}>
+          <VaultView />
+        </Suspense>
+      ) : filteredNotes.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-center">
           <FileText className="h-12 w-12 text-muted-foreground/30 mb-4" />
           <p className="text-lg font-medium text-muted-foreground">{search ? "No matching notes" : "No notes yet"}</p>

@@ -15,3 +15,6 @@ verify_jwt = false
 
 [functions.google]
 verify_jwt = false
+
+[functions.vault]
+verify_jwt = false
