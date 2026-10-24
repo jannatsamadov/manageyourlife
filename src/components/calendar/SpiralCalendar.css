@@ -1,0 +1,70 @@
+/* React Bits InfiniteSpiral (JS-CSS) as installed; the colours come from the app theme and a card holds a day
+   instead of an image (an image covers the whole card, so the card is opaque here too). */
+.infinite-spiral {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 320px;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.infinite-spiral__stage {
+  position: absolute;
+  inset: 0;
+  transform-style: preserve-3d;
+}
+
+.infinite-spiral__item {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: block;
+  width: var(--infinite-spiral-card-width);
+  height: var(--infinite-spiral-card-height);
+  overflow: hidden;
+  border: 1px solid hsl(var(--foreground) / 0.24);
+  border-radius: var(--infinite-spiral-card-radius);
+  background: hsl(var(--card));
+  box-shadow: 0 14px 38px rgb(8 6 18 / 0.2);
+  transform-style: preserve-3d;
+  backface-visibility: hidden;
+  will-change: transform, opacity, filter;
+  text-decoration: none;
+}
+
+/* Calendar line and long goals, under the cards. */
+.infinite-spiral__lines {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.spiral-day {
+  padding: 6px 8px;
+  text-align: left;
+  color: hsl(var(--foreground));
+  cursor: pointer;
+}
+
+.spiral-day:hover {
+  border-color: hsl(var(--primary) / 0.7);
+}
+
+.spiral-day.is-today {
+  border-color: hsl(var(--primary));
+  box-shadow: 0 0 0 1px hsl(var(--primary)), 0 14px 38px rgb(8 6 18 / 0.2);
+}
+
+.spiral-day.is-past .spiral-day__body {
+  filter: grayscale(var(--infinite-spiral-grayscale));
+  opacity: 0.75;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .infinite-spiral__item {
+    transition: none;
+  }
+}

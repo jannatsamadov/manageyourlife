@@ -1,12 +1,12 @@
 // Strategy tree for MCP (P-2): the same progress rules as the app (src/lib/strategy.ts) — keep them in step.
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2.45.4";
 
-export const NODE_COLS = "id, parent_id, kind, title, description, status, weight, target_count, progress, due_date, position";
+export const NODE_COLS = "id, parent_id, kind, title, description, status, weight, target_count, progress, start_date, due_date, position";
 export const CHILD_KIND: Record<string, string> = { area: "goal", goal: "mission", mission: "step", step: "step" };
 
 type Row = {
   id: string; parent_id: string | null; kind: string; title: string; description: string; status: string;
-  weight: number; target_count: number | null; progress: number | null; due_date: string | null; position: number;
+  weight: number; target_count: number | null; progress: number | null; start_date: string | null; due_date: string | null; position: number;
 };
 type LinkedTask = { id: string; title: string; status: string; node_id: string; date: string | null };
 export type Node = Row & { children: Node[]; tasks: LinkedTask[]; value: number; slots: number };
@@ -54,6 +54,7 @@ export function present(n: Node, depth: number): Record<string, unknown> {
   if (Number(n.weight) !== 1) out.weight = Number(n.weight);
   if (n.target_count) out.target_count = n.target_count;
   if (n.slots) out.missing = n.slots;
+  if (n.start_date) out.start_date = n.start_date;
   if (n.due_date) out.due_date = n.due_date;
   if (n.progress !== null && !n.children.length && !n.tasks.length) out.progress_by_hand = Number(n.progress);
   if (n.description) out.description = n.description;

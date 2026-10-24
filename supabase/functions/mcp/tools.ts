@@ -430,6 +430,7 @@ export const TOOLS: Tool[] = [
         description: { type: "string" },
         weight: { type: "number", exclusiveMinimum: 0, maximum: 100 },
         target_count: { type: "integer", minimum: 1, maximum: 100 },
+        start_date: DATE,
         due_date: DATE,
         progress: { type: "number", minimum: 0, maximum: 1 },
       },
@@ -458,7 +459,7 @@ export const TOOLS: Tool[] = [
     title: "Update a strategy node",
     description:
       "Change a node: title, description, status (open / done / dropped — done counts as 100 %, dropped stops counting), weight, " +
-      "target_count (null clears), due_date (null clears), progress (0–1, null clears), or move it under another parent of a fitting kind.",
+      "target_count (null clears), start_date / due_date (null clears; start ≤ due), progress (0–1, null clears), or move it under another parent of a fitting kind.",
     scope: "write",
     inputSchema: {
       type: "object",
@@ -469,6 +470,7 @@ export const TOOLS: Tool[] = [
         status: { type: "string", enum: NODE_STATUSES },
         weight: { type: "number", exclusiveMinimum: 0, maximum: 100 },
         target_count: { type: ["integer", "null"], minimum: 1, maximum: 100 },
+        start_date: { type: ["string", "null"], description: "YYYY-MM-DD or null" },
         due_date: { type: ["string", "null"], description: "YYYY-MM-DD or null" },
         progress: { type: ["number", "null"], minimum: 0, maximum: 1 },
         parent_id: { ...ID, description: "Move under this node" },
@@ -527,9 +529,10 @@ function nodeFields(a: any, creating: boolean) {
     need(a.target_count === null || (Number.isInteger(a.target_count) && a.target_count >= 1 && a.target_count <= 100), "target_count: 1–100 or null");
     row.target_count = a.target_count;
   }
-  if (a.due_date !== undefined) {
-    need(a.due_date === null || isDate(a.due_date), "due_date: YYYY-MM-DD or null");
-    row.due_date = a.due_date;
+  for (const k of ["start_date", "due_date"]) {
+    if (a[k] === undefined) continue;
+    need(a[k] === null || isDate(a[k]), `${k}: YYYY-MM-DD or null`);
+    row[k] = a[k];
   }
   if (a.progress !== undefined) {
     need(a.progress === null || (typeof a.progress === "number" && a.progress >= 0 && a.progress <= 1), "progress: 0–1 or null");

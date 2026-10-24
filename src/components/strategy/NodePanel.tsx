@@ -2,7 +2,7 @@
 // that serve it. Few words; the rest is in tooltips.
 import { useEffect, useRef, useState } from "react";
 import {
-  Ban, CalendarDays, CheckCircle2, ChevronRight, Circle, FileText, Globe, Hash, ListTodo, Moon, Palette, Plus, Scale,
+  Ban, CalendarDays, CalendarRange, CheckCircle2, ChevronRight, Circle, FileText, Globe, Hash, ListTodo, Moon, Palette, Plus, Scale,
   Sparkles, Sun, Trash2, X,
 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -184,6 +184,23 @@ export default function NodePanel({ tree, onSelect, onOpenTask, onClose }: {
             </button>
           </Tip>
         )}
+        {kind !== "area" && (
+          <Tip label="Start">
+            <label className={cn(iconButton, "relative flex cursor-pointer items-center gap-1")}>
+              <CalendarRange className="h-4 w-4" />
+              {node.start_date && (
+                <span className="text-xs tabular-nums">{node.start_date.slice(8, 10)}.{node.start_date.slice(5, 7)}</span>
+              )}
+              <input
+                type="date"
+                value={node.start_date ?? ""}
+                max={node.due_date ?? undefined}
+                onChange={(e) => update(node.id, { start_date: e.target.value || null })}
+                className="absolute inset-0 cursor-pointer opacity-0 [color-scheme:dark]"
+              />
+            </label>
+          </Tip>
+        )}
         <Tip label="Due">
           <label className={cn(iconButton, "relative flex cursor-pointer items-center gap-1")}>
             <CalendarDays className="h-4 w-4" />
@@ -195,6 +212,7 @@ export default function NodePanel({ tree, onSelect, onOpenTask, onClose }: {
             <input
               type="date"
               value={node.due_date ?? ""}
+              min={node.start_date ?? undefined}
               onChange={(e) => update(node.id, { due_date: e.target.value || null })}
               className="absolute inset-0 cursor-pointer opacity-0 [color-scheme:dark]"
             />

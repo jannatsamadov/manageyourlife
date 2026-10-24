@@ -346,6 +346,7 @@ export type Database = {
           parent_id: string | null
           position: number
           progress: number | null
+          start_date: string | null
           status: string
           target_count: number | null
           title: string
@@ -364,6 +365,7 @@ export type Database = {
           parent_id?: string | null
           position?: number
           progress?: number | null
+          start_date?: string | null
           status?: string
           target_count?: number | null
           title: string
@@ -382,6 +384,7 @@ export type Database = {
           parent_id?: string | null
           position?: number
           progress?: number | null
+          start_date?: string | null
           status?: string
           target_count?: number | null
           title?: string

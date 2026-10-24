@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useCallback } from "react";
+import { useState, useMemo, useRef, useCallback, useEffect, lazy, Suspense } from "react";
 import { ChevronLeft, ChevronRight, ChevronUp, Clock, Plus, Trash2, ExternalLink, GripVertical, CalendarX, RefreshCw, Loader2, RotateCcw, X, Play, CheckCircle2, Timer, Filter, Search } from "lucide-react";
 import { useAppState, type TaskPriority, type Task } from "@/context/AppContext";
 import { getSettings } from "@/lib/settings";
@@ -24,8 +24,32 @@ import {
   SelectTrigger,
   SelectValue } from
 "@/components/ui/select";
+import { useStrategyNodes } from "@/hooks/useStrategy";
+import { buildForest } from "@/lib/strategy";
 
-type View = "month" | "week" | "daily";
+const SpiralCalendar = lazy(() => import("@/components/calendar/SpiralCalendar"));
+
+type View = "month" | "week" | "daily" | "spiral";
+
+// Projects hidden on the calendar (P-55), remembered in this browser only.
+const HIDDEN_KEY = "schedule.hiddenProjects";
+const NO_PROJECT = "none";
+function loadHidden() {
+  try {
+    return new Set<string>(JSON.parse(localStorage.getItem(HIDDEN_KEY) ?? "[]"));
+  } catch {
+    return new Set<string>();
+  }
+}
+
+function ProjectToggle({ title, color, shown, onToggle }: { title: string; color: string; shown: boolean; onToggle: () => void }) {
+  return (
+    <button type="button" onClick={onToggle} className="flex w-full items-center gap-2 rounded-md px-1 py-1 text-left text-sm hover:bg-muted/40">
+      <span className="h-3 w-3 shrink-0 rounded-sm border-2" style={{ borderColor: color, background: shown ? color : "transparent" }} />
+      <span className={cn("truncate", !shown && "text-muted-foreground")}>{title}</span>
+    </button>
+  );
+}
 
 function getDaysInMonth(year: number, month: number) {
   return new Date(year, month + 1, 0).getDate();
@@ -131,8 +155,32 @@ export default function SchedulePlanning() {
   const [searchOpen, setSearchOpen] = useState(false);
   const queryClient = useQueryClient();
 
+  const strategyNodes = useStrategyNodes();
+  const forest = useMemo(() => buildForest(strategyNodes.data ?? [], tasks), [strategyNodes.data, tasks]);
+  const [hiddenProjects, setHiddenProjects] = useState(loadHidden);
+  useEffect(() => {
+    try {
+      localStorage.setItem(HIDDEN_KEY, JSON.stringify([...hiddenProjects]));
+    } catch {
+      // storage blocked: the choice lasts until reload
+    }
+  }, [hiddenProjects]);
+  // A task belongs to the goal above the node it serves; unlinked tasks to "No project".
+  const projectOf = useCallback((nodeId?: string | null) => {
+    let t = nodeId ? forest.byId.get(nodeId) : undefined;
+    while (t && t.kind !== "goal") t = t.parent ?? undefined;
+    return t ? t.node.id : NO_PROJECT;
+  }, [forest]);
+  const toggleProject = (id: string) => setHiddenProjects((prev) => {
+    const next = new Set(prev);
+    if (!next.delete(id)) next.add(id);
+    return next;
+  });
+  const filtersOn = priorityFilter !== "all" || deadlineFilter !== "any" || hiddenProjects.size > 0;
+
   const normalizedTaskQuery = taskQuery.trim().toLowerCase();
   const taskMatchesQuery = useCallback((t: Task) => {
+    if (hiddenProjects.size && hiddenProjects.has(projectOf(t.nodeId))) return false;
     if (priorityFilter !== "all" && (t.priority || "medium") !== priorityFilter) return false;
 
     const todayDate = new Date(new Date().toISOString().slice(0, 10));
@@ -149,7 +197,7 @@ export default function SchedulePlanning() {
     if (!normalizedTaskQuery) return true;
     const hay = `${t.title ?? ""}\n${t.description ?? ""}\n${t.link ?? ""}`.toLowerCase();
     return hay.includes(normalizedTaskQuery);
-  }, [deadlineFilter, normalizedTaskQuery, priorityFilter]);
+  }, [deadlineFilter, normalizedTaskQuery, priorityFilter, hiddenProjects, projectOf]);
 
   const visibleTasks = useMemo(() => tasks.filter(taskMatchesQuery), [tasks, taskMatchesQuery]);
 
@@ -259,6 +307,7 @@ export default function SchedulePlanning() {
   // Google Calendar events for the days on screen (T-9).
   const [eventsFrom, eventsTo] = useMemo(() => {
     const dayAfter = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
+    if (view === "spiral") return selectedDay ? [selectedDay, localDay(dayAfter(new Date(`${selectedDay}T00:00:00`)))] : ["", ""];
     if (view === "month") return [localDay(new Date(year, month, 1)), localDay(new Date(year, month + 1, 1))];
     if (view === "week") {
       const week = getWeekDates(currentDate);
@@ -266,7 +315,7 @@ export default function SchedulePlanning() {
     }
     const days = [...visiblePreviousDates, ...visibleScheduledDates].sort();
     return days.length ? [days[0], localDay(dayAfter(new Date(`${days[days.length - 1]}T00:00:00`)))] : ["", ""];
-  }, [view, year, month, currentDate, visiblePreviousDates, visibleScheduledDates]);
+  }, [view, year, month, currentDate, visiblePreviousDates, visibleScheduledDates, selectedDay]);
   const googleEvents = useGoogleEvents(eventsFrom, eventsTo);
 
   const handleDropOnUnscheduled = (e: React.DragEvent) => {
@@ -489,7 +538,7 @@ export default function SchedulePlanning() {
                         type="button"
                         className={cn(
                           "rounded-lg p-2 text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors",
-                          (priorityFilter !== "all" || deadlineFilter !== "any") && "text-primary bg-primary/10"
+                          filtersOn && "text-primary bg-primary/10"
                         )}
                       >
                         <Filter className="h-4 w-4" />
@@ -530,16 +579,28 @@ export default function SchedulePlanning() {
                         </SelectContent>
                       </Select>
                     </div>
-                    <div className="space-y-1.5 opacity-70">
-                      <div className="text-xs font-medium text-muted-foreground">Project</div>
-                      <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
-                        Coming soon
+                    <div className="space-y-1.5">
+                      <div className="text-xs font-medium text-muted-foreground">Projects</div>
+                      <div className="max-h-56 space-y-1 overflow-y-auto pr-1">
+                        {forest.roots.map((r) => {
+                          const goals = (r.kind === "goal" ? [r] : r.children).filter((g) => g.kind === "goal" && g.node.status !== "dropped");
+                          if (!goals.length) return null;
+                          return (
+                            <div key={r.node.id}>
+                              {r.kind === "area" && <div className="px-1 text-[10px] uppercase tracking-wide text-muted-foreground/70">{r.node.title}</div>}
+                              {goals.map((g) => (
+                                <ProjectToggle key={g.node.id} title={g.node.title} color={g.color} shown={!hiddenProjects.has(g.node.id)} onToggle={() => toggleProject(g.node.id)} />
+                              ))}
+                            </div>
+                          );
+                        })}
+                        <ProjectToggle title="No project" color="hsl(var(--muted-foreground))" shown={!hiddenProjects.has(NO_PROJECT)} onToggle={() => toggleProject(NO_PROJECT)} />
                       </div>
                     </div>
-                    {(priorityFilter !== "all" || deadlineFilter !== "any") && (
+                    {filtersOn && (
                       <button
                         type="button"
-                        onClick={() => { setPriorityFilter("all"); setDeadlineFilter("any"); }}
+                        onClick={() => { setPriorityFilter("all"); setDeadlineFilter("any"); setHiddenProjects(new Set()); }}
                         className="w-full rounded-md border border-border px-3 py-2 text-sm text-muted-foreground hover:text-foreground hover:border-primary/30 transition-colors"
                       >
                         Clear filters
@@ -586,7 +647,7 @@ export default function SchedulePlanning() {
 
               {/* View Toggle */}
               <div className="flex rounded-lg border border-border overflow-hidden">
-                {(["month", "week", "daily"] as View[]).map((v) => (
+                {(["month", "week", "daily", "spiral"] as View[]).map((v) => (
                   <button
                     key={v}
                     onClick={() => setView(v)}
@@ -763,6 +824,12 @@ export default function SchedulePlanning() {
                 })}
                 </div>
               </div>
+            }
+
+            {view === "spiral" &&
+            <Suspense fallback={<div className="glass-card h-[calc(100vh-12rem)] min-h-[420px]" />}>
+                <SpiralCalendar tasks={visibleTasks} roots={forest.roots} byId={forest.byId} hidden={hiddenProjects} onOpenDay={setSelectedDay} />
+              </Suspense>
             }
           </div>
         </section>
