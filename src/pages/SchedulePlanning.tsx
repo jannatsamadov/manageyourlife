@@ -133,7 +133,7 @@ const today = new Date().toISOString().slice(0, 10);
 
 export default function SchedulePlanning() {
   const { tasks, updateTask, addTask, deleteTask, permanentDeleteTask, reorderTasks } = useAppState();
-  const [view, setView] = useState<View>("daily");
+  const [view, setView] = useState<View>("spiral"); // owner, 2026-10-25: the spiral calendar first
   const [currentDate, setCurrentDate] = useState(new Date());
   const [showForm, setShowForm] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
