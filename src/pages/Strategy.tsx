@@ -15,8 +15,8 @@ import TaskEditPopup from "@/components/TaskEditPopup";
 const SolarSystem = lazy(() => import("@/components/strategy/solar/SolarSystem"));
 const Galaxy = lazy(() => import("@/components/strategy/galaxy/Galaxy"));
 
-// Owner (2026-10-24): "forget the cosmic theme for now, focus on Pro" — Space is parked, not deleted.
-const SPACE_THEME = false;
+// Owner (2026-10-24): "forget the cosmic theme for now, focus on Pro"; 2026-10-25: the Space / Pro switch is back on.
+const SPACE_THEME = true;
 
 type Theme = "space" | "pro";
 
@@ -240,29 +240,29 @@ export default function Strategy() {
   return (
     <div className="relative -m-4 h-[100dvh] overflow-hidden bg-[#020309] lg:-m-8">
       <Suspense fallback={<div className="flex h-full items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-white/40" /></div>}>
-      {inGalaxy ? (
-        <Galaxy
-          areas={areas}
-          looseGoals={looseGoals}
-          focusId={focusArea}
-          onFocus={(id) => {
-            setFocusArea(id);
-            if (id) setAreaId(id);
-          }}
-          onOpenGoal={select}
-        />
-      ) : goal ? (
-        <SolarSystem goal={goal} area={area} selectedId={selectedId} onSelect={select} onTask={setTaskId} />
-      ) : (
-        <div className="flex h-full flex-col items-center justify-center gap-4 bg-[radial-gradient(ellipse_at_center,rgba(124,156,255,0.08),transparent_60%)]">
-          <Orbit className="h-10 w-10 text-white/20" />
-          {area ? (
-            <AddChip big label="Goal" onAdd={(t) => create({ kind: "goal", parent_id: area.node.id, title: t })} />
-          ) : (
-            <AddChip big label="Area" onAdd={addArea} />
-          )}
-        </div>
-      )}
+        {inGalaxy ? (
+          <Galaxy
+            areas={areas}
+            looseGoals={looseGoals}
+            focusId={focusArea}
+            onFocus={(id) => {
+              setFocusArea(id);
+              if (id) setAreaId(id);
+            }}
+            onOpenGoal={select}
+          />
+        ) : goal ? (
+          <SolarSystem goal={goal} area={area} selectedId={selectedId} onSelect={select} onTask={setTaskId} />
+        ) : (
+          <div className="flex h-full flex-col items-center justify-center gap-4 bg-[radial-gradient(ellipse_at_center,rgba(124,156,255,0.08),transparent_60%)]">
+            <Orbit className="h-10 w-10 text-white/20" />
+            {area ? (
+              <AddChip big label="Goal" onAdd={(t) => create({ kind: "goal", parent_id: area.node.id, title: t })} />
+            ) : (
+              <AddChip big label="Area" onAdd={addArea} />
+            )}
+          </div>
+        )}
       </Suspense>
 
       {(areas.length > 0 || looseGoals.length > 0) && (
