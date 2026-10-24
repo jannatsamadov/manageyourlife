@@ -1,17 +1,22 @@
 // Strategy (P-2, P-24, P-25). Two themes on the same data:
 //  - Space: wordless — a galaxy of areas, one goal's solar system; light shows progress
 //  - Pro: text and simple dashboards — outline, numbers, editing
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { LayoutDashboard, Loader2, Orbit, PanelRight, Plus, Sparkles, Sun } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useAppState } from "@/context/AppContext";
 import { useStrategyActions, useStrategyNodes } from "@/hooks/useStrategy";
 import { AREA_COLORS, buildForest, type TreeNode } from "@/lib/strategy";
 import { cn } from "@/lib/utils";
-import SolarSystem from "@/components/strategy/solar/SolarSystem";
-import Galaxy from "@/components/strategy/galaxy/Galaxy";
 import ProView from "@/components/strategy/ProView";
 import TaskEditPopup from "@/components/TaskEditPopup";
+
+// three.js loads only with the Space theme.
+const SolarSystem = lazy(() => import("@/components/strategy/solar/SolarSystem"));
+const Galaxy = lazy(() => import("@/components/strategy/galaxy/Galaxy"));
+
+// Owner (2026-10-24): "forget the cosmic theme for now, focus on Pro" — Space is parked, not deleted.
+const SPACE_THEME = false;
 
 type Theme = "space" | "pro";
 
@@ -127,7 +132,7 @@ export default function Strategy() {
   const areas = roots.filter((r) => r.kind === "area");
   const looseGoals = roots.filter((r) => r.kind === "goal");
 
-  const [theme, setTheme] = useState<Theme>(() => remember.get("strategy.theme", "space"));
+  const [theme, setTheme] = useState<Theme>(() => (SPACE_THEME ? remember.get("strategy.theme", "pro") : "pro"));
   const [areaId, setAreaId] = useState<string | null>(() => remember.get("strategy.area", null));
   const [goalOf, setGoalOf] = useState<Record<string, string>>(() => remember.get("strategy.goals", {}));
   const [galaxy, setGalaxy] = useState<boolean>(() => remember.get("strategy.galaxy", true));
@@ -145,8 +150,8 @@ export default function Strategy() {
   const goal = goals.find((g) => g.node.id === goalOf[areaKey]) ?? goals.find((g) => g.node.status !== "dropped") ?? goals[0] ?? null;
   const selected = selectedId ? byId.get(selectedId) ?? null : null;
   const inGalaxy = galaxy && (areas.length > 0 || looseGoals.length > 0);
-  // Pro shows the selected node, else what Space has open.
-  const proShown = selected ?? (inGalaxy && focusArea ? byId.get(focusArea) ?? null : null) ?? goal ?? area ?? roots[0] ?? null;
+  // Pro shows the selected node; nothing selected = the overview of everything.
+  const proShown = selected;
 
   // Keep Space in step with a choice: its area / goal becomes the open one.
   const openGoalOf = useCallback((t: TreeNode) => {
@@ -218,7 +223,7 @@ export default function Strategy() {
       <div className="mx-auto max-w-6xl space-y-4 animate-fade-in">
         <div className="flex items-center justify-end gap-2">
           <AddChip dark={false} label="Area" onAdd={addArea} />
-          <ThemeSwitch theme={theme} onChange={switchTheme} dark={false} />
+          {SPACE_THEME && <ThemeSwitch theme={theme} onChange={switchTheme} dark={false} />}
         </div>
         {roots.length ? (
           <ProView roots={roots} selected={proShown} onSelect={select} onOpenTask={setTaskId} />
@@ -234,6 +239,7 @@ export default function Strategy() {
   const detailsFor = selectedId ?? (inGalaxy ? focusArea : null);
   return (
     <div className="relative -m-4 h-[100dvh] overflow-hidden bg-[#020309] lg:-m-8">
+      <Suspense fallback={<div className="flex h-full items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-white/40" /></div>}>
       {inGalaxy ? (
         <Galaxy
           areas={areas}
@@ -257,6 +263,7 @@ export default function Strategy() {
           )}
         </div>
       )}
+      </Suspense>
 
       {(areas.length > 0 || looseGoals.length > 0) && (
         <div className="absolute left-3 top-3 z-10 flex max-w-[calc(100%-7rem)] flex-col gap-2">
