@@ -5,6 +5,8 @@ import ShareTaskDialog from "@/components/ShareTaskDialog";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/context/AuthContext";
 import { cn } from "@/lib/utils";
+import { useStrategyNodes } from "@/hooks/useStrategy";
+import { buildForest, pickList } from "@/lib/strategy";
 
 function formatDuration(ms: number): string {
   const seconds = Math.floor(ms / 1000);
@@ -33,6 +35,7 @@ interface EditForm {
   link: string;
   priority: TaskPriority;
   status: Task["status"];
+  nodeId: string;
 }
 
 interface TaskEditPopupProps {
@@ -57,7 +60,11 @@ export default function TaskEditPopup({ task, onClose }: TaskEditPopupProps) {
     link: task.link || "",
     priority: task.priority || "medium",
     status: task.status,
+    nodeId: task.nodeId ?? "",
   });
+  // Which goal / mission / step this task serves (Strategy page).
+  const { data: strategyNodes } = useStrategyNodes();
+  const strategyRoots = useMemo(() => buildForest(strategyNodes ?? [], []).roots, [strategyNodes]);
 
   // Fetch subtasks with note titles
   useEffect(() => {
@@ -195,6 +202,7 @@ export default function TaskEditPopup({ task, onClose }: TaskEditPopupProps) {
     if (editForm.deadline !== (task.deadline || "")) updates.deadline = editForm.deadline;
     if (editForm.link !== (task.link || "")) updates.link = editForm.link;
     if (editForm.priority !== (task.priority || "medium")) updates.priority = editForm.priority;
+    if (editForm.nodeId !== (task.nodeId ?? "")) updates.nodeId = editForm.nodeId || null;
     if (editForm.status !== task.status) {
       updates.status = editForm.status;
       if (editForm.status === "active" && task.status === "idle") updates.startTime = Date.now();
@@ -304,6 +312,23 @@ export default function TaskEditPopup({ task, onClose }: TaskEditPopupProps) {
                 <option value="high">High</option>
                 <option value="medium">Medium</option>
                 <option value="low">Low</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">Strategy</label>
+              <select
+                value={editForm.nodeId}
+                onChange={(e) => setEditForm({ ...editForm, nodeId: e.target.value })}
+                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+              >
+                <option value="">—</option>
+                {strategyRoots.map((root) => root.kind === "area" ? (
+                  <optgroup key={root.node.id} label={root.node.title}>
+                    {pickList(root).map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+                  </optgroup>
+                ) : (
+                  pickList(root).map((o) => <option key={o.id} value={o.id}>{o.label}</option>)
+                ))}
               </select>
             </div>
           </div>

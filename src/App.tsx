@@ -18,6 +18,10 @@ import Privacy from "@/pages/Privacy";
 import OAuthConsent from "@/pages/OAuthConsent";
 import NotFound from "./pages/NotFound";
 import { Loader2 } from "lucide-react";
+import { lazy, Suspense } from "react";
+
+// three.js is big: the Strategy page loads only when opened.
+const Strategy = lazy(() => import("@/pages/Strategy"));
 
 const queryClient = new QueryClient();
 
@@ -50,6 +54,14 @@ const AppRoutes = () => (
                   
                   <Route path="/schedule" element={<Navigate to="/" replace />} />
                   <Route path="/inbox" element={<Inbox />} />
+                  <Route
+                    path="/strategy"
+                    element={
+                      <Suspense fallback={<div className="flex h-[80vh] items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>}>
+                        <Strategy />
+                      </Suspense>
+                    }
+                  />
                   <Route path="/notes" element={<Notes />} />
                   <Route path="/trash" element={<Trash />} />
                   <Route path="/settings" element={<SettingsPage />} />

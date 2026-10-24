@@ -334,6 +334,71 @@ export type Database = {
         }
         Relationships: []
       }
+      strategy_nodes: {
+        Row: {
+          color: string | null
+          created_at: string
+          description: string
+          done_at: string | null
+          due_date: string | null
+          id: string
+          kind: string
+          parent_id: string | null
+          position: number
+          progress: number | null
+          status: string
+          target_count: number | null
+          title: string
+          updated_at: string
+          user_id: string
+          weight: number
+        }
+        Insert: {
+          color?: string | null
+          created_at?: string
+          description?: string
+          done_at?: string | null
+          due_date?: string | null
+          id?: string
+          kind: string
+          parent_id?: string | null
+          position?: number
+          progress?: number | null
+          status?: string
+          target_count?: number | null
+          title: string
+          updated_at?: string
+          user_id?: string
+          weight?: number
+        }
+        Update: {
+          color?: string | null
+          created_at?: string
+          description?: string
+          done_at?: string | null
+          due_date?: string | null
+          id?: string
+          kind?: string
+          parent_id?: string | null
+          position?: number
+          progress?: number | null
+          status?: string
+          target_count?: number | null
+          title?: string
+          updated_at?: string
+          user_id?: string
+          weight?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "strategy_nodes_parent_fkey"
+            columns: ["parent_id", "user_id"]
+            isOneToOne: false
+            referencedRelation: "strategy_nodes"
+            referencedColumns: ["id", "user_id"]
+          },
+        ]
+      }
       subtasks: {
         Row: {
           completed: boolean
@@ -442,6 +507,7 @@ export type Database = {
           id: string
           link: string
           linked_note_id: string | null
+          node_id: string | null
           position: number
           priority: string
           status: string
@@ -467,6 +533,7 @@ export type Database = {
           id?: string
           link?: string
           linked_note_id?: string | null
+          node_id?: string | null
           position?: number
           priority?: string
           status?: string
@@ -492,6 +559,7 @@ export type Database = {
           id?: string
           link?: string
           linked_note_id?: string | null
+          node_id?: string | null
           position?: number
           priority?: string
           status?: string
@@ -506,6 +574,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "notes"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tasks_node_fkey"
+            columns: ["node_id", "user_id"]
+            isOneToOne: false
+            referencedRelation: "strategy_nodes"
+            referencedColumns: ["id", "user_id"]
           },
         ]
       }

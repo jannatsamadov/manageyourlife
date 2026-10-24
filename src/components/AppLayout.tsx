@@ -1,5 +1,5 @@
 import { NavLink, useLocation } from "react-router-dom";
-import { Calendar, Settings, LogOut, StickyNote, Trash2, Inbox } from "lucide-react";
+import { Calendar, Settings, LogOut, StickyNote, Trash2, Inbox, Orbit } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/context/AuthContext";
 import ChatPanel from "@/components/ChatPanel";
@@ -13,6 +13,7 @@ import {
 const navItems = [
   { title: "Inbox", path: "/inbox", icon: Inbox },
   { title: "Schedule", path: "/", icon: Calendar },
+  { title: "Strategy", path: "/strategy", icon: Orbit },
   { title: "Notes", path: "/notes", icon: StickyNote },
   { title: "Trash", path: "/trash", icon: Trash2 },
   { title: "Settings", path: "/settings", icon: Settings },

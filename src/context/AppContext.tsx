@@ -21,6 +21,8 @@ export interface Task {
   priority: TaskPriority;
   // Optional soft-delete timestamp
   deletedAt?: string | null;
+  // Strategy node this task serves (P-2)
+  nodeId?: string | null;
 }
 
 export interface Goal {
@@ -122,6 +124,7 @@ function dbTaskToLocal(row: any): Task {
     link: row.link ?? "",
     priority: (row.priority as TaskPriority) ?? "medium",
     deletedAt: row.deleted_at ?? null,
+    nodeId: row.node_id ?? null,
   };
 }
 
@@ -199,6 +202,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       link: task.link ?? "",
       priority: task.priority ?? "medium",
       deleted_at: null,
+      node_id: task.nodeId ?? null,
     } as any).select().single();
 
     if (error) {
@@ -244,6 +248,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (updates.position !== undefined) dbUpdates.position = updates.position;
     if (updates.link !== undefined) dbUpdates.link = updates.link;
     if (updates.priority !== undefined) dbUpdates.priority = updates.priority;
+    if (updates.nodeId !== undefined) dbUpdates.node_id = updates.nodeId;
 
     const { error } = await supabase.from("tasks").update(dbUpdates).eq("id", id);
     if (error) {
