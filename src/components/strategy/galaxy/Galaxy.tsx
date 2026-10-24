@@ -1,6 +1,6 @@
 // Galaxy overview (T-72): every area of life is a nebula on the spiral arms of one galaxy, its goals are stars inside
 // it — red and faint at 0 %, white-gold and bright when done. Click an area to fly there, a star to enter its system.
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
+import { createContext, memo, useContext, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import * as THREE from "three";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { CameraControls, Html, Stars } from "@react-three/drei";
@@ -143,9 +143,8 @@ function GoalStar({ goal, offset, showLabel }: { goal: TreeNode; offset: THREE.V
   const v = goal.node.status === "dropped" ? 0 : goal.value;
   const color = useMemo(() => heat(v), [v]);
   const core = useMemo(() => heat(v).multiplyScalar(1.2 + 2.5 * v), [v]);
-  useFrame(({ clock }) => {
-    const twinkle = 1 + Math.sin(clock.elapsedTime * (1.3 + (id.charCodeAt(0) % 5) * 0.3)) * 0.06;
-    ref.current.scale.setScalar(twinkle * (g.hovered === id ? 1.35 : 1));
+  useFrame(() => {
+    ref.current.scale.setScalar(g.hovered === id ? 1.35 : 1);
     glow.current.opacity = 0.3 + 0.55 * v;
   });
   return (
@@ -163,9 +162,9 @@ function GoalStar({ goal, offset, showLabel }: { goal: TreeNode; offset: THREE.V
       </sprite>
       {(showLabel || g.hovered === id) && (
         <Html position={[0, -0.55, 0]} center zIndexRange={[20, 0]} style={{ pointerEvents: "none" }}>
-          <div className="select-none whitespace-nowrap text-[11px] font-medium text-white/85 [text-shadow:0_1px_4px_#000]">
+          <div className="select-none whitespace-nowrap text-[11px] text-white/70 [text-shadow:0_1px_4px_#000]">
             {goal.node.title}
-            <span className="ml-1.5 text-white/45">{percent(goal.value)}</span>
+            {g.hovered === id && <span className="ml-1.5 text-white/45">{percent(goal.value)}</span>}
           </div>
         </Html>
       )}
@@ -210,7 +209,6 @@ function AreaCloud({ area, pos }: { area: TreeNode; pos: THREE.Vector3 }) {
         >
           <span className="h-2 w-2 rounded-full" style={{ background: area.color }} />
           {area.node.title}
-          <span className="text-white/45">{percent(area.value)}</span>
         </button>
       </Html>
     </group>
@@ -293,14 +291,23 @@ export default function Galaxy({ areas, looseGoals, focusId, onFocus, onOpenGoal
       aria-label="Galaxy"
     >
       <color attach="background" args={["#020309"]} />
-      <Stars radius={260} depth={140} count={6000} factor={5} saturation={0.25} fade speed={0.3} />
+      {/* speed 0: drei's Stars pulse all together — with bloom the whole sky blinked */}
+      <Stars radius={260} depth={140} count={6000} factor={5} saturation={0.25} fade speed={0} />
       <Scene areas={areas} looseGoals={looseGoals} ctx={ctx} />
       <CameraControls makeDefault minDistance={1} maxDistance={160} smoothTime={0.7} />
-      <EffectComposer multisampling={4}>
-        <Bloom mipmapBlur intensity={1.2} luminanceThreshold={0.75} luminanceSmoothing={0.25} radius={0.8} />
-        <ToneMapping mode={ToneMappingMode.ACES_FILMIC} />
-        <Vignette offset={0.28} darkness={0.72} />
-      </EffectComposer>
+      <Effects />
     </Canvas>
   );
 }
+
+// Rendered once (see SolarSystem). The bloom starts above the brightest single disk points, so the slowly turning
+// disk does not shimmer; only the dense core and the goal stars glow.
+const Effects = memo(function Effects() {
+  return (
+    <EffectComposer multisampling={4}>
+      <Bloom mipmapBlur intensity={1.2} luminanceThreshold={1.5} luminanceSmoothing={0.4} radius={0.8} />
+      <ToneMapping mode={ToneMappingMode.ACES_FILMIC} />
+      <Vignette offset={0.28} darkness={0.72} />
+    </EffectComposer>
+  );
+});

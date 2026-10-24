@@ -1,7 +1,7 @@
 // Solar-system theme (P-24): a goal is a star, its missions are planets, their steps are moons, small tasks of the
 // goal are dwarf planets in a belt. Everything starts dim and lights up as it gets done; the star itself goes from
 // a dull red protostar to a white-gold sun as the whole goal moves.
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
+import { createContext, memo, useContext, useEffect, useMemo, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
 import * as THREE from "three";
 import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
 import { Billboard, CameraControls, Html, Line, Stars } from "@react-three/drei";
@@ -56,13 +56,13 @@ function useHover(id: string, onClick: () => void) {
   };
 }
 
-// ── Labels: few words — the name, how far it is, the due day if close ──
+// ── Labels: the name only; the light already shows progress (the number appears on hover), a date only when close ──
 function Label({ y, title, value, due, done, strong }: { y: number; title: string; value?: number; due?: string | null; done?: boolean; strong?: boolean }) {
   const days = done ? null : daysLeft(due ?? null);
-  const dueText = due && days !== null && days <= 30 ? `${due.slice(8, 10)}.${due.slice(5, 7)}` : null;
+  const dueText = due && days !== null && days <= 7 ? `${due.slice(8, 10)}.${due.slice(5, 7)}` : null;
   return (
     <Html position={[0, y, 0]} center zIndexRange={[20, 0]} style={{ pointerEvents: "none" }}>
-      <div className={`select-none whitespace-nowrap text-center [text-shadow:0_1px_4px_#000] ${strong ? "text-[13px] font-semibold text-white" : "text-[11px] font-medium text-white/80"}`}>
+      <div className={`select-none whitespace-nowrap text-center [text-shadow:0_1px_4px_#000] ${strong ? "text-[13px] font-medium text-white/85" : "text-[11px] text-white/55"}`}>
         {title.length > 28 ? `${title.slice(0, 27)}…` : title}
         {value !== undefined && <span className="ml-1.5 text-white/45">{percent(value)}</span>}
         {dueText && <span className={`ml-1.5 ${days! < 0 ? "text-red-400" : days! <= 7 ? "text-amber-300" : "text-white/45"}`}>{dueText}</span>}
@@ -72,14 +72,9 @@ function Label({ y, title, value, due, done, strong }: { y: number; title: strin
 }
 
 function SelectMarker({ size }: { size: number }) {
-  const ref = useRef<THREE.Mesh>(null!);
-  useFrame(({ clock }) => {
-    const s = 1 + Math.sin(clock.elapsedTime * 3) * 0.04;
-    ref.current.scale.set(s, s, s);
-  });
   return (
     <Billboard>
-      <mesh ref={ref} raycast={noRaycast}>
+      <mesh raycast={noRaycast}>
         <ringGeometry args={[size * 1.55, size * 1.62, 72]} />
         <meshBasicMaterial color="#dfe8ff" transparent opacity={0.75} toneMapped={false} />
       </mesh>
@@ -289,7 +284,7 @@ function Planet({ p }: { p: PlanetLayout }) {
         {tree.done && <Halo size={p.size} color={p.look.glow} />}
         {p.moons.map((m, j) => <Moon key={m.tree?.node.id ?? `slot-${j}`} m={m} showOrbit={near} />)}
         {tree.tasks.length > 0 && <Moonlets tasks={tree.tasks} radius={p.size * (p.ringed ? 1.25 : 1.4)} />}
-        <Label y={-p.size - 0.5} title={tree.node.title} value={value} due={tree.node.due_date} done={tree.done} />
+        <Label y={-p.size - 0.5} title={tree.node.title} value={near ? value : undefined} due={tree.node.due_date} done={tree.done} />
         {scene.selectedId === id && <SelectMarker size={p.size} />}
       </group>
     </group>
@@ -323,8 +318,7 @@ function Sun({ goal }: { goal: TreeNode }) {
     group.current.scale.setScalar(0.9 + 0.2 * h);
     corona.current.color.lerpColors(red, white, h);
     corona.current.opacity = 0.45 + 0.4 * h;
-    const pulse = 1 + Math.sin(t * 0.8) * 0.03;
-    outer.current.scale.setScalar(SUN_RADIUS * (7 + 7 * h) * pulse);
+    outer.current.scale.setScalar(SUN_RADIUS * (7 + 7 * h));
     rays.current.material.rotation = t * 0.02;
     rays.current.scale.setScalar(SUN_RADIUS * (5 + 6 * h));
     rayMat.current.opacity = 0.08 + 0.5 * h * h;
@@ -344,7 +338,7 @@ function Sun({ goal }: { goal: TreeNode }) {
       <sprite ref={rays} raycast={noRaycast}>
         <spriteMaterial ref={rayMat} map={raysTexture()} transparent depthWrite={false} blending={THREE.AdditiveBlending} toneMapped={false} />
       </sprite>
-      <Label y={-SUN_RADIUS * 1.35 - 0.6} title={goal.node.title} value={goal.value} due={goal.node.due_date} done={goal.done} strong />
+      <Label y={-SUN_RADIUS * 1.35 - 0.6} title={goal.node.title} value={scene.hovered === id || scene.selectedId === id ? goal.value : undefined} due={goal.node.due_date} done={goal.done} strong />
     </group>
   );
 }
@@ -475,19 +469,28 @@ export default function SolarSystem({ goal, area, selectedId, onSelect, onTask }
       <SceneContext.Provider value={scene}>
         <color attach="background" args={["#020309"]} />
         <Sky color={skyColor} seed={seeded(area?.node.id ?? goal.node.id)() * 10} />
-        <Stars radius={220} depth={120} count={7000} factor={5} saturation={0.3} fade speed={0.5} />
+        {/* speed 0: drei's Stars pulse all together (one sin for every star) — with bloom the whole sky blinked */}
+        <Stars radius={220} depth={120} count={7000} factor={5} saturation={0.3} fade speed={0} />
         <Clock />
         <Sun goal={goal} />
         {layout.planets.map((p) => <Planet key={p.tree.node.id} p={p} />)}
         <Belt tasks={goal.tasks} radius={layout.belt} color={goal.color} goalId={goal.node.id} />
         <CameraControls makeDefault minDistance={1.2} maxDistance={layout.outer * 3} smoothTime={0.7} />
         <CameraRig goalId={goal.node.id} outer={layout.outer} />
-        <EffectComposer multisampling={4}>
-          <Bloom mipmapBlur intensity={1.1} luminanceThreshold={0.8} luminanceSmoothing={0.25} radius={0.75} />
-          <ToneMapping mode={ToneMappingMode.ACES_FILMIC} />
-          <Vignette offset={0.28} darkness={0.72} />
-        </EffectComposer>
+        <Effects />
       </SceneContext.Provider>
     </Canvas>
   );
 }
+
+// Rendered once (EffectComposer rebuilds its passes whenever its parent re-renders). The bloom starts above 1.0 so
+// only the star, lit bodies and halos glow — not thousands of tiny background stars, which shimmered as anything moved.
+const Effects = memo(function Effects() {
+  return (
+    <EffectComposer multisampling={4}>
+      <Bloom mipmapBlur intensity={1.1} luminanceThreshold={1} luminanceSmoothing={0.3} radius={0.75} />
+      <ToneMapping mode={ToneMappingMode.ACES_FILMIC} />
+      <Vignette offset={0.28} darkness={0.72} />
+    </EffectComposer>
+  );
+});
