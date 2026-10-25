@@ -2,7 +2,7 @@ import { createContext, useContext, useState, useEffect, ReactNode, useCallback 
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/context/AuthContext";
 import { toast } from "@/hooks/use-toast";
-import { queueCalendarSync } from "@/lib/gcal";
+import { googleAction, isGoogleConnected, queueCalendarSync } from "@/lib/gcal";
 
 export type TaskPriority = "high" | "medium" | "low";
 
@@ -114,7 +114,7 @@ const defaultStrategy: StrategyData = {
   ],
 };
 
-function dbTaskToLocal(row: any): Task {
+export function dbTaskToLocal(row: any): Task {
   return {
     id: row.id,
     title: row.title,
@@ -192,7 +192,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setLoading(false);
     };
 
-    fetchAll();
+    // Google Tasks → the app (new ones, and what changed in Google) when the app opens and when its tab comes back
+    // after a while; Google Tasks has no push, so the app asks. Then the list again if anything came in.
+    let lastPull = 0;
+    const pullGoogle = async () => {
+      if (Date.now() - lastPull < 5 * 60_000 || !(await isGoogleConnected())) return;
+      lastPull = Date.now();
+      const r = await googleAction.importTasks().catch(() => null);
+      if (!r || !(r.added || r.changed)) return;
+      const { data } = await supabase.from("tasks").select("*").eq("user_id", user.id).is("deleted_at", null)
+        .order("position", { ascending: true }).order("created_at", { ascending: true });
+      if (data) setTasks(data.map(dbTaskToLocal));
+    };
+    const onVisible = () => document.visibilityState === "visible" && pullGoogle();
+
+    fetchAll().then(pullGoogle);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
   }, [user]);
 
   const addTask = useCallback(async (task: Omit<Task, "id"> & Partial<Pick<Task, "link" | "priority">>) => {
@@ -221,7 +237,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     } else if (data) {
       const saved = dbTaskToLocal(data);
       setTasks((prev) => [...prev, saved]);
-      if (saved.date) queueCalendarSync(saved.id);
+      queueCalendarSync(saved.id); // its calendar event (with a day) and its Google task
       return saved;
     }
   }, [user]);

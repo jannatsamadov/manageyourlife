@@ -3,7 +3,8 @@ import { MessageCircle, X, Send, Plus, Loader2 } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
-import { useAppState } from "@/context/AppContext";
+import { dbTaskToLocal, useAppState } from "@/context/AppContext";
+import { googleAction, isGoogleConnected } from "@/lib/gcal";
 import { getSettings } from "@/lib/settings";
 import { toast } from "@/hooks/use-toast";
 
@@ -26,26 +27,14 @@ export default function ChatPanel() {
 
   const { setTasks } = useAppState();
 
+  // After the assistant changed tasks: the list again (as the app loads it) and the new ones to Google.
   const refreshData = async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
-    const tasksRes = await supabase.from("tasks").select("*").eq("user_id", user.id).order("created_at", { ascending: true });
-    if (tasksRes.data) {
-      setTasks(tasksRes.data.map((row: any) => ({
-        id: row.id,
-        title: row.title,
-        description: row.description || "",
-        estimatedTime: row.estimated_time,
-        status: row.status as "idle" | "active" | "complete",
-        startTime: row.actual_start ? new Date(row.actual_start).getTime() : null,
-        endTime: row.actual_end ? new Date(row.actual_end).getTime() : null,
-        date: row.date,
-        deadline: row.deadline ?? "",
-        position: row.position ?? 0,
-        link: row.link ?? "",
-        priority: (row.priority as "high" | "medium" | "low") ?? "medium",
-      })));
-    }
+    const tasksRes = await supabase.from("tasks").select("*").eq("user_id", user.id).is("deleted_at", null)
+      .order("position", { ascending: true }).order("created_at", { ascending: true });
+    if (tasksRes.data) setTasks(tasksRes.data.map(dbTaskToLocal));
+    if (await isGoogleConnected()) googleAction.syncCalendar().catch(() => {});
   };
 
   useEffect(() => {

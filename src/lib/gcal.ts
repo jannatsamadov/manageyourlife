@@ -19,9 +19,9 @@ async function callFunction<T>(name: string, body: Record<string, unknown>): Pro
 
 export type CalendarSyncResult = {
   created: number; updated: number; removed: number; unchanged: number; failed: number; errors: string[];
-  google_tasks: { completed: number; reopened: number; failed: number };
+  google_tasks: { created: number; updated: number; removed: number; unchanged: number; failed: number };
 };
-export type TasksImportResult = { lists: number; found: number; added: number; done: number };
+export type TasksImportResult = { lists: number; found: number; added: number; changed: number };
 export type GoogleCalendar = { id: string; name: string; primary: boolean };
 // start / end: "YYYY-MM-DD" when all_day (end exclusive), else ISO date-times.
 export type GoogleEvent = { id: string; title: string; all_day: boolean; start: string; end: string; url: string | null; color: string | null; calendar: string };

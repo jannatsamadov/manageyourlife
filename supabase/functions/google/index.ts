@@ -1,13 +1,13 @@
 // Google Calendar + Google Tasks for the signed-in user (P-17, P-50). POST { action, ... }:
 //   calendars      → calendars the user can write to
 //   events         → { time_min, time_max } Google events for the app calendar (read on demand, nothing stored)
-//   import_tasks   → open Google Tasks into the Inbox (an item is never imported twice); tasks completed or deleted
-//                    in Google since the last import take their Inbox item out / mark the app task done
-//   sync_calendar  → scheduled tasks → all-day events in the chosen calendar, and done state → Google Tasks
+//   import_tasks   → Google Tasks → app tasks: new ones come in (never twice), linked ones follow changes made in
+//                    Google (title, done / reopened, day); the app calls it when it opens
+//   sync_calendar  → app tasks → Google: events in the chosen calendar, and every open task as a Google task
 //                    { task_ids?: string[] } limits it to those tasks (auto-sync after a change in the app)
 //   disconnect     → revoke the access at Google and forget the tokens
 import { GoogleError, ReconnectNeeded, cors, db, decrypt, google, json, userFrom } from "../_shared/google.ts";
-import { CAL, TASKS, syncCalendar, syncTasks } from "../_shared/gsync.ts";
+import { CAL, TASKS, gtaskFor, gtaskHash, syncCalendar, syncTasks } from "../_shared/gsync.ts";
 
 class BadInput extends Error {}
 
@@ -67,99 +67,102 @@ async function allPages(userId: string, url: string) {
   return items;
 }
 
+// Google Tasks → the app (T-65; both ways since 2026-10-25). First run: every open Google task; later only what
+// changed since the last import (a few minutes' overlap), done, reopened, renamed and deleted ones too.
+//   new in Google      → an app task (unscheduled, due → deadline), linked by tasks.gtask_id
+//   linked, changed    → its title, done state and (without a planned day) deadline follow Google
+//   deleted in Google  → the app task stays; it is not sent to Google again
 async function importTasks(userId: string) {
   const { data: conn, error: connError } = await db.from("google_connections").select("last_tasks_import_at").eq("user_id", userId).maybeSingle();
   if (connError) throw connError;
   const startedAt = new Date().toISOString();
-  // After the first import only what changed since the last one (a few minutes' overlap), done and deleted ones too.
   const since = conn?.last_tasks_import_at ? new Date(new Date(conn.last_tasks_import_at).getTime() - 5 * 60_000).toISOString() : null;
   const query = since
     ? `showCompleted=true&showHidden=true&showDeleted=true&updatedMin=${encodeURIComponent(since)}`
     : "showCompleted=false&showHidden=false";
 
   const lists = await allPages(userId, `${TASKS}/users/@me/lists`);
-  let found = 0;
-  let added = 0;
-  const closed: any[] = [];
+  let found = 0, added = 0, changed = 0;
+  const calendarToo: string[] = [];
   for (const list of lists) {
     const all = await allPages(userId, `${TASKS}/lists/${encodeURIComponent(list.id)}/tasks?${query}`);
-    closed.push(...all.filter((t) => t.deleted || t.status === "completed"));
-    const tasks = all.filter((t) => !t.deleted && t.status !== "completed" && (t.title?.trim() || t.notes?.trim()));
-    found += tasks.length;
-    if (!tasks.length) continue;
-    // New Google tasks become app tasks at once (unscheduled): to-dos are sorted by project, not in the Inbox (owner,
-    // 2026-10-25). The inbox_items row stays as the link Google task ↔ app task, so "done" syncs both ways.
-    const { data: known, error: knownError } = await db.from("inbox_items").select("source_ref").eq("user_id", userId)
-      .eq("source", "google_tasks").in("source_ref", tasks.map((t) => t.id));
-    if (knownError) throw knownError;
-    const seen = new Set(known.map((k) => k.source_ref));
-    for (const t of tasks.filter((t) => !seen.has(t.id))) {
-      const title = t.title?.trim() || String(t.notes).trim().split("\n")[0];
-      const { data: task, error } = await db.from("tasks").insert({
-        user_id: userId,
-        title: title.slice(0, 500),
-        description: t.title?.trim() ? (t.notes?.trim() ?? "") : "",
-        deadline: t.due ? String(t.due).slice(0, 10) : "",
-        link: t.webViewLink ?? "",
+    if (!all.length) continue;
+    const { data: linked, error: linkedError } = await db.from("tasks")
+      .select("id, title, description, link, status, date, deadline, actual_end, gtask_id, gtask_hash")
+      .eq("user_id", userId).in("gtask_id", all.map((t) => t.id));
+    if (linkedError) throw linkedError;
+    const byGoogle = new Map(linked.map((t) => [t.gtask_id, t]));
+    // Imported before the link moved to tasks (an Inbox item still waiting to be sorted): not again.
+    const { data: old, error: oldError } = await db.from("inbox_items").select("source_ref").eq("user_id", userId)
+      .eq("source", "google_tasks").in("source_ref", all.map((t) => t.id));
+    if (oldError) throw oldError;
+    const oldRefs = new Set(old.map((o) => o.source_ref));
+
+    for (const g of all) {
+      const task = byGoogle.get(g.id);
+      if (task) {
+        if (await applyFromGoogle(task, g, calendarToo)) changed++;
+        continue;
+      }
+      if (g.deleted || g.status === "completed" || oldRefs.has(g.id) || !(g.title?.trim() || g.notes?.trim())) continue;
+      found++;
+      const title = (g.title?.trim() || String(g.notes).trim().split("\n")[0]).slice(0, 500);
+      const row = {
+        title,
+        description: g.title?.trim() ? (g.notes?.trim() ?? "") : "",
+        deadline: g.due ? String(g.due).slice(0, 10) : "",
+        link: "",
         status: "idle",
-      }).select("id").single();
-      if (error) throw error;
-      const { error: linkError } = await db.from("inbox_items").insert({
+      };
+      const { error } = await db.from("tasks").insert({
         user_id: userId,
-        source: "google_tasks",
-        kind: "todo",
-        source_ref: t.id,
-        source_url: t.webViewLink ?? null,
-        content: [t.title?.trim(), t.notes?.trim()].filter(Boolean).join("\n\n"),
-        meta: { list: list.title, list_id: list.id, due: t.due ?? null, parent: t.parent ?? null, links: (t.links ?? []).map((l: any) => l.link), updated: t.updated },
-        sorted_at: new Date().toISOString(),
-        result_type: "task",
-        result_id: task.id,
+        ...row,
+        gtask_id: g.id,
+        gtask_list_id: list.id,
+        gtask_hash: await gtaskHash(gtaskFor(row)),
       });
-      if (linkError) throw linkError;
+      if (error) throw error;
       added++;
     }
   }
-  const done = await closeFromGoogle(userId, closed);
+  // Done / reopened ones: their calendar events get or lose the ✓.
+  if (calendarToo.length) await syncCalendar(userId, calendarToo).catch((e) => console.error("calendar after import:", e));
   await db.from("google_connections").update({ last_tasks_import_at: startedAt }).eq("user_id", userId);
-  return { lists: lists.length, found, added, done };
+  return { lists: lists.length, found, added, changed };
 }
 
-// Completed or deleted in Google Tasks: an (older) unsorted Inbox item is closed; a task made from it is marked done
-// (completed only — a task deleted in Google stays as it is in the app).
-async function closeFromGoogle(userId: string, closed: any[]) {
-  let done = 0;
-  const completedTasks: string[] = [];
-  for (let i = 0; i < closed.length; i += 100) {
-    const chunk = closed.slice(i, i + 100);
-    const byRef = new Map(chunk.map((t) => [t.id, t]));
-    const { data: items, error } = await db.from("inbox_items").select("id, source_ref, sorted_at, result_type, result_id, meta")
-      .eq("user_id", userId).eq("source", "google_tasks").in("source_ref", [...byRef.keys()]);
-    if (error) throw error;
-    for (const item of items) {
-      const g = byRef.get(item.source_ref);
-      const status = g.deleted ? "deleted" : "completed";
-      const meta = item.meta ?? {};
-      if (meta.gtask_status === status) continue;
-      if (!item.sorted_at) {
-        await db.from("inbox_items").update({ sorted_at: new Date().toISOString(), result_type: "deleted", meta: { ...meta, gtask_status: status } }).eq("id", item.id);
-        done++;
-        continue;
-      }
-      if (item.result_type === "task" && item.result_id && status === "completed") {
-        const { data: task } = await db.from("tasks").select("id, status, actual_end").eq("user_id", userId).eq("id", item.result_id).maybeSingle();
-        if (task && task.status !== "complete") {
-          await db.from("tasks").update({ status: "complete", actual_end: task.actual_end ?? g.completed ?? new Date().toISOString() }).eq("id", task.id);
-          completedTasks.push(task.id);
-          done++;
-        }
-      }
-      await db.from("inbox_items").update({ meta: { ...meta, gtask_status: status } }).eq("id", item.id);
-    }
+// A linked task changed in Google. What Google shows equal to what the app sent last → our own change, nothing to do.
+async function applyFromGoogle(task: any, g: any, calendarToo: string[]) {
+  if (task.gtask_hash === "deleted") return false;
+  if (g.deleted) {
+    await db.from("tasks").update({ gtask_hash: "deleted" }).eq("id", task.id);
+    return false;
   }
-  // Their calendar events get the ✓.
-  if (completedTasks.length) await syncCalendar(userId, completedTasks).catch((e) => console.error("calendar after import:", e));
-  return done;
+  const done = g.status === "completed";
+  const theirs = {
+    title: (g.title ?? "").trim(),
+    notes: (g.notes ?? "").trim(),
+    due: g.due ? `${String(g.due).slice(0, 10)}T00:00:00.000Z` : null,
+    status: done ? "completed" : "needsAction",
+    ...(done ? {} : { completed: null }),
+  };
+  if ((await gtaskHash(theirs)) === task.gtask_hash) return false;
+
+  const updates: Record<string, unknown> = {};
+  if (g.title?.trim() && g.title.trim() !== task.title) updates.title = g.title.trim().slice(0, 500);
+  if (done && task.status !== "complete") {
+    updates.status = "complete";
+    updates.actual_end = task.actual_end ?? g.completed ?? new Date().toISOString();
+  }
+  if (!done && task.status === "complete") updates.status = "idle"; // reopened in Google
+  // The day only when the task has no planned day of its own (then Google's day is its deadline).
+  const due = g.due ? String(g.due).slice(0, 10) : "";
+  if (!task.date && due !== (task.deadline || "")) updates.deadline = due;
+  // From now on the app's version is what Google has (notes come from the app: description + link).
+  const hash = await gtaskHash(gtaskFor({ ...task, ...updates }));
+  await db.from("tasks").update({ ...updates, gtask_hash: hash }).eq("id", task.id);
+  if ("status" in updates) calendarToo.push(task.id);
+  return Object.keys(updates).length > 0;
 }
 
 async function disconnect(userId: string) {

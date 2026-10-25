@@ -59,7 +59,7 @@ export default function GoogleConnect() {
   const importTasks = () =>
     run("import", async () => {
       const r = await googleAction.importTasks();
-      toast({ title: `${r.added} new tasks${r.done ? ` · ${r.done} done` : ""}` });
+      toast({ title: `${r.added} new tasks${r.changed ? ` · ${r.changed} changed` : ""}` });
       load();
     });
 

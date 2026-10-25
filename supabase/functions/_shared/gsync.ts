@@ -1,6 +1,6 @@
 // Task changes → Google (P-17, P-50), shared by the google function (the app) and the MCP server:
-//   calendar     → scheduled tasks as all-day events in the chosen calendar; create / update / delete, no duplicates
-//   Google Tasks → a task made from a Google Task (through the Inbox) sends its done state back (T-65)
+//   calendar     → scheduled tasks as events in the chosen calendar (timed or all-day); create / update / delete
+//   Google Tasks → every open task as a Google task (title, notes, day, done); create / update / delete
 import { GoogleError, ReconnectNeeded, db, google, hex, sha256 } from "./google.ts";
 
 export const CAL = "https://www.googleapis.com/calendar/v3";
@@ -100,44 +100,75 @@ export async function syncCalendar(userId: string, taskIds?: unknown) {
   return { ...counts, errors: errors.slice(0, 5) };
 }
 
-// Done in the app → completed in Google Tasks; undone → open again. The Inbox item remembers what Google has
-// (meta.gtask_status), so a task is sent only when it changed.
-export async function syncTaskStatus(userId: string, taskIds?: unknown) {
+// ── Tasks ↔ Google Tasks (owner, 2026-10-25: "sync the tasks with Google Tasks too") ──
+// Every open task of the app is also a Google task (the ones made in the app go to "My Tasks"); its title, notes,
+// day and done state follow the app. Not there: events (they are in the calendar, P-60), trashed and abandoned
+// tasks (their Google task is removed); done tasks made in the app are not added, a linked one shows done.
+// gtask_hash = what was sent last (only changes go); "deleted" = the user deleted it in Google: not sent again.
+export const DEFAULT_LIST = "@default";
+const tasksUrl = (list: string, id?: string) => `${TASKS}/lists/${encodeURIComponent(list)}/tasks${id ? `/${encodeURIComponent(id)}` : ""}`;
+
+// A task as Google Tasks shows it: due = the deadline, else the planned day (Google keeps only the date).
+export function gtaskFor(t: { title: string; description?: string | null; link?: string | null; status: string; date?: string | null; deadline?: string | null }) {
+  const due = t.deadline || t.date;
+  return {
+    title: t.title,
+    notes: [t.description?.trim(), t.link || null].filter(Boolean).join("\n\n"),
+    due: due ? `${due}T00:00:00.000Z` : null,
+    status: t.status === "complete" ? "completed" : "needsAction",
+    ...(t.status === "complete" ? {} : { completed: null }),
+  };
+}
+export const gtaskHash = async (body: unknown) => hex(await sha256(JSON.stringify(body)));
+
+export async function syncGoogleTasks(userId: string, taskIds?: unknown) {
   const ids = idsFrom(taskIds);
-  let q = db.from("inbox_items").select("id, source_ref, meta, result_id")
-    .eq("user_id", userId).eq("source", "google_tasks").eq("result_type", "task").not("result_id", "is", null);
-  if (ids) q = q.in("result_id", ids);
-  const { data: items, error } = await q;
+  let q = db.from("tasks")
+    .select("id, title, description, link, status, date, deadline, is_event, deleted_at, gtask_id, gtask_list_id, gtask_hash")
+    .eq("user_id", userId);
+  q = ids ? q.in("id", ids) : q.or("gtask_id.not.is.null,and(deleted_at.is.null,status.in.(idle,active),is_event.is.false)");
+  const { data: tasks, error } = await q;
   if (error) throw error;
-  const counts = { completed: 0, reopened: 0, failed: 0 };
-  if (!items.length) return counts;
 
-  const { data: tasks, error: taskError } = await db.from("tasks").select("id, status").eq("user_id", userId).in("id", items.map((i) => i.result_id));
-  if (taskError) throw taskError;
-  const statusOf = new Map(tasks.map((t) => [t.id, t.status]));
-
-  for (const item of items) {
-    const status = statusOf.get(item.result_id);
-    const meta = item.meta ?? {};
-    if (!status || !meta.list_id || meta.gtask_status === "deleted") continue;
-    const wanted = status === "complete" ? "completed" : "needsAction";
-    if (wanted === (meta.gtask_status ?? "needsAction")) continue;
-    let now = wanted;
+  const counts = { created: 0, updated: 0, removed: 0, unchanged: 0, failed: 0 };
+  for (const t of tasks) {
+    if (t.gtask_hash === "deleted") continue;
+    const wanted = !t.deleted_at && t.status !== "abandoned" && !t.is_event && (t.status !== "complete" || !!t.gtask_id);
     try {
-      await google(userId, `${TASKS}/lists/${encodeURIComponent(meta.list_id)}/tasks/${encodeURIComponent(item.source_ref)}`, {
-        method: "PATCH",
-        body: wanted === "completed" ? { status: "completed" } : { status: "needsAction", completed: null },
-      });
-      counts[wanted === "completed" ? "completed" : "reopened"]++;
-    } catch (e) {
-      if (e instanceof ReconnectNeeded) throw e;
-      if (!gone(e)) {
-        counts.failed++;
+      if (!wanted) {
+        if (t.gtask_id) {
+          await google(userId, tasksUrl(t.gtask_list_id ?? DEFAULT_LIST, t.gtask_id), { method: "DELETE" }).catch((e) => {
+            if (!gone(e)) throw e;
+          });
+          await db.from("tasks").update({ gtask_id: null, gtask_list_id: null, gtask_hash: null }).eq("id", t.id);
+          counts.removed++;
+        }
         continue;
       }
-      now = "deleted"; // deleted in Google: stop sending it
+      const body = gtaskFor(t);
+      const hash = await gtaskHash(body);
+      if (t.gtask_id && t.gtask_hash === hash) {
+        counts.unchanged++;
+        continue;
+      }
+      if (t.gtask_id) {
+        const sent = await google(userId, tasksUrl(t.gtask_list_id ?? DEFAULT_LIST, t.gtask_id), { method: "PATCH", body }).then(() => true, (e) => {
+          if (!gone(e)) throw e;
+          return false;
+        });
+        // Deleted in Google meanwhile: it stays deleted there; the app task stays as it is.
+        await db.from("tasks").update({ gtask_hash: sent ? hash : "deleted" }).eq("id", t.id);
+        if (sent) counts.updated++;
+      } else {
+        const g = await google(userId, tasksUrl(DEFAULT_LIST), { method: "POST", body });
+        await db.from("tasks").update({ gtask_id: g.id, gtask_list_id: DEFAULT_LIST, gtask_hash: hash }).eq("id", t.id);
+        counts.created++;
+      }
+    } catch (e) {
+      if (e instanceof ReconnectNeeded) throw e;
+      console.error(`google task ${t.id}:`, e);
+      counts.failed++;
     }
-    await db.from("inbox_items").update({ meta: { ...meta, gtask_status: now } }).eq("id", item.id);
   }
   return counts;
 }
@@ -145,10 +176,10 @@ export async function syncTaskStatus(userId: string, taskIds?: unknown) {
 // Both, for the tasks that changed (or all of them).
 export async function syncTasks(userId: string, taskIds?: unknown) {
   const calendar = await syncCalendar(userId, taskIds);
-  const googleTasks = await syncTaskStatus(userId, taskIds).catch((e) => {
+  const googleTasks = await syncGoogleTasks(userId, taskIds).catch((e) => {
     if (e instanceof ReconnectNeeded) throw e;
-    console.error("google tasks status:", e);
-    return { completed: 0, reopened: 0, failed: 1 };
+    console.error("google tasks:", e);
+    return { created: 0, updated: 0, removed: 0, unchanged: 0, failed: 1 };
   });
   return { ...calendar, google_tasks: googleTasks };
 }
