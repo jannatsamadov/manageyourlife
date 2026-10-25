@@ -500,6 +500,7 @@ export type Database = {
           created_at: string
           date: string | null
           deadline: string
+          deadline_time: string | null
           deleted_at: string | null
           description: string
           estimated_time: number | null
@@ -508,11 +509,13 @@ export type Database = {
           gcal_event_id: string | null
           gcal_hash: string | null
           id: string
+          is_event: boolean
           link: string
           linked_note_id: string | null
           node_id: string | null
           position: number
           priority: string
+          start_time: string | null
           status: string
           title: string
           user_id: string
@@ -526,6 +529,7 @@ export type Database = {
           created_at?: string
           date?: string | null
           deadline?: string
+          deadline_time?: string | null
           deleted_at?: string | null
           description?: string
           estimated_time?: number | null
@@ -534,11 +538,13 @@ export type Database = {
           gcal_event_id?: string | null
           gcal_hash?: string | null
           id?: string
+          is_event?: boolean
           link?: string
           linked_note_id?: string | null
           node_id?: string | null
           position?: number
           priority?: string
+          start_time?: string | null
           status?: string
           title: string
           user_id: string
@@ -552,6 +558,7 @@ export type Database = {
           created_at?: string
           date?: string | null
           deadline?: string
+          deadline_time?: string | null
           deleted_at?: string | null
           description?: string
           estimated_time?: number | null
@@ -560,11 +567,13 @@ export type Database = {
           gcal_event_id?: string | null
           gcal_hash?: string | null
           id?: string
+          is_event?: boolean
           link?: string
           linked_note_id?: string | null
           node_id?: string | null
           position?: number
           priority?: string
+          start_time?: string | null
           status?: string
           title?: string
           user_id?: string

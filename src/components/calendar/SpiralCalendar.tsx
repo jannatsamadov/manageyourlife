@@ -6,6 +6,8 @@ import { Crosshair, ZoomIn, ZoomOut } from "lucide-react";
 import type { Task } from "@/context/AppContext";
 import type { TreeNode } from "@/lib/strategy";
 import { localDay } from "@/hooks/useGoogleEvents";
+import { TimeTag } from "@/components/TimingFields";
+import { byTime } from "@/lib/timing";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import "./SpiralCalendar.css";
@@ -116,7 +118,7 @@ export default function SpiralCalendar({ tasks, roots, byId, hidden, onOpenDay }
       if (!m.has(d)) m.set(d, []);
       m.get(d)!.push(t);
     }
-    m.forEach((list) => list.sort((a, b) => a.position - b.position));
+    m.forEach((list) => list.sort(byTime)); // timed ones (events, time blocks) first, by time
     return m;
   }, [tasks]);
 
@@ -570,6 +572,7 @@ export default function SpiralCalendar({ tasks, roots, byId, hidden, onOpenDay }
                         {list.slice(0, 2).map((t, i) => (
                           <div key={t.id} className="flex items-center gap-1 text-[10px] leading-tight">
                             <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: colorOf(t) }} />
+                            <TimeTag task={t} className="text-[9px] text-muted-foreground" />
                             <span className={cn("min-w-0 flex-1 truncate", t.status === "complete" && "text-muted-foreground line-through")}>{t.title}</span>
                             {i === 1 && list.length > 2 && <span className="shrink-0 text-[9px] text-muted-foreground">+{list.length - 2}</span>}
                           </div>

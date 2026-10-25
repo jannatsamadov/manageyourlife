@@ -23,6 +23,11 @@ export interface Task {
   deletedAt?: string | null;
   // Strategy node this task serves (P-2)
   nodeId?: string | null;
+  // When it happens (P-60): an event at a fixed time; time = the event's start or the planned block's start
+  // ("HH:MM", only with a date); deadlineTime = the deadline's time (only with a deadline).
+  isEvent?: boolean;
+  time?: string | null;
+  deadlineTime?: string | null;
 }
 
 export interface Goal {
@@ -125,6 +130,9 @@ function dbTaskToLocal(row: any): Task {
     priority: (row.priority as TaskPriority) ?? "medium",
     deletedAt: row.deleted_at ?? null,
     nodeId: row.node_id ?? null,
+    isEvent: row.is_event ?? false,
+    time: row.start_time ?? null,
+    deadlineTime: row.deadline_time ?? null,
   };
 }
 
@@ -203,6 +211,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       priority: task.priority ?? "medium",
       deleted_at: null,
       node_id: task.nodeId ?? null,
+      is_event: !!task.isEvent && !!task.date,
+      start_time: task.date ? task.time || null : null,
+      deadline_time: task.deadline ? task.deadlineTime || null : null,
     } as any).select().single();
 
     if (error) {
@@ -249,12 +260,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (updates.link !== undefined) dbUpdates.link = updates.link;
     if (updates.priority !== undefined) dbUpdates.priority = updates.priority;
     if (updates.nodeId !== undefined) dbUpdates.node_id = updates.nodeId;
+    if (updates.isEvent !== undefined) dbUpdates.is_event = updates.isEvent;
+    if (updates.time !== undefined) dbUpdates.start_time = updates.time || null;
+    if (updates.deadlineTime !== undefined) dbUpdates.deadline_time = updates.deadlineTime || null;
+    // The database drops the time and the event mark with the planned day, and the deadline's time with the
+    // deadline (P-60); the local copy does the same.
+    const local: Partial<Task> = { ...updates };
+    if (updates.date === "" || updates.date === null) Object.assign(local, { time: null, isEvent: false });
+    if (updates.deadline === "") local.deadlineTime = null;
 
     const { error } = await supabase.from("tasks").update(dbUpdates).eq("id", id);
     if (error) {
       toast({ title: "Failed to update task", description: error.message, variant: "destructive" });
     } else {
-      setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, ...updates } : t)));
+      setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, ...local } : t)));
       queueCalendarSync(id);
     }
   }, []);

@@ -46,7 +46,8 @@ const checkWrite = <T>({ data, error }: { data: T; error: { code?: string; messa
 const STATUSES = ["idle", "active", "complete", "abandoned"];
 const PRIORITIES = ["high", "medium", "low"];
 const KINDS = ["idea", "question", "todo", "resource"];
-const TASK_COLS = "id, title, description, status, date, deadline, priority, estimated_time, link, node_id, created_at";
+const TASK_COLS = "id, title, description, status, date, start_time, is_event, deadline, deadline_time, priority, estimated_time, link, node_id, created_at";
+const isTime = (v: unknown) => typeof v === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(v);
 const NODE_STATUSES = ["open", "done", "dropped"];
 const DATE = { type: "string", description: "YYYY-MM-DD" };
 const ID = { type: "string", description: "uuid" };
@@ -76,6 +77,20 @@ function taskFields(a: any, creating: boolean) {
     need(a.deadline === null || a.deadline === "" || isDate(a.deadline), "deadline: YYYY-MM-DD, or null to clear");
     row.deadline = a.deadline ?? "";
   }
+  // When it happens (P-60): times go with a date / a deadline; the database drops them when those are cleared.
+  if (a.start_time !== undefined) {
+    need(a.start_time === null || isTime(a.start_time), "start_time: HH:MM (24 h) or null");
+    row.start_time = a.start_time;
+  }
+  if (a.deadline_time !== undefined) {
+    need(a.deadline_time === null || isTime(a.deadline_time), "deadline_time: HH:MM (24 h) or null");
+    row.deadline_time = a.deadline_time;
+  }
+  if (a.is_event !== undefined) {
+    need(typeof a.is_event === "boolean", "is_event: true or false");
+    row.is_event = a.is_event;
+    if (a.is_event && creating) need(isDate(a.date) && isTime(a.start_time), "an event needs date and start_time");
+  }
   if (a.estimated_minutes !== undefined) {
     need(a.estimated_minutes === null || (Number.isInteger(a.estimated_minutes) && a.estimated_minutes > 0 && a.estimated_minutes <= 100000), "estimated_minutes: positive whole number or null");
     row.estimated_time = a.estimated_minutes;
@@ -99,8 +114,11 @@ const TASK_INPUT = {
   title: { type: "string" },
   description: { type: "string" },
   status: { type: "string", enum: STATUSES },
-  date: { ...DATE, description: "Day the task is planned for (YYYY-MM-DD); null = unscheduled" },
-  deadline: { ...DATE, description: "Due date (YYYY-MM-DD); null clears it" },
+  date: { ...DATE, description: "Day the task is planned for, or the day of an event (YYYY-MM-DD); null = unscheduled" },
+  start_time: { type: ["string", "null"], description: "HH:MM (24 h, user's local time): an event's start, or the time block of a planned task; needs date" },
+  is_event: { type: "boolean", description: "true = happens at a fixed time (meeting, exam, conference, call): needs date + start_time, estimated_minutes = its length; synced to Google Calendar as a timed event" },
+  deadline: { ...DATE, description: "Due date (YYYY-MM-DD): must be done by then; null clears it" },
+  deadline_time: { type: ["string", "null"], description: "HH:MM (24 h) of the deadline; needs deadline" },
   estimated_minutes: { type: "integer", minimum: 1 },
   priority: { type: "string", enum: PRIORITIES },
   link: { type: "string", description: "Related URL" },
@@ -160,7 +178,7 @@ export const TOOLS: Tool[] = [
     run: async ({ date }, { db, userId }) => {
       const day = isDate(date) ? date : new Date().toISOString().slice(0, 10);
       const planned = check(await db.from("tasks").select(TASK_COLS).eq("user_id", userId).is("deleted_at", null)
-        .eq("date", day).neq("status", "abandoned").order("position"));
+        .eq("date", day).neq("status", "abandoned").order("start_time", { ascending: true, nullsFirst: false }).order("position"));
       const overdue = check(await db.from("tasks").select(TASK_COLS).eq("user_id", userId).is("deleted_at", null)
         .neq("deadline", "").lt("deadline", day).not("status", "in", "(complete,abandoned)").order("deadline"));
       const { count, error } = await db.from("vault_files").select("id", { count: "exact", head: true }).eq("user_id", userId)
@@ -221,7 +239,7 @@ export const TOOLS: Tool[] = [
   {
     name: "task_create",
     title: "Create a task",
-    description: "Create a task. Without date it stays unscheduled (in the backlog). node_id links it to a strategy goal / mission / step.",
+    description: "Create a task. Pick its kind: an event at a fixed time (is_event + date + start_time: meetings, exams, calls), a planned task (date, optional start_time = time block), a deadline (deadline, optional deadline_time: must be done by), or none (no date, no deadline: it waits in the backlog). node_id links it to a strategy goal / mission / step.",
     scope: "write",
     inputSchema: { type: "object", properties: TASK_INPUT, required: ["title"] },
     annotations: WRITE,
@@ -234,7 +252,7 @@ export const TOOLS: Tool[] = [
   {
     name: "task_update",
     title: "Update a task",
-    description: "Change any fields of a task: title, description, status (idle/active/complete/abandoned), planned date (null = unscheduled), deadline, estimate, priority, link, strategy node (node_id; null unlinks).",
+    description: "Change any fields of a task: title, description, status (idle/active/complete/abandoned), planned date (null = unscheduled, which also drops its time and event mark), start_time, is_event, deadline, deadline_time, estimate, priority, link, strategy node (node_id; null unlinks).",
     scope: "write",
     inputSchema: { type: "object", properties: { id: ID, ...TASK_INPUT }, required: ["id"] },
     annotations: { ...WRITE, idempotentHint: true },

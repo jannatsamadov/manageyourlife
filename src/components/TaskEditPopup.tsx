@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { X, Save, AlertTriangle, Trash2, Plus, CheckSquare, FileText, Send } from "lucide-react";
 import { Task, TaskPriority, useAppState } from "@/context/AppContext";
 import ShareTaskDialog from "@/components/ShareTaskDialog";
+import TimingFields from "@/components/TimingFields";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/context/AuthContext";
 import { cn } from "@/lib/utils";
@@ -33,6 +34,9 @@ interface EditForm {
   estimatedTime: string;
   date: string;
   deadline: string;
+  isEvent: boolean;
+  time: string;
+  deadlineTime: string;
   link: string;
   priority: TaskPriority;
   status: Task["status"];
@@ -58,6 +62,9 @@ export default function TaskEditPopup({ task, onClose }: TaskEditPopupProps) {
     estimatedTime: task.estimatedTime ? String(task.estimatedTime) : "",
     date: task.date || "",
     deadline: task.deadline || "",
+    isEvent: !!task.isEvent,
+    time: task.time || "",
+    deadlineTime: task.deadlineTime || "",
     link: task.link || "",
     priority: task.priority || "medium",
     status: task.status,
@@ -177,6 +184,9 @@ export default function TaskEditPopup({ task, onClose }: TaskEditPopupProps) {
     if (newEst !== task.estimatedTime) updates.estimatedTime = newEst;
     if (editForm.date !== (task.date || "")) updates.date = editForm.date;
     if (editForm.deadline !== (task.deadline || "")) updates.deadline = editForm.deadline;
+    if (editForm.isEvent !== !!task.isEvent) updates.isEvent = editForm.isEvent;
+    if (editForm.time !== (task.time || "")) updates.time = editForm.time || null;
+    if (editForm.deadlineTime !== (task.deadlineTime || "")) updates.deadlineTime = editForm.deadlineTime || null;
     if (editForm.link !== (task.link || "")) updates.link = editForm.link;
     if (editForm.priority !== (task.priority || "medium")) updates.priority = editForm.priority;
     if (editForm.nodeId !== (task.nodeId ?? "")) updates.nodeId = editForm.nodeId || null;
@@ -237,36 +247,9 @@ export default function TaskEditPopup({ task, onClose }: TaskEditPopupProps) {
             rows={3}
             className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-primary"
           />
+          {/* When it happens (P-60): event / deadline / planned, and only that kind's fields. */}
+          <TimingFields value={editForm} onChange={(v) => setEditForm({ ...editForm, ...v })} />
           <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs text-muted-foreground mb-1 block">Scheduled Date</label>
-              <input
-                type="date"
-                value={editForm.date}
-                onChange={(e) => setEditForm({ ...editForm, date: e.target.value })}
-                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm [color-scheme:dark] focus:outline-none focus:ring-1 focus:ring-primary"
-              />
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground mb-1 block">Deadline</label>
-              <input
-                type="date"
-                value={editForm.deadline}
-                onChange={(e) => setEditForm({ ...editForm, deadline: e.target.value })}
-                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm [color-scheme:dark] focus:outline-none focus:ring-1 focus:ring-primary"
-              />
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground mb-1 block">Estimated (min)</label>
-              <input
-                type="number"
-                value={editForm.estimatedTime}
-                onChange={(e) => setEditForm({ ...editForm, estimatedTime: e.target.value })}
-                placeholder="minutes"
-                min="1"
-                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
-              />
-            </div>
             <div>
               <label className="text-xs text-muted-foreground mb-1 block">Status</label>
               <select

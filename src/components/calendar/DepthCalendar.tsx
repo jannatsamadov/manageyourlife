@@ -12,6 +12,8 @@ import type { Task } from "@/context/AppContext";
 import type { TreeNode } from "@/lib/strategy";
 import { useAuth } from "@/context/AuthContext";
 import { localDay } from "@/hooks/useGoogleEvents";
+import { TimeTag } from "@/components/TimingFields";
+import { byTime } from "@/lib/timing";
 import { toast } from "@/hooks/use-toast";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ensureMemory, loadMemories } from "@/lib/memories";
@@ -124,7 +126,7 @@ export default function DepthCalendar({ tasks, byId, onOpenDay }: {
       if (!m.has(d)) m.set(d, []);
       m.get(d)!.push(t);
     }
-    m.forEach((list) => list.sort((a, b) => a.position - b.position));
+    m.forEach((list) => list.sort(byTime)); // timed ones (events, time blocks) first, by time
     return m;
   }, [tasks]);
   const colorOf = (t: Task) => (t.nodeId && byId.get(t.nodeId)?.color) || "hsl(var(--muted-foreground))";
@@ -436,6 +438,7 @@ export default function DepthCalendar({ tasks, byId, onOpenDay }: {
                       {list.slice(0, 4).map((t, i) => (
                         <div key={t.id} className="flex items-center gap-2 text-sm leading-tight">
                           <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: colorOf(t) }} />
+                          <TimeTag task={t} className="text-xs opacity-70" />
                           <span className={cn("min-w-0 flex-1 truncate", t.status === "complete" && "line-through opacity-60")}>{t.title}</span>
                           {i === 3 && list.length > 4 && <span className="shrink-0 text-xs opacity-60">+{list.length - 4}</span>}
                         </div>

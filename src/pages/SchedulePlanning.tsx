@@ -15,6 +15,8 @@ import {
   TooltipTrigger } from
 "@/components/ui/tooltip";
 import TaskEditPopup from "@/components/TaskEditPopup";
+import TimingFields, { TimeTag } from "@/components/TimingFields";
+import { byTime } from "@/lib/timing";
 import IncomingShares from "@/components/IncomingShares";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
@@ -143,14 +145,8 @@ export default function SchedulePlanning() {
   const [deadlineFilter, setDeadlineFilter] = useState<"any" | "overdue" | "due3" | "due7" | "due14" | "noDeadline">("any");
   const [scheduledDaysShown, setScheduledDaysShown] = useState(4);
   const [previousDaysShown, setPreviousDaysShown] = useState(0);
-  const [form, setForm] = useState({
-    title: "",
-    description: "",
-    estimatedTime: "",
-    deadline: "",
-    link: "",
-    priority: "medium" as TaskPriority
-  });
+  const emptyForm = { title: "", description: "", estimatedTime: "", deadline: "", link: "", priority: "medium" as TaskPriority, isEvent: false, date: "", time: "", deadlineTime: "" };
+  const [form, setForm] = useState(emptyForm);
   const dragNavTimer = useRef<ReturnType<typeof setTimeout>>();
   const [syncing, setSyncing] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -228,12 +224,14 @@ export default function SchedulePlanning() {
   const month = currentDate.getMonth();
 
   const calendarEvents = useMemo(() => {
-    const map: Record<string, {id: string;title: string;status: Task["status"];deadline: string;}[]> = {};
+    const map: Record<string, {id: string;title: string;status: Task["status"];deadline: string;time: string | null;isEvent: boolean;}[]> = {};
     visibleTasks.forEach((t) => {
       if (!t.date) return;
       if (!map[t.date]) map[t.date] = [];
-      map[t.date].push({ id: t.id, title: t.title, status: t.status, deadline: t.deadline });
+      map[t.date].push({ id: t.id, title: t.title, status: t.status, deadline: t.deadline, time: t.time ?? null, isEvent: !!t.isEvent });
     });
+    // Timed ones (events, time blocks) by their time first (P-60).
+    Object.values(map).forEach((list) => list.sort((a, b) => (a.time || "99:99").localeCompare(b.time || "99:99")));
     return map;
   }, [visibleTasks]);
 
@@ -394,7 +392,7 @@ export default function SchedulePlanning() {
   );
 
   const selectedDayTasks = useMemo(
-    () => selectedDay ? visibleTasks.filter((t) => t.date === selectedDay).sort((a, b) => a.position - b.position) : [],
+    () => selectedDay ? visibleTasks.filter((t) => t.date === selectedDay).sort(byTime) : [],
     [visibleTasks, selectedDay]
   );
 
@@ -453,13 +451,16 @@ export default function SchedulePlanning() {
       status: "idle",
       startTime: null,
       endTime: null,
-      date: "",
+      date: form.date,
       deadline: form.deadline,
       position: 0,
       link: form.link,
-      priority: form.priority
+      priority: form.priority,
+      isEvent: form.isEvent,
+      time: form.time || null,
+      deadlineTime: form.deadlineTime || null
     });
-    setForm({ title: "", description: "", estimatedTime: "", deadline: "", link: "", priority: "medium" });
+    setForm(emptyForm);
     setShowForm(false);
   };
 
@@ -668,12 +669,10 @@ export default function SchedulePlanning() {
           {showForm && (
             <div className="mt-3 p-4 rounded-lg border border-border bg-muted/20 space-y-3 animate-in slide-in-from-top-1 duration-200">
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <input value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} placeholder="Task title *" className="rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary/30 transition-colors" />
-                <div>
-                  <label className="text-[10px] text-muted-foreground">Deadline</label>
-                  <input type="date" value={form.deadline} onChange={(e) => setForm((f) => ({ ...f, deadline: e.target.value }))} className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm [color-scheme:dark] focus:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary/30 transition-colors" />
+                <input value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} placeholder="Task title *" className="rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary/30 transition-colors sm:col-span-2" />
+                <div className="sm:col-span-2">
+                  <TimingFields value={form} onChange={(v) => setForm((f) => ({ ...f, ...v }))} />
                 </div>
-                <input type="number" value={form.estimatedTime} onChange={(e) => setForm((f) => ({ ...f, estimatedTime: e.target.value }))} placeholder="Estimated minutes" min="1" className="rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary/30 transition-colors" />
                 <select value={form.priority} onChange={(e) => setForm((f) => ({ ...f, priority: e.target.value as TaskPriority }))} className="rounded-lg border border-border bg-background px-3 py-2 text-sm">
                   <option value="high">High Priority</option>
                   <option value="medium">Medium Priority</option>
@@ -750,7 +749,7 @@ export default function SchedulePlanning() {
                             calendarEventColor(ev.status, ev.deadline)
                           )}>
                           
-                              {ev.title}
+                              <TimeTag task={ev} className="mr-1 opacity-80" />{ev.title}
                             </div>
                         )}
                           {gShown.map((ev) => <GoogleEventChip key={ev.id} event={ev} />)}
@@ -813,7 +812,7 @@ export default function SchedulePlanning() {
                           )}>
                           
                               <div className="flex items-center gap-0.5">
-                                <Clock className="h-2.5 w-2.5 flex-shrink-0" />
+                                {ev.time || ev.isEvent ? <TimeTag task={ev} className="mr-0.5" /> : <Clock className="h-2.5 w-2.5 flex-shrink-0" />}
                                 <span className="truncate">{ev.title}</span>
                               </div>
                             </div>
@@ -916,6 +915,7 @@ export default function SchedulePlanning() {
                             }
                             <div className="relative flex-1 min-w-0 z-[1]">
                               <div className="flex items-center gap-2">
+                                <TimeTag task={task} className="text-xs text-muted-foreground" />
                                 <p className={cn("font-medium truncate", task.status === "complete" && "line-through text-muted-foreground")}>{task.title}</p>
                                 {task.link &&
                                 <a href={task.link} target="_blank" rel="noopener" onClick={(e) => e.stopPropagation()} className="shrink-0 text-primary hover:text-primary/80">
@@ -1027,6 +1027,7 @@ export default function SchedulePlanning() {
                             }
                             <div className="relative flex-1 min-w-0 z-[1]">
                               <div className="flex items-center gap-2">
+                                <TimeTag task={task} className="text-xs text-muted-foreground" />
                                 <p className={cn("font-medium truncate", task.status === "complete" && "line-through text-muted-foreground")}>
                                   {task.title}
                                 </p>
@@ -1231,7 +1232,7 @@ export default function SchedulePlanning() {
                       <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-medium", priorityColors[task.priority])}>{task.priority}</span>
                     </div>
                     <div className="mt-0.5 flex items-center gap-3 text-[10px] text-muted-foreground">
-                      {task.deadline && <span className="font-mono">Deadline: {task.deadline}</span>}
+                      {task.deadline && <span className="font-mono">Deadline: {task.deadline}{task.deadlineTime && ` ${task.deadlineTime}`}</span>}
                     </div>
                   </div>
                   <Tooltip>
@@ -1285,13 +1286,14 @@ export default function SchedulePlanning() {
                 
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
+                          <TimeTag task={task} className="text-xs text-muted-foreground" />
                           <span className="font-medium text-sm">{task.title}</span>
                           <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-medium", priorityColors[task.priority])}>{task.priority}</span>
                           {task.estimatedTime && <span className="text-[10px] text-muted-foreground">Est: {formatEstimated(task.estimatedTime)}</span>}
                         </div>
                         {task.description && <p className="mt-1 text-xs text-muted-foreground">{task.description}</p>}
                         <div className="mt-1 flex items-center gap-3 text-[10px] text-muted-foreground">
-                          {task.deadline && <span className="font-mono">Deadline: {task.deadline}</span>}
+                          {task.deadline && <span className="font-mono">Deadline: {task.deadline}{task.deadlineTime && ` ${task.deadlineTime}`}</span>}
                           <span className="capitalize">Status: {task.status}</span>
                           {task.link && <a href={task.link} target="_blank" rel="noopener" className="flex items-center gap-0.5 text-primary hover:underline" onClick={(e) => e.stopPropagation()}><ExternalLink className="h-3 w-3" />Link</a>}
                         </div>

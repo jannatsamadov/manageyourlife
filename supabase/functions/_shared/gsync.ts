@@ -11,19 +11,24 @@ export const gone = (e: unknown) => e instanceof GoogleError && (e.status === 40
 const idsFrom = (taskIds: unknown) =>
   Array.isArray(taskIds) && taskIds.length ? taskIds.filter((id): id is string => typeof id === "string").slice(0, 200) : undefined;
 
-// All-day event for a task's planned day (end date is exclusive in Google Calendar).
-function eventFor(t: any) {
+// The event of a task's planned day. An event (P-60) or a time block: at its time, in the calendar's time zone,
+// as long as its minutes (60 if not set); an event blocks the time, a task does not. A whole-day task: an all-day
+// event (end date is exclusive in Google Calendar).
+function eventFor(t: any, timeZone: string) {
+  const details = [t.description?.trim(), t.link || null, t.estimated_time && !t.is_event ? `Estimate: ${t.estimated_time} min` : null].filter(Boolean);
+  const summary = (t.status === "complete" && !t.is_event ? "✓ " : "") + t.title;
+  const description = [...details, "— ManageYourLife"].join("\n\n");
+  const extendedProperties = { private: { myl_task_id: t.id } };
+  if (t.start_time) {
+    const start = `${t.date}T${t.start_time}:00`;
+    // Local wall-clock times: add the minutes as if UTC, keep the zone.
+    const end = new Date(Date.parse(`${start}Z`) + (t.estimated_time || 60) * 60_000).toISOString().slice(0, 19);
+    return { summary, description, start: { dateTime: start, timeZone }, end: { dateTime: end, timeZone }, transparency: t.is_event ? "opaque" : "transparent", extendedProperties };
+  }
   const end = new Date(`${t.date}T00:00:00Z`);
   end.setUTCDate(end.getUTCDate() + 1);
-  const details = [t.description?.trim(), t.link || null, t.estimated_time ? `Estimate: ${t.estimated_time} min` : null].filter(Boolean);
-  return {
-    summary: (t.status === "complete" ? "✓ " : "") + t.title,
-    description: [...details, "— ManageYourLife"].join("\n\n"),
-    start: { date: t.date },
-    end: { date: end.toISOString().slice(0, 10) },
-    transparency: "transparent",
-    extendedProperties: { private: { myl_task_id: t.id } },
-  };
+  // Same shape as before P-60, so the stored hashes of whole-day tasks still match.
+  return { summary, description, start: { date: t.date }, end: { date: end.toISOString().slice(0, 10) }, transparency: "transparent", extendedProperties };
 }
 
 export async function syncCalendar(userId: string, taskIds?: unknown) {
@@ -35,7 +40,7 @@ export async function syncCalendar(userId: string, taskIds?: unknown) {
 
   const ids = idsFrom(taskIds);
   let q = db.from("tasks")
-    .select("id, title, description, status, date, link, estimated_time, deleted_at, gcal_event_id, gcal_calendar_id, gcal_hash")
+    .select("id, title, description, status, date, link, estimated_time, is_event, start_time, deleted_at, gcal_event_id, gcal_calendar_id, gcal_hash")
     .eq("user_id", userId);
   q = ids ? q.in("id", ids) : q.or("date.not.is.null,gcal_event_id.not.is.null");
   const { data: tasks, error } = await q;
@@ -43,6 +48,14 @@ export async function syncCalendar(userId: string, taskIds?: unknown) {
 
   const counts = { created: 0, updated: 0, removed: 0, unchanged: 0, failed: 0 };
   const errors: string[] = [];
+  // Timed events need a time zone: the calendar's own, else the one the app set for the user (Telegram link), else UTC.
+  let zone: string | null = null;
+  const timeZone = async () => {
+    if (zone) return zone;
+    const cal = await google(userId, `${CAL}/calendars/${encodeURIComponent(calendarId)}`).catch(() => null);
+    const own = cal?.timeZone ?? (await db.from("telegram_links").select("time_zone").eq("user_id", userId).maybeSingle()).data?.time_zone;
+    return (zone = own || "UTC");
+  };
   for (const t of tasks) {
     try {
       const wanted = !!t.date && !t.deleted_at && t.status !== "abandoned";
@@ -57,7 +70,7 @@ export async function syncCalendar(userId: string, taskIds?: unknown) {
       }
       if (!wanted) continue;
 
-      const body = eventFor(t);
+      const body = eventFor(t, t.start_time ? await timeZone() : "UTC");
       const hash = hex(await sha256(JSON.stringify(body)));
       if (t.gcal_event_id && t.gcal_hash === hash) {
         counts.unchanged++;
