@@ -1,6 +1,7 @@
 // MCP tools (P-18). Every query is filtered by the token owner's user_id (the client is the service role).
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2.45.4";
 import { CHILD_KIND, NODE_COLS, loadTree, present } from "./strategy.ts";
+import { collectIdeas } from "../_shared/ideas.ts";
 import {
   addItem, CAPTURE_SECTIONS, captureItem, editNote, INBOX, inboxNotePath, localTime, moveFile, noteById, readNote, safeName, syncTodos, userTimeZone,
   VaultError, writeNote,
@@ -335,6 +336,28 @@ export const TOOLS: Tool[] = [
           return { ...n, updated_at: modified_at, snippet: text.slice(at, at + 300) };
         }),
       };
+    },
+  },
+  {
+    name: "ideas_list",
+    title: "List ideas",
+    description:
+      "Every idea in the user's notes and projects in one list: notes in an ideas folder (e.g. Notes/İdeyalar) or tagged #idea, " +
+      "items under an \"Ideas\" / \"İdeyalar\" heading (Telegram captures too), plan items marked IDEA, task-table rows with status IDEA. " +
+      "Newest first; query filters by text, folder by path prefix.",
+    scope: "read",
+    inputSchema: {
+      type: "object",
+      properties: { query: { type: "string" }, folder: { type: "string", description: "e.g. \"Projects/clsmng\"" }, limit: { type: "integer", minimum: 1, maximum: 300, default: 100 } },
+    },
+    annotations: READ,
+    run: async ({ query, folder, limit }, { db, userId }) => {
+      const term = typeof query === "string" ? query.trim().toLowerCase() : "";
+      const prefix = typeof folder === "string" ? folder.trim().replace(/^\/+|\/+$/g, "") : "";
+      const ideas = (await collectIdeas(db, userId))
+        .filter((i) => (!term || `${i.text} ${i.detail ?? ""} ${i.path}`.toLowerCase().includes(term)) && (!prefix || i.path.startsWith(`${prefix}/`)))
+        .slice(0, limitOf(limit, 100, 300));
+      return { ideas: ideas.map(({ file_id, ...i }) => ({ note_id: file_id, ...i })) };
     },
   },
   {

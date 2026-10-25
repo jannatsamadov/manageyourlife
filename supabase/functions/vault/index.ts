@@ -4,6 +4,7 @@ import { cors, db, json, userFrom } from "../_shared/google.ts";
 import {
   cleanPath, moveFile, purgeFile, readNote, restoreFile, scan, setTodo, signedUrls, syncTodos, toggleTodo, trashFile, VaultError, writeNote, noteById,
 } from "../_shared/vault.ts";
+import { collectIdeas } from "../_shared/ideas.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: cors });
@@ -46,6 +47,9 @@ Deno.serve(async (req) => {
         await toggleTodo(db, uid, body.note_id, body.title, body.completed);
         return json({ ok: true });
       }
+      // The Ideas page (P-64): every idea in the user's files.
+      case "ideas":
+        return json({ ideas: await collectIdeas(db, uid) });
       // The Tasks page: a to-do line of any note, by line number + text.
       case "set_todo": {
         if (!Number.isInteger(body.line) || typeof body.text !== "string" || typeof body.done !== "boolean") throw new VaultError("line, text, done");
