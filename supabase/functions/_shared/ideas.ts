@@ -83,7 +83,17 @@ export function ideasIn(body: string) {
       continue;
     }
   }
-  return out.filter((o) => o.text);
+  return out.filter((o) => o.text).map((o) => ({ ...o, detail: o.kind === "plan" ? sectionText(lines, o.line) : null }));
+}
+
+// What a marked heading's section says first (shown under it, and searched).
+function sectionText(lines: string[], heading: number) {
+  const parts: string[] = [];
+  for (let i = heading + 1; i < lines.length && !/^#{1,6}\s/.test(lines[i]) && parts.join(" ").length < 300; i++) {
+    const t = plain(lines[i].replace(/^\s*[-*+]\s+/, ""));
+    if (t) parts.push(t);
+  }
+  return parts.join(" ").slice(0, 280) || null;
 }
 
 export async function collectIdeas(db: SupabaseClient, userId: string) {
@@ -96,7 +106,7 @@ export async function collectIdeas(db: SupabaseClient, userId: string) {
       ideas.push({ ...base, kind: "note", text: f.title, detail: f.excerpt?.slice(0, 280) || null, line: null });
       continue;
     }
-    for (const o of ideasIn(f.body ?? "")) ideas.push({ ...base, kind: o.kind, text: o.text, detail: null, line: o.line });
+    for (const o of ideasIn(f.body ?? "")) ideas.push({ ...base, kind: o.kind, text: o.text, detail: o.detail, line: o.line });
   }
   ideas.sort((a, b) => b.modified_at.localeCompare(a.modified_at) || a.path.localeCompare(b.path) || (a.line ?? 0) - (b.line ?? 0));
   return ideas;

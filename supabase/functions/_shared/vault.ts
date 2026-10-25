@@ -129,7 +129,8 @@ export function parse(text: string) {
   }
   const prose = text.replace(/```[\s\S]*?```/g, "").replace(/`[^`\n]*`/g, "");
   for (const [, t] of prose.matchAll(/(?:^|\s)#([\p{L}\p{N}_/-]+)/gu)) if (!/^\d+$/.test(t)) tags.add(t);
-  const links = new Set([...text.matchAll(/!?\[\[([^\]|#^\n]+)/g)].map((m) => m[1].trim()).filter(Boolean));
+  // [[links]] outside code, as Obsidian reads them (a [[link]] shown as code is not one).
+  const links = new Set([...prose.matchAll(/!?\[\[([^\]|#^\n]+)/g)].map((m) => m[1].trim()).filter(Boolean));
   const excerpt = text
     .replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/, "")
     .replace(/!\[\[[^\]]*\]\]|!\[[^\]]*\]\([^)]*\)/g, "")
