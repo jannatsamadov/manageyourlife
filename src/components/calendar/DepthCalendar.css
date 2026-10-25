@@ -1,7 +1,8 @@
-/* React Bits DepthCarousel (JS-CSS) as installed, turned upward: the day in front sits low and the coming days rise
-   toward the horizon (the card's top and the perspective origin are set inline from ANCHOR / ORIGIN). Colours come
-   from the app theme; --haze is the soft colour of the future (a glow at the horizon and a light mist over the far
-   days). Arrows and dots of the original are replaced by the calendar's own controls. */
+/* React Bits DepthCarousel (JS-CSS) as installed, made a road: the days stand on it hinged at their bottom edge
+   (transform-origin bottom centre), the front one low, the rest running to the vanishing point on the horizon (the
+   card's top and the perspective origin are set inline from BOTTOM / HORIZON). Colours come from the app theme;
+   --haze is the soft colour of the future (a glow on the horizon, the road's edges, a light mist over the far days).
+   Arrows and dots of the original are replaced by the calendar's own controls. */
 .depth-cal {
   position: relative;
   width: 100%;
@@ -18,8 +19,21 @@
   -webkit-user-select: none;
   cursor: grab;
   background:
-    radial-gradient(ellipse 70% 45% at 50% 14%, color-mix(in srgb, var(--haze) 30%, transparent), transparent 70%),
-    linear-gradient(to bottom, color-mix(in srgb, var(--haze) 10%, transparent), transparent 55%);
+    radial-gradient(ellipse 70% 40% at 50% var(--horizon, 18%), color-mix(in srgb, var(--haze) 32%, transparent), transparent 70%),
+    linear-gradient(to bottom, color-mix(in srgb, var(--haze) 12%, transparent), transparent var(--horizon, 18%), transparent);
+}
+
+/* The road's edges (leading lines to the vanishing point) and a faint surface between them. */
+.depth-cal__road {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.depth-cal__road polyline {
+  fill: none;
+  stroke: var(--haze);
+  stroke-opacity: 0.45;
+  stroke-width: 1;
 }
 
 .depth-cal:active {
@@ -36,13 +50,14 @@
   position: absolute;
   inset: 0;
   transform-style: preserve-3d;
+  transition: opacity 0.45s ease; /* autoplay fades back to today */
 }
 
 .depth-cal__card {
   position: absolute;
   top: 50%;
   left: 50%;
-  transform-origin: center center;
+  transform-origin: 50% 100%; /* hinged at the bottom edge (the original: center center) */
   overflow: hidden;
   border: 1px solid hsl(var(--foreground) / 0.12);
   background: hsl(var(--card));
@@ -52,7 +67,7 @@
     0 8px 20px -10px rgba(0, 0, 0, 0.35);
   will-change: transform, opacity, filter;
   cursor: pointer;
-  transform: translate(-50%, -50%);
+  transform: translate(-50%, -100%);
 }
 
 .depth-cal__card.is-today {
@@ -98,7 +113,7 @@
   position: relative;
   z-index: 1;
   height: 100%;
-  padding: 22px 34px; /* away from the round corners */
+  padding: 18px 36px; /* away from the round corners */
   display: flex;
   flex-direction: column;
 }

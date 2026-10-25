@@ -1,8 +1,10 @@
-// Depth calendar (owner, 2026-10-25): the React Bits "DepthCarousel" turned into time. We look ahead: the days stand
-// one behind the other, up toward the horizon, the future in a soft colour haze; the day in focus is in front. As
-// time moves on (wheel, drag, arrows, autoplay) the days come toward us and pass through. A card holds the day's
-// tasks and its memory (a note Memories/<date>.md and the photos sent to the bot that day; the first picture fills
-// the card). Click a day → it comes to the front; click the front day → the day opens.
+// Depth calendar (owner, 2026-10-25): the React Bits "DepthCarousel" turned into time — an abstract road into the
+// future. The days stand on a flat road one behind the other, hinged at their bottom edge and leaning back, and run
+// to a vanishing point on the horizon (one-point perspective: nothing is lifted by hand, the perspective lifts them);
+// the far ones dissolve in a soft colour haze. As time moves on (autoplay rolls slowly; wheel, drag, arrows) the days
+// come toward us and pass through. A card holds the day's tasks and its memory (a note Memories/<date>.md and the
+// photos sent to the bot that day; the first picture fills the card). Click a day → it comes to the front; click the
+// front day → the day opens.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -21,26 +23,33 @@ import { vault } from "@/lib/vault";
 import { cn } from "@/lib/utils";
 import "./DepthCalendar.css";
 
-// The owner's settings on reactbits.dev (tilt turned upward; blur 0 → a little, owner: "the back a bit blurred") …
-const CARD_W = 420, CARD_H = 220, RADIUS = 44, VISIBLE = 5, DURATION = 1150, FALLOFF = 0.22, DEPTH = 170, SPREAD = 130,
-  TILT = 17, PERSPECTIVE = 1100, BLUR = 2;
+// The owner's settings (reactbits.dev, then for the road, 2026-10-25: depth 420, perspective 1200–1500, tilt 18,
+// 7–14 days, the card shape of the spiral view 164:72; "the back a bit blurred") …
+const CARD_W = 420, CARD_H = 184, RADIUS = 44, VISIBLE = 14, DURATION = 1150, FALLOFF = 0.22, DEPTH = 420, TILT = 18,
+  PERSPECTIVE = 1300, BLUR = 2.5;
 // … and the component's defaults.
 const EASE = "power3.out", AUTOPLAY_DELAY = 3200;
-// Upward the stack needs height, not width: the day in front sits low (ANCHOR of the height), the horizon is at
-// ORIGIN, and the step up per day (at most SPREAD) is what lets the 5th day still show under the top edge.
-const ANCHOR = 0.68, ORIGIN = 0.25, MIN_RISE = 40;
-const AHEAD = 14; // autoplay walks this many days ahead of today, then starts again at today
-// Soft colours of the future (owner: light blue, or another positive colour — light green, orange — nothing sharp).
+// The road: the front day's bottom edge at BOTTOM of the height, the horizon (eye level, vanishing point) at HORIZON.
+const BOTTOM = 0.92, HORIZON = 0.18;
+// The owner's falloff was for 5 days; spread over the longer road so the haze grows to the same at its far end.
+const FALLOFF_STEP = (FALLOFF * 5) / VISIBLE;
+const AHEAD = 14; // autoplay rolls this many days ahead of today, then starts again at today
+// Colours of the future: soft, nothing sharp (owner: light blue, light green, orange — and a neutral one).
 const HAZES = [
   { name: "Sky", color: "#a8d5f7" },
   { name: "Mint", color: "#b3e5c9" },
   { name: "Peach", color: "#f8caa2" },
+  { name: "Neutral", color: "#d6d3d1" },
 ];
 
 const DAY = 86400000;
 const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const clamp = (v: number, min: number, max: number) => Math.min(Math.max(v, min), max);
+const smoothstep = (min: number, max: number, v: number) => {
+  const x = clamp((v - min) / (max - min), 0, 1);
+  return x * x * (3 - 2 * x);
+};
 const dayOf = (iso: string) => Math.floor(Date.parse(`${iso.slice(0, 10)}T00:00:00Z`) / DAY);
 const isoOf = (n: number) => new Date(n * DAY).toISOString().slice(0, 10);
 const fmt = (n: number) => {
@@ -54,27 +63,8 @@ const remember = {
 
 type Card = { el: HTMLDivElement; content: HTMLElement | null; haze: HTMLElement | null };
 
-// Where the top (edge −1) or bottom (+1) of day d lands on screen, in px from the top: the same transform as layout()
-// under CSS perspective.
-function edgeY(h: number, sc: number, rise: number, d: number, edge: number) {
-  const rx = (TILT * clamp(d, 0, 1) * Math.PI) / 180;
-  const y = ANCHOR * h + sc * (-rise * d + (edge * CARD_H * Math.cos(rx)) / 2);
-  const z = sc * (-DEPTH * d + (edge * CARD_H * Math.sin(rx)) / 2);
-  return ORIGIN * h + ((y - ORIGIN * h) * PERSPECTIVE) / (PERSPECTIVE - z);
-}
-
-// The biggest cards (≤ 1) and step up (≤ SPREAD) that keep the front day and the 5th day ahead on screen.
-function fit(w: number, h: number) {
-  for (let sc = clamp(w / (CARD_W + 120), 0.4, 1); ; sc -= 0.05) {
-    const fits = (rise: number) => edgeY(h, sc, rise, VISIBLE, -1) >= 0.05 * h && edgeY(h, sc, rise, 0, 1) <= 0.98 * h;
-    if (fits(MIN_RISE) || sc <= 0.4) {
-      let lo = MIN_RISE, hi = SPREAD;
-      if (fits(hi)) lo = hi;
-      else for (let i = 0; i < 12; i++) { const mid = (lo + hi) / 2; if (fits(mid)) lo = mid; else hi = mid; }
-      return { sc: Math.max(sc, 0.4), rise: lo };
-    }
-  }
-}
+// The front card as big as the width allows and at most about a third of the height (the road needs the rest).
+const fitScale = (w: number, h: number) => clamp(Math.min(w / (CARD_W + 120), (0.36 * h) / CARD_H), 0.4, 1);
 
 function Icon({ label, onClick, active, children }: { label: string; onClick: () => void; active?: boolean; children: React.ReactNode }) {
   return (
@@ -100,21 +90,21 @@ export default function DepthCalendar({ tasks, byId, onOpenDay }: {
   const today = useMemo(() => dayOf(localDay(new Date())), []);
 
   const rootRef = useRef<HTMLDivElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
   const cards = useRef(new Map<number, Card>());
   const refFns = useRef(new Map<number, (el: HTMLDivElement | null) => void>());
   const posRef = useRef(today);
   const focusRef = useRef(today);
   const tweenRef = useRef<gsap.core.Tween | null>(null);
   const scaleRef = useRef(1);
-  const riseRef = useRef(SPREAD);
   const dragRef = useRef<{ y: number; startPos: number; lastY: number; lastT: number; v: number; moved: boolean; id: number } | null>(null);
   const wheelTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const autoTimerRef = useRef<number | null>(null);
   const reducedRef = useRef(false);
 
   const [focus, setFocusState] = useState(today);
   const [center, setCenter] = useState(today); // the rendered days are around this one
   const centerRef = useRef(today);
+  const [size, setSize] = useState({ w: 0, h: 0, sc: 1 }); // for the road's edge lines
   const [autoplay, setAutoplay] = useState(() => remember.get("depth.autoplay") !== "off");
   const [haze, setHaze] = useState(() => HAZES.find((h) => h.name === remember.get("depth.haze")) ?? HAZES[0]);
 
@@ -150,35 +140,35 @@ export default function DepthCalendar({ tasks, byId, onOpenDay }: {
     queryFn: async () => (await vault<{ urls: Record<string, string> }>("urls", { paths: pictures })).urls,
   });
 
-  // ── React Bits DepthCarousel: layout, tween, focus (sideways → upward, loop → endless days) ──
+  // ── React Bits DepthCarousel: layout, tween, focus (sideways → a road to the horizon, loop → endless days) ──
   const layout = useCallback((pos: number) => {
     const sc = scaleRef.current;
     for (const [day, card] of cards.current) {
       const d = day - pos;
       const back = Math.max(0, d);
-      const shown = Math.abs(d) <= VISIBLE + 0.5;
+      const shown = d > -1 && d <= VISIBLE + 0.5;
 
-      const tz = -DEPTH * d;
-      const ty = -riseRef.current * d; // up toward the horizon (the original goes sideways: translateX)
-      const rx = TILT * clamp(d, 0, 1); // leaning back (the original turns: rotateY)
+      const tz = -DEPTH * d; // straight back along the road (the original also goes sideways: translateX)
+      const rx = TILT * clamp(d, 0, 1); // leaning back on its bottom edge (the original turns: rotateY)
 
-      let opacity = d < 0 ? Math.max(0, 1 + d) : 1;
+      // Passing days fade as they come through us; the last ones melt into the horizon.
+      let opacity = d < 0 ? Math.max(0, 1 + d) : 1 - smoothstep(VISIBLE - 3, VISIBLE + 0.5, d);
       if (!shown) opacity = 0;
 
-      const brightness = Math.max(0.15, 1 - back * FALLOFF);
+      const brightness = Math.max(0.15, 1 - back * FALLOFF_STEP);
       const blurPx = BLUR > 0 ? Math.min(BLUR, (back / Math.max(1, VISIBLE)) * BLUR) : 0;
       const zi = Math.round(2000 - d * 20);
 
       const el = card.el;
-      el.style.transform = `translate(-50%, -50%) scale(${sc}) translateY(${ty.toFixed(2)}px) translateZ(${tz.toFixed(2)}px) rotateX(${rx.toFixed(3)}deg)`;
+      el.style.transform = `translate(-50%, -100%) scale(${sc}) translateZ(${tz.toFixed(2)}px) rotateX(${rx.toFixed(3)}deg)`;
       el.style.opacity = opacity.toFixed(3);
-      el.style.filter = `blur(${blurPx.toFixed(2)}px)`;
+      el.style.filter = blurPx > 0.05 ? `blur(${blurPx.toFixed(2)}px)` : "none";
       el.style.zIndex = String(zi);
       el.style.pointerEvents = shown && opacity > 0.05 ? "auto" : "none";
-      el.style.visibility = "visible";
+      el.style.visibility = shown ? "visible" : "hidden";
       // The day itself dims with the distance; the haze over it does not, so the far future looks light, not dark.
       if (card.content) card.content.style.filter = `brightness(${brightness.toFixed(3)})`;
-      if (card.haze) card.haze.style.opacity = clamp(back * FALLOFF * 1.25, 0, 0.86).toFixed(3);
+      if (card.haze) card.haze.style.opacity = clamp(back * FALLOFF_STEP * 1.25, 0, 0.86).toFixed(3);
     }
     // Days come and go around the one in front.
     const near = Math.round(pos);
@@ -204,13 +194,17 @@ export default function DepthCalendar({ tasks, byId, onOpenDay }: {
     });
   }, [layout]);
 
-  const setFocus = useCallback((day: number, animate = true) => {
-    tweenTo(day, animate);
+  const markFocus = useCallback((day: number) => {
     if (day !== focusRef.current) {
       focusRef.current = day;
       setFocusState(day);
     }
-  }, [tweenTo]);
+  }, []);
+
+  const setFocus = useCallback((day: number, animate = true) => {
+    tweenTo(day, animate);
+    markFocus(day);
+  }, [tweenTo, markFocus]);
 
   const navigateBy = useCallback((step: number) => setFocus(focusRef.current + step, true), [setFocus]);
 
@@ -238,10 +232,8 @@ export default function DepthCalendar({ tasks, byId, onOpenDay }: {
     if (!root) return;
     const ro = new ResizeObserver((entries) => {
       const { width, height } = entries[0].contentRect;
-      // The original fits the width (cards + spread sideways); upward the stack has to fit the height.
-      const f = fit(width, height);
-      scaleRef.current = f.sc;
-      riseRef.current = f.rise;
+      scaleRef.current = fitScale(width, height);
+      setSize({ w: width, h: height, sc: scaleRef.current });
       layout(posRef.current);
     });
     ro.observe(root);
@@ -321,20 +313,45 @@ export default function DepthCalendar({ tasks, byId, onOpenDay }: {
     else setFocus(day, true);
   };
 
-  // Autoplay (owner's setting): one day closer every few seconds, paused while the pointer or focus is inside;
-  // after two weeks ahead it starts again at today.
+  // Autoplay (owner: "roll slowly, not a card at once every 3.2 s"): the road moves on all the time, one day per
+  // AUTOPLAY_DELAY; it waits while the pointer or the focus is inside or a move is running; after AHEAD days it fades
+  // back to today.
   useEffect(() => {
     reducedRef.current = typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (!autoplay || reducedRef.current) return;
     const root = rootRef.current;
+    const stage = stageRef.current;
     let hovered = false;
     let focused = false;
-    const timer = window.setInterval(() => {
-      if (hovered || focused) return;
-      if (focusRef.current >= today + AHEAD || focusRef.current < today) setFocus(today, false);
-      else navigateBy(1);
-    }, Math.max(AUTOPLAY_DELAY, 600));
-    autoTimerRef.current = timer;
+    let wrapping = false;
+    let last = performance.now();
+    let raf = 0;
+    const perDay = AUTOPLAY_DELAY / 1000;
+    const tick = (now: number) => {
+      const dt = Math.min(now - last, 100) / 1000;
+      last = now;
+      const busy = hovered || focused || wrapping || !!dragRef.current || !!tweenRef.current?.isActive();
+      if (!busy) {
+        if (posRef.current >= today + AHEAD || posRef.current < today - 0.5) {
+          // Back to today without rolling back through the days: fade out, jump, fade in.
+          wrapping = true;
+          if (stage) stage.style.opacity = "0";
+          window.setTimeout(() => {
+            posRef.current = today;
+            layout(today);
+            markFocus(today);
+            if (stage) stage.style.opacity = "1";
+            window.setTimeout(() => (wrapping = false), 500);
+          }, 500);
+        } else {
+          posRef.current += dt / perDay;
+          layout(posRef.current);
+          markFocus(Math.round(posRef.current));
+        }
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
     const onEnter = () => (hovered = true);
     const onLeave = () => (hovered = false);
     const onFocusIn = () => (focused = true);
@@ -344,18 +361,18 @@ export default function DepthCalendar({ tasks, byId, onOpenDay }: {
     root?.addEventListener("focusin", onFocusIn);
     root?.addEventListener("focusout", onFocusOut);
     return () => {
-      clearInterval(timer);
+      cancelAnimationFrame(raf);
+      if (stage) stage.style.opacity = "1";
       root?.removeEventListener("mouseenter", onEnter);
       root?.removeEventListener("mouseleave", onLeave);
       root?.removeEventListener("focusin", onFocusIn);
       root?.removeEventListener("focusout", onFocusOut);
     };
-  }, [autoplay, today, navigateBy, setFocus]);
+  }, [autoplay, today, layout, markFocus]);
 
   useEffect(() => () => {
     tweenRef.current?.kill();
     if (wheelTimerRef.current) clearTimeout(wheelTimerRef.current);
-    if (autoTimerRef.current) clearInterval(autoTimerRef.current);
   }, []);
 
   const toggleAutoplay = () => {
@@ -378,12 +395,19 @@ export default function DepthCalendar({ tasks, byId, onOpenDay }: {
     }
   };
 
+  // The road's edges: from the front day's bottom corners to the vanishing point (leading lines).
+  const road = size.w > 0 && (() => {
+    const half = (CARD_W * size.sc) / 2 + 24;
+    const cx = size.w / 2, hy = HORIZON * size.h;
+    return { left: `${cx - half},${size.h} ${cx},${hy}`, right: `${cx + half},${size.h} ${cx},${hy}`, fill: `${cx - half},${size.h} ${cx},${hy} ${cx + half},${size.h}` };
+  })();
+
   return (
     <div className="glass-card relative h-[calc(100vh-12rem)] min-h-[420px] overflow-hidden">
       <div
         ref={rootRef}
         className="depth-cal"
-        style={{ "--dc-perspective": `${PERSPECTIVE}px`, "--haze": haze.color, perspectiveOrigin: `50% ${ORIGIN * 100}%` } as React.CSSProperties}
+        style={{ "--dc-perspective": `${PERSPECTIVE}px`, "--haze": haze.color, "--horizon": `${HORIZON * 100}%`, perspectiveOrigin: `50% ${HORIZON * 100}%` } as React.CSSProperties}
         role="group"
         aria-roledescription="carousel"
         aria-label="Days ahead"
@@ -394,7 +418,20 @@ export default function DepthCalendar({ tasks, byId, onOpenDay }: {
         onPointerCancel={onPointerEnd}
         onKeyDown={onKeyDown}
       >
-        <div className="depth-cal__stage">
+        {road && (
+          <svg className="depth-cal__road" width={size.w} height={size.h} aria-hidden>
+            <defs>
+              <linearGradient id="depth-road" x1="0" y1="1" x2="0" y2="0">
+                <stop offset="0" style={{ stopColor: "var(--haze)", stopOpacity: 0.16 }} />
+                <stop offset="1" style={{ stopColor: "var(--haze)", stopOpacity: 0 }} />
+              </linearGradient>
+            </defs>
+            <polygon points={road.fill} fill="url(#depth-road)" />
+            <polyline points={road.left} />
+            <polyline points={road.right} />
+          </svg>
+        )}
+        <div className="depth-cal__stage" ref={stageRef}>
           {days.map((d) => {
             const date = new Date(d * DAY);
             const list = byDay.get(d) ?? [];
@@ -409,13 +446,13 @@ export default function DepthCalendar({ tasks, byId, onOpenDay }: {
                 aria-hidden={focus !== d}
                 onClick={() => onCardClick(d)}
                 className={cn("depth-cal__card group", d === today && "is-today", d < today && "is-past", picture && "has-picture")}
-                style={{ width: CARD_W, height: CARD_H, borderRadius: RADIUS, top: `${ANCHOR * 100}%` }}
+                style={{ width: CARD_W, height: CARD_H, borderRadius: RADIUS, top: `${BOTTOM * 100}%` }}
               >
                 <div className="depth-cal__content">
                   {picture && <img className="depth-cal__img" src={picture} alt="" draggable={false} />}
                   <div className="depth-cal__body">
                     <div className="flex items-baseline gap-2">
-                      <span className="text-4xl font-semibold leading-none tabular-nums">{date.getUTCDate()}</span>
+                      <span className="text-3xl font-semibold leading-none tabular-nums">{date.getUTCDate()}</span>
                       <span className="text-sm opacity-80">{WEEKDAYS[date.getUTCDay()]}</span>
                       <span className="text-sm opacity-60">
                         {MONTHS[date.getUTCMonth()]}{date.getUTCFullYear() !== new Date(today * DAY).getUTCFullYear() && ` ${date.getUTCFullYear()}`}
@@ -434,13 +471,13 @@ export default function DepthCalendar({ tasks, byId, onOpenDay }: {
                         <TooltipContent>Memory</TooltipContent>
                       </Tooltip>
                     </div>
-                    <div className="mt-3 space-y-1">
-                      {list.slice(0, 4).map((t, i) => (
+                    <div className="mt-2 space-y-1">
+                      {list.slice(0, 3).map((t, i) => (
                         <div key={t.id} className="flex items-center gap-2 text-sm leading-tight">
                           <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: colorOf(t) }} />
                           <TimeTag task={t} className="text-xs opacity-70" />
                           <span className={cn("min-w-0 flex-1 truncate", t.status === "complete" && "line-through opacity-60")}>{t.title}</span>
-                          {i === 3 && list.length > 4 && <span className="shrink-0 text-xs opacity-60">+{list.length - 4}</span>}
+                          {i === 2 && list.length > 3 && <span className="shrink-0 text-xs opacity-60">+{list.length - 3}</span>}
                         </div>
                       ))}
                     </div>
