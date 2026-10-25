@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/context/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
-import { buildTree, fileName, folderOf, joinPath, loadIndex, resolver, safeName, vault, type VaultFile } from "@/lib/vault";
+import { buildTree, fileName, folderOf, joinPath, loadIndex, resolver, safeName, scanAll, vault, type VaultFile } from "@/lib/vault";
 
 type Saved = { id?: string; path?: string; etag?: string | null; conflict?: boolean };
 
@@ -30,7 +30,7 @@ export function useVault() {
 
   // Index ← files in R2 (picks up what the laptop synced since last time).
   const scan = useMutation({
-    mutationFn: () => vault<{ added: number; updated: number; moved: number; removed: number }>("scan"),
+    mutationFn: scanAll,
     onSuccess: (r) => {
       if (r.added || r.updated || r.moved || r.removed) refresh();
     },

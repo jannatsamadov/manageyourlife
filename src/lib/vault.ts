@@ -23,6 +23,20 @@ export async function vault<T>(action: string, args: Record<string, unknown> = {
   return data as T;
 }
 
+// Index ← files in R2, in batches (a whole synced folder can arrive at once). Returns what changed in all batches.
+export async function scanAll() {
+  const total = { added: 0, updated: 0, moved: 0, removed: 0 };
+  for (let i = 0; i < 20; i++) {
+    const r = await vault<typeof total & { more?: boolean }>("scan");
+    total.added += r.added;
+    total.updated += r.updated;
+    total.moved += r.moved;
+    total.removed += r.removed;
+    if (!r.more) break;
+  }
+  return total;
+}
+
 // The index of the live files (no note text: that is read from the file when a note opens).
 export async function loadIndex() {
   const out: VaultFile[] = [];

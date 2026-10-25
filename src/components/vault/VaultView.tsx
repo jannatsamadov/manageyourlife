@@ -102,11 +102,12 @@ function GalleryNote({ f, onOpen, onAction }: { f: VaultFile; onOpen: (p: string
 
 export default function VaultView() {
   const v = useVault();
-  const [mode, setMode] = useState<Mode>(() => (remember.get("notes.view") === "gallery" ? "gallery" : "list"));
-  const [selected, setSelected] = useState<string | null>(() => remember.get("vault.open"));
+  // ?folder=Inbox (the old /inbox link) opens that folder; ?open=<path> (the Tasks page) opens that note.
+  const [params] = useState(() => new URLSearchParams(window.location.search));
+  const [mode, setMode] = useState<Mode>(() => (!params.get("open") && remember.get("notes.view") === "gallery" ? "gallery" : "list"));
+  const [selected, setSelected] = useState<string | null>(() => params.get("open") ?? remember.get("vault.open"));
   const [fresh, setFresh] = useState<string | null>(null); // a note just made here opens in edit mode
-  // ?folder=Inbox (the old /inbox link) opens that folder.
-  const [asked] = useState(() => new URLSearchParams(window.location.search).get("folder"));
+  const [asked] = useState(() => params.get("folder") ?? (params.get("open") ? folderOf(params.get("open")!) : null));
   const [open, setOpen] = useState<Set<string>>(() => new Set(asked ? asked.split("/").map((_, i, a) => a.slice(0, i + 1).join("/")) : []));
   const [folder, setFolder] = useState(() => asked ?? remember.get("notes.folder") ?? "");
   const [q, setQ] = useState("");

@@ -717,18 +717,21 @@ export type Database = {
         Row: {
           color: string | null
           path: string
+          todos_hidden: boolean
           updated_at: string
           user_id: string
         }
         Insert: {
           color?: string | null
           path: string
+          todos_hidden?: boolean
           updated_at?: string
           user_id: string
         }
         Update: {
           color?: string | null
           path?: string
+          todos_hidden?: boolean
           updated_at?: string
           user_id?: string
         }

@@ -2,7 +2,7 @@
 // delete for good, signed links to attachments, and the note ↔ task to-do sync. The work is in _shared/vault.ts.
 import { cors, db, json, userFrom } from "../_shared/google.ts";
 import {
-  cleanPath, moveFile, purgeFile, readNote, restoreFile, scan, signedUrls, syncTodos, toggleTodo, trashFile, VaultError, writeNote, noteById,
+  cleanPath, moveFile, purgeFile, readNote, restoreFile, scan, setTodo, signedUrls, syncTodos, toggleTodo, trashFile, VaultError, writeNote, noteById,
 } from "../_shared/vault.ts";
 
 Deno.serve(async (req) => {
@@ -44,6 +44,12 @@ Deno.serve(async (req) => {
       case "toggle_todo": {
         if (typeof body.title !== "string" || typeof body.completed !== "boolean") throw new VaultError("title, completed");
         await toggleTodo(db, uid, body.note_id, body.title, body.completed);
+        return json({ ok: true });
+      }
+      // The Tasks page: a to-do line of any note, by line number + text.
+      case "set_todo": {
+        if (!Number.isInteger(body.line) || typeof body.text !== "string" || typeof body.done !== "boolean") throw new VaultError("line, text, done");
+        await setTodo(db, uid, body.path, body.line, body.text, body.done);
         return json({ ok: true });
       }
       default:

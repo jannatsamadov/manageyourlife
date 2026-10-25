@@ -140,7 +140,8 @@ export function parse(text: string) {
     .replace(/[*_`>~=]/g, "")
     .replace(/\s+/g, " ")
     .trim()
-    .slice(0, 280);
+    .slice(0, 280)
+    .replace(/[\ud800-\udbff]$/, ""); // half an emoji cut at 280 is not valid JSON for Postgres
   return {
     tags: [...tags],
     links: [...links],
@@ -194,13 +195,16 @@ async function pool<T>(items: T[], size: number, f: (x: T) => Promise<void>) {
 
 // Index ← files in R2. Same content at a new path while the old path is gone = a rename / move (the id stays).
 // A file gone from R2 (deleted on the laptop) moves to the trash list; restore finds it in R2's trash.
+// At most SCAN_BATCH new / changed files are read per call (a whole folder arriving at once stays inside the
+// function's time); `more` = call again.
+const SCAN_BATCH = 300;
 export async function scan(db: SupabaseClient, userId: string) {
   const prefix = vaultPrefix(userId);
   const [objects, live] = await Promise.all([list(prefix), liveRows(db, userId)]);
   const present = new Set(objects.map((o) => o.path));
   const gone = new Map<string, { path: string; id: string }[]>();
   for (const [path, r] of live) if (!present.has(path)) gone.set(r.etag, [...(gone.get(r.etag) ?? []), { path, id: r.id }]);
-  const counts = { files: objects.length, added: 0, updated: 0, moved: 0, removed: 0 };
+  const counts = { files: objects.length, added: 0, updated: 0, moved: 0, removed: 0, more: false };
 
   const fresh: Obj[] = [];
   for (const o of objects.filter((o) => !live.has(o.path))) {
@@ -213,8 +217,10 @@ export async function scan(db: SupabaseClient, userId: string) {
     counts.moved++;
   }
   const changed = objects.filter((o) => live.has(o.path) && live.get(o.path)!.etag !== o.etag);
+  const work = [...changed, ...fresh];
+  counts.more = work.length > SCAN_BATCH;
   const inserts: Record<string, unknown>[] = [];
-  await pool([...fresh, ...changed], 16, async (o) => {
+  await pool(work.slice(0, SCAN_BATCH), 16, async (o) => {
     const text = isNote(o.path) ? (await getText(prefix + o.path)).text : null;
     const id = live.get(o.path)?.id;
     if (!id) {
@@ -225,7 +231,17 @@ export async function scan(db: SupabaseClient, userId: string) {
     counts.updated++;
     if (text !== null) await syncTodos(db, userId, id, text);
   });
-  for (let i = 0; i < inserts.length; i += 100) check(await db.from("vault_files").insert(inserts.slice(i, i + 100)));
+  for (let i = 0; i < inserts.length; i += 100) {
+    const chunk = inserts.slice(i, i + 100);
+    if (!(await db.from("vault_files").insert(chunk)).error) continue;
+    // A file Postgres refuses must not stop the others: that one goes in without its text.
+    for (const row of chunk) {
+      const { error } = await db.from("vault_files").insert(row);
+      if (!error) continue;
+      console.error(`vault scan: ${row.path}: ${error.message}`);
+      check(await db.from("vault_files").insert({ ...row, body: null, excerpt: null, tags: [], links: [], todo_open: 0, todo_done: 0 }));
+    }
+  }
   counts.added = inserts.length;
 
   const vanished = [...gone.values()].flat().map((r) => r.id);
@@ -391,6 +407,23 @@ export async function toggleTodo(db: SupabaseClient, userId: string, noteId: unk
     });
     if (i < 0) return null;
     lines[i] = lines[i].replace(/^- \[( |x)\]/, `- [${completed ? "x" : " "}]`);
+    return lines.join("\n");
+  });
+}
+
+// A to-do ticked on the Tasks page (P-53) → its line in the file: "- [ ] text" at any depth, found by its line number,
+// else by its text (the file changed since the page loaded).
+export async function setTodo(db: SupabaseClient, userId: string, rawPath: unknown, line: number, text: string, done: boolean) {
+  const path = cleanPath(rawPath);
+  if (!isNote(path)) throw new VaultError("only .md notes have to-dos");
+  return editNote(db, userId, path, (current) => {
+    if (current === null) throw new VaultError("not found", 404);
+    const lines = current.split("\n");
+    const todo = (i: number) => lines[i]?.replace(/\r$/, "").match(/^([ \t]*[-*+] )\[( |x|X)\] (.*)$/);
+    const same = (i: number) => todo(i)?.[3] === text;
+    const i = same(line) ? line : lines.findIndex((_, k) => same(k));
+    if (i < 0) throw new VaultError("the line changed — reload", 409);
+    lines[i] = lines[i].replace(/^([ \t]*[-*+] )\[( |x|X)\]/, `$1[${done ? "x" : " "}]`);
     return lines.join("\n");
   });
 }
