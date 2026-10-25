@@ -1,7 +1,7 @@
 /* React Bits DepthCarousel (JS-CSS) as installed, made a road: the days stand on it hinged at their bottom edge
    (transform-origin bottom centre), the front one low, the rest running to the vanishing point on the horizon (the
    card's top and the perspective origin are set inline from BOTTOM / HORIZON). Colours come from the app theme;
-   --haze is the soft colour of the future (a glow on the horizon, the road's edges, a light mist over the far days).
+   --haze is the soft colour of the future (a glow on the horizon, a light mist over the far days), or none.
    Arrows and dots of the original are replaced by the calendar's own controls. */
 .depth-cal {
   position: relative;
@@ -21,19 +21,6 @@
   background:
     radial-gradient(ellipse 70% 40% at 50% var(--horizon, 18%), color-mix(in srgb, var(--haze) 32%, transparent), transparent 70%),
     linear-gradient(to bottom, color-mix(in srgb, var(--haze) 12%, transparent), transparent var(--horizon, 18%), transparent);
-}
-
-/* The road's edges (leading lines to the vanishing point) and a faint surface between them. */
-.depth-cal__road {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
-.depth-cal__road polyline {
-  fill: none;
-  stroke: var(--haze);
-  stroke-opacity: 0.45;
-  stroke-width: 1;
 }
 
 .depth-cal:active {

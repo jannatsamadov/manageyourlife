@@ -34,12 +34,12 @@ const BOTTOM = 0.92, HORIZON = 0.18;
 // The owner's falloff was for 5 days; spread over the longer road so the haze grows to the same at its far end.
 const FALLOFF_STEP = (FALLOFF * 5) / VISIBLE;
 const AHEAD = 14; // autoplay rolls this many days ahead of today, then starts again at today
-// Colours of the future: soft, nothing sharp (owner: light blue, light green, orange — and a neutral one).
+// Colours of the future: soft, nothing sharp (owner: light blue, light green, orange — and none at all).
 const HAZES = [
   { name: "Sky", color: "#a8d5f7" },
   { name: "Mint", color: "#b3e5c9" },
   { name: "Peach", color: "#f8caa2" },
-  { name: "Neutral", color: "#d6d3d1" },
+  { name: "No colour", color: "transparent" },
 ];
 
 const DAY = 86400000;
@@ -104,7 +104,6 @@ export default function DepthCalendar({ tasks, byId, onOpenDay }: {
   const [focus, setFocusState] = useState(today);
   const [center, setCenter] = useState(today); // the rendered days are around this one
   const centerRef = useRef(today);
-  const [size, setSize] = useState({ w: 0, h: 0, sc: 1 }); // for the road's edge lines
   const [autoplay, setAutoplay] = useState(() => remember.get("depth.autoplay") !== "off");
   const [haze, setHaze] = useState(() => HAZES.find((h) => h.name === remember.get("depth.haze")) ?? HAZES[0]);
 
@@ -233,7 +232,6 @@ export default function DepthCalendar({ tasks, byId, onOpenDay }: {
     const ro = new ResizeObserver((entries) => {
       const { width, height } = entries[0].contentRect;
       scaleRef.current = fitScale(width, height);
-      setSize({ w: width, h: height, sc: scaleRef.current });
       layout(posRef.current);
     });
     ro.observe(root);
@@ -395,13 +393,6 @@ export default function DepthCalendar({ tasks, byId, onOpenDay }: {
     }
   };
 
-  // The road's edges: from the front day's bottom corners to the vanishing point (leading lines).
-  const road = size.w > 0 && (() => {
-    const half = (CARD_W * size.sc) / 2 + 24;
-    const cx = size.w / 2, hy = HORIZON * size.h;
-    return { left: `${cx - half},${size.h} ${cx},${hy}`, right: `${cx + half},${size.h} ${cx},${hy}`, fill: `${cx - half},${size.h} ${cx},${hy} ${cx + half},${size.h}` };
-  })();
-
   return (
     <div className="glass-card relative h-[calc(100vh-12rem)] min-h-[420px] overflow-hidden">
       <div
@@ -418,19 +409,6 @@ export default function DepthCalendar({ tasks, byId, onOpenDay }: {
         onPointerCancel={onPointerEnd}
         onKeyDown={onKeyDown}
       >
-        {road && (
-          <svg className="depth-cal__road" width={size.w} height={size.h} aria-hidden>
-            <defs>
-              <linearGradient id="depth-road" x1="0" y1="1" x2="0" y2="0">
-                <stop offset="0" style={{ stopColor: "var(--haze)", stopOpacity: 0.16 }} />
-                <stop offset="1" style={{ stopColor: "var(--haze)", stopOpacity: 0 }} />
-              </linearGradient>
-            </defs>
-            <polygon points={road.fill} fill="url(#depth-road)" />
-            <polyline points={road.left} />
-            <polyline points={road.right} />
-          </svg>
-        )}
         <div className="depth-cal__stage" ref={stageRef}>
           {days.map((d) => {
             const date = new Date(d * DAY);
@@ -499,8 +477,12 @@ export default function DepthCalendar({ tasks, byId, onOpenDay }: {
               <button
                 type="button"
                 onClick={() => pickHaze(h)}
-                className={cn("mx-0.5 h-4 w-4 rounded-full border transition-transform", haze.name === h.name ? "scale-110 border-foreground/60" : "border-transparent opacity-70 hover:opacity-100")}
-                style={{ background: h.color }}
+                className={cn(
+                  "mx-0.5 h-4 w-4 rounded-full border transition-transform",
+                  haze.name === h.name ? "scale-110 border-foreground/60" : "opacity-70 hover:opacity-100",
+                  haze.name !== h.name && (h.color === "transparent" ? "border-muted-foreground/50" : "border-transparent"),
+                )}
+                style={{ background: h.color === "transparent" ? "linear-gradient(135deg, transparent 44%, hsl(var(--muted-foreground)) 44% 56%, transparent 56%)" : h.color }}
               />
             </TooltipTrigger>
             <TooltipContent>{h.name}</TooltipContent>
