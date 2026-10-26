@@ -1,5 +1,6 @@
 // Money (P-67): the user's balance, income, bills, debts (I owe) and loans (owed to me), and the month's numbers made
-// from them. AZN; a weekly amount counts 52 / 12 weeks a month. Months are keyed by their first day ("2026-11-01").
+// from them. AZN; a weekly amount counts 52 / 12 weeks a month, a yearly one 1 / 12 a month (paid once a year).
+// Months are keyed by their first day ("2026-11-01").
 import { supabase } from "@/integrations/supabase/client";
 import type { Tables } from "@/integrations/supabase/types";
 
@@ -24,7 +25,10 @@ export const monthLabel = (m: string, short = false) =>
 const fmt = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
 export const azn = (n: number) => `${fmt.format(Math.round(n * 100) / 100)} ₼`;
 
-export const monthly = (i: MoneyItem) => (i.period === "week" ? i.amount * WEEKS_PER_MONTH : i.amount);
+export const monthly = (i: MoneyItem) => (i.period === "week" ? i.amount * WEEKS_PER_MONTH : i.period === "year" ? i.amount / 12 : i.amount);
+// What ticks a bill / income for month m: that month's payment; for a yearly one, any payment in that year.
+export const paymentFor = (i: MoneyItem, m: string, payments: Payment[]) =>
+  payments.find((p) => p.item_id === i.id && p.month && (i.period === "year" ? p.month.slice(0, 4) === m.slice(0, 4) : p.month === m));
 export const activeIn = (i: MoneyItem, m: string) => (!i.starts_on || i.starts_on < addMonths(m, 1)) && (!i.ends_on || i.ends_on >= m);
 const sum = (ps: Payment[]) => ps.reduce((s, p) => s + p.amount, 0);
 export const paymentsOf = (i: MoneyItem, payments: Payment[]) => payments.filter((p) => p.item_id === i.id);
@@ -88,11 +92,15 @@ export async function setPlan(itemId: string, first: string, amounts: number[], 
 
 // A bill paid / income received for a month, or an instalment ticked: on ↔ off.
 export async function toggleMonth(item: MoneyItem, m: string, payments: Payment[]) {
-  const p = payments.find((x) => x.item_id === item.id && x.month === m);
   if (repeats(item.kind)) {
+    const p = paymentFor(item, m, payments);
+    const amount = item.period === "year" ? item.amount : Math.round(monthly(item) * 100) / 100;
     if (p) check(await supabase.from("money_payments").delete().eq("id", p.id));
-    else check(await supabase.from("money_payments").insert({ item_id: item.id, month: m, amount: Math.round(monthly(item) * 100) / 100, paid_at: new Date().toISOString() }));
-  } else if (p) {
+    else check(await supabase.from("money_payments").insert({ item_id: item.id, month: m, amount, paid_at: new Date().toISOString() }));
+    return;
+  }
+  const p = payments.find((x) => x.item_id === item.id && x.month === m);
+  if (p) {
     check(await supabase.from("money_payments").update({ paid_at: p.paid_at ? null : new Date().toISOString() }).eq("id", p.id));
   }
 }

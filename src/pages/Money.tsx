@@ -9,7 +9,7 @@ import { toast } from "@/hooks/use-toast";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   type Draft, type Kind, type Money as Data, type MoneyItem, activeIn, addMonths, azn, deleteItem, loadMoney, monthLabel,
-  monthOf, monthly, parsePlan, pay, paymentsOf, remaining, repeats, saveItem, setBalance, setPlan, toggleMonth, totals,
+  monthOf, monthly, parsePlan, pay, paymentFor, paymentsOf, remaining, repeats, saveItem, setBalance, setPlan, toggleMonth, totals,
 } from "@/lib/money";
 
 const SECTIONS: { kind: Kind; title: string; done: string }[] = [
@@ -103,6 +103,7 @@ function ItemForm({ kind, item, data, month, onDone }: { kind: Kind; item: Money
           <select value={period} onChange={(e) => setPeriod(e.target.value)} className={field}>
             <option value="month">a month</option>
             <option value="week">a week</option>
+            <option value="year">a year</option>
           </select>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -223,14 +224,15 @@ export default function Money() {
                   }
                   const mine = paymentsOf(i, data.payments);
                   const left = remaining(i, data.payments);
-                  const ticked = mine.some((p) => p.month === month);
+                  const ticked = !!paymentFor(i, month, data.payments);
+                  const when = i.period === "year" ? month.slice(0, 4) : monthLabel(month, true);
                   const active = activeIn(i, month);
                   const settled = !repeats(kind) && left === 0;
                   return (
                     <li key={i.id} onClick={() => setEditing({ kind, id: i.id })}
                       className={cn("group flex cursor-pointer flex-wrap items-center gap-x-3 gap-y-1 rounded-md px-2 py-1.5 hover:bg-muted/40", (!active || settled) && "opacity-50")}>
                       {repeats(kind) && (
-                        <Icon label={ticked ? `${done} in ${monthLabel(month, true)}` : `Mark ${done.toLowerCase()}`} onClick={() => run(() => toggleMonth(i, month, data.payments))} disabled={!active}
+                        <Icon label={ticked ? `${done} in ${when}` : `Mark ${done.toLowerCase()}`} onClick={() => run(() => toggleMonth(i, month, data.payments))} disabled={!active}
                           className="-my-1 p-1">
                           {ticked ? <CircleCheck className="h-4 w-4 text-primary" /> : <Circle className="h-4 w-4" />}
                         </Icon>
@@ -255,7 +257,7 @@ export default function Money() {
                         ))}
                         <span className="text-sm tabular-nums text-foreground">
                           {repeats(kind)
-                            ? <>{azn(i.amount)}<span className="text-xs text-muted-foreground">{i.period === "week" ? ` /wk ≈ ${azn(monthly(i))}` : " /mo"}</span></>
+                            ? <>{azn(i.amount)}<span className="text-xs text-muted-foreground">{i.period === "month" ? " /mo" : ` /${i.period === "week" ? "wk" : "yr"} ≈ ${azn(monthly(i))} /mo`}</span></>
                             : left === i.amount ? azn(i.amount) : <>{azn(left)}<span className="text-xs text-muted-foreground"> / {azn(i.amount)}</span></>}
                         </span>
                         {!repeats(kind) && !settled && (paying?.id === i.id ? (
