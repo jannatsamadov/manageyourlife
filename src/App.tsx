@@ -12,6 +12,7 @@ import SettingsPage from "@/pages/Settings";
 import Notes from "@/pages/Notes";
 import Tasks from "@/pages/Tasks";
 import Ideas from "@/pages/Ideas";
+import Money from "@/pages/Money";
 import Trash from "@/pages/Trash";
 import Auth from "@/pages/Auth";
 import ResetPassword from "@/pages/ResetPassword";
@@ -66,6 +67,7 @@ const AppRoutes = () => (
                   />
                   <Route path="/tasks" element={<Tasks />} />
                   <Route path="/ideas" element={<Ideas />} />
+                  <Route path="/money" element={<Money />} />
                   <Route path="/notes" element={<Notes />} />
                   <Route path="/trash" element={<Trash />} />
                   <Route path="/settings" element={<SettingsPage />} />

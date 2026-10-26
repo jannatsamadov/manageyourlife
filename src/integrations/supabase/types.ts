@@ -205,6 +205,110 @@ export type Database = {
         }
         Relationships: []
       }
+      money_balances: {
+        Row: {
+          amount: number
+          id: string
+          noted_at: string
+          user_id: string
+        }
+        Insert: {
+          amount: number
+          id?: string
+          noted_at?: string
+          user_id?: string
+        }
+        Update: {
+          amount?: number
+          id?: string
+          noted_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      money_items: {
+        Row: {
+          amount: number
+          created_at: string
+          ends_on: string | null
+          id: string
+          kind: string
+          name: string
+          note: string
+          period: string | null
+          position: number
+          starts_on: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          amount: number
+          created_at?: string
+          ends_on?: string | null
+          id?: string
+          kind: string
+          name: string
+          note?: string
+          period?: string | null
+          position?: number
+          starts_on?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Update: {
+          amount?: number
+          created_at?: string
+          ends_on?: string | null
+          id?: string
+          kind?: string
+          name?: string
+          note?: string
+          period?: string | null
+          position?: number
+          starts_on?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      money_payments: {
+        Row: {
+          amount: number
+          created_at: string
+          id: string
+          item_id: string
+          month: string | null
+          paid_at: string | null
+          user_id: string
+        }
+        Insert: {
+          amount: number
+          created_at?: string
+          id?: string
+          item_id: string
+          month?: string | null
+          paid_at?: string | null
+          user_id?: string
+        }
+        Update: {
+          amount?: number
+          created_at?: string
+          id?: string
+          item_id?: string
+          month?: string | null
+          paid_at?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "money_payments_item_fkey"
+            columns: ["item_id", "user_id"]
+            isOneToOne: false
+            referencedRelation: "money_items"
+            referencedColumns: ["id", "user_id"]
+          },
+        ]
+      }
       note_task_links: {
         Row: {
           created_at: string
@@ -508,6 +612,9 @@ export type Database = {
           gcal_calendar_id: string | null
           gcal_event_id: string | null
           gcal_hash: string | null
+          gtask_hash: string | null
+          gtask_id: string | null
+          gtask_list_id: string | null
           id: string
           is_event: boolean
           link: string
@@ -537,6 +644,9 @@ export type Database = {
           gcal_calendar_id?: string | null
           gcal_event_id?: string | null
           gcal_hash?: string | null
+          gtask_hash?: string | null
+          gtask_id?: string | null
+          gtask_list_id?: string | null
           id?: string
           is_event?: boolean
           link?: string
@@ -566,6 +676,9 @@ export type Database = {
           gcal_calendar_id?: string | null
           gcal_event_id?: string | null
           gcal_hash?: string | null
+          gtask_hash?: string | null
+          gtask_id?: string | null
+          gtask_list_id?: string | null
           id?: string
           is_event?: boolean
           link?: string
@@ -746,6 +859,21 @@ export type Database = {
         }
         Relationships: []
       }
+      vault_signals: {
+        Row: {
+          changed_at: string
+          user_id: string
+        }
+        Insert: {
+          changed_at?: string
+          user_id: string
+        }
+        Update: {
+          changed_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
@@ -756,6 +884,18 @@ export type Database = {
         Returns: string
       }
       create_telegram_link_code: { Args: never; Returns: string }
+      idea_candidates: {
+        Args: { p_user: string }
+        Returns: {
+          body: string
+          excerpt: string
+          id: string
+          modified_at: string
+          path: string
+          title: string
+          whole: boolean
+        }[]
+      }
       redeem_telegram_link_code: {
         Args: { p_chat_id: number; p_code: string; p_username: string }
         Returns: string
