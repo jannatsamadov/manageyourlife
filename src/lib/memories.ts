@@ -1,7 +1,10 @@
 // Memories of the days (owner, 2026-10-25): a note Memories/<YYYY-MM-DD>….md, and the photos sent to the Telegram bot
 // that day (Inbox/files/<YYYY-MM-DD>-…). The first picture of a day — an image in its note, else a photo — is the
 // picture of its card in the Depth calendar.
-import { supabase } from "@/integrations/supabase/client";
+import { supabase as typedSupabase } from "@/integrations/supabase/client";
+// Generated types lag behind the live schema; queries here are untyped.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const supabase = typedSupabase as any;
 import { fileName, isImage, loadIndex, resolver, targetsOf, vault } from "@/lib/vault";
 
 export const MEMORIES = "Memories";

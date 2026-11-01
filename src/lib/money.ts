@@ -1,7 +1,10 @@
 // Money (P-67): the user's balance, income, bills, debts (I owe) and loans (owed to me), and the month's numbers made
 // from them. AZN; a weekly amount counts 52 / 12 weeks a month, a yearly one 1 / 12 a month (paid once a year).
 // Months are keyed by their first day ("2026-11-01").
-import { supabase } from "@/integrations/supabase/client";
+import { supabase as typedSupabase } from "@/integrations/supabase/client";
+// Generated types lag behind the live schema; queries here are untyped.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const supabase = typedSupabase as any;
 import type { Tables } from "@/integrations/supabase/types";
 
 export type MoneyItem = Tables<"money_items">;

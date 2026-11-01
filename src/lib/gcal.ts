@@ -1,5 +1,8 @@
 // Google Calendar + Google Tasks through our edge functions (P-17, P-50): the browser never holds Google tokens.
-import { supabase } from "@/integrations/supabase/client";
+import { supabase as typedSupabase } from "@/integrations/supabase/client";
+// Generated types lag behind the live schema; queries here are untyped.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const supabase = typedSupabase as any;
 
 async function callFunction<T>(name: string, body: Record<string, unknown>): Promise<T> {
   const { data: { session } } = await supabase.auth.getSession();

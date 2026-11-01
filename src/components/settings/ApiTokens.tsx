@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { KeyRound, Loader2, Copy, Check } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase as typedSupabase } from "@/integrations/supabase/client";
+// Generated types lag behind the live schema; queries here are untyped.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const supabase = typedSupabase as any;
 import type { Tables } from "@/integrations/supabase/types";
 import { toast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
