@@ -67,7 +67,7 @@ function Passage({ day, span, anchor, tasks, media, urls, mode, palette, onTask,
   const indexOf = (d: number) => span === "year" ? new Date(d * 86400000).getUTCFullYear() - new Date(anchor * 86400000).getUTCFullYear()
     : Math.floor((d - (span === "day" ? anchor : boxStart(anchor, span, anchor))) / spanDays(span));
   const base = boxStart(day, span, anchor);
-  const target = -indexOf(base) * STRIDE - (day - base) / (boxEnd(base, span) - base) * BOX_LENGTH + 2;
+  const target = -indexOf(base) * STRIDE - (span === "year" ? 0 : (day - base) / (boxEnd(base, span) - base) * BOX_LENGTH) + 2;
   const previousSpan = useRef(span);
   const reduced = useMemo(() => window.matchMedia("(prefers-reduced-motion: reduce)").matches, []);
   useFrame(({ camera }, dt) => {
