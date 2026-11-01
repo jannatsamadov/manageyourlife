@@ -1,3 +1,4 @@
+import type { StrategyNodeRow } from "@/integrations/schema-extra";
 import { useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase as typedSupabase } from "@/integrations/supabase/client";
@@ -9,8 +10,8 @@ import { toast } from "@/hooks/use-toast";
 import type { Database } from "@/integrations/supabase/types";
 import type { StrategyNode } from "@/lib/strategy";
 
-type NodeInsert = Database["public"]["Tables"]["strategy_nodes"]["Insert"];
-type NodeUpdate = Database["public"]["Tables"]["strategy_nodes"]["Update"];
+type NodeInsert = Partial<StrategyNodeRow> & Pick<StrategyNodeRow, "kind" | "title">;
+type NodeUpdate = Partial<StrategyNodeRow>;
 
 const keyOf = (userId?: string) => ["strategy-nodes", userId];
 

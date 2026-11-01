@@ -1,3 +1,4 @@
+import type { MoneyItemRow, MoneyPaymentRow, MoneyBalanceRow } from "@/integrations/schema-extra";
 // Money (P-67): the user's balance, income, bills, debts (I owe) and loans (owed to me), and the month's numbers made
 // from them. AZN; a weekly amount counts 52 / 12 weeks a month, a yearly one 1 / 12 a month (paid once a year).
 // Months are keyed by their first day ("2026-11-01").
@@ -7,9 +8,9 @@ import { supabase as typedSupabase } from "@/integrations/supabase/client";
 const supabase = typedSupabase as any;
 import type { Tables } from "@/integrations/supabase/types";
 
-export type MoneyItem = Tables<"money_items">;
-export type Payment = Tables<"money_payments">;
-export type Balance = Tables<"money_balances">;
+export type MoneyItem = MoneyItemRow;
+export type Payment = MoneyPaymentRow;
+export type Balance = MoneyBalanceRow;
 export type Kind = "income" | "bill" | "debt" | "loan";
 export type Money = { items: MoneyItem[]; payments: Payment[]; balance: Balance | null };
 

@@ -1,3 +1,4 @@
+import type { ApiTokenRow } from "@/integrations/schema-extra";
 import { useCallback, useEffect, useState } from "react";
 import { KeyRound, Loader2, Copy, Check } from "lucide-react";
 import { supabase as typedSupabase } from "@/integrations/supabase/client";
@@ -9,7 +10,7 @@ import { toast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
-type Token = Pick<Tables<"api_tokens">, "id" | "name" | "token_prefix" | "scopes" | "created_at" | "last_used_at">;
+type Token = Pick<ApiTokenRow, "id" | "name" | "token_prefix" | "scopes" | "created_at" | "last_used_at">;
 
 const MCP_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/mcp`;
 const SCOPES = { rw: ["read", "write"], r: ["read"] } as const;

@@ -65,7 +65,7 @@ export async function searchText(q: string) {
     .ilike("body", `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`)
     .limit(300);
   if (error) throw error;
-  return new Set(data.map((r) => r.path));
+  return new Set<string>((data as { path: string }[]).map((r) => r.path));
 }
 
 export const isNote = (path: string) => /\.md$/i.test(path);

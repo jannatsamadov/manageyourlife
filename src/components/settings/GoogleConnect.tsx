@@ -1,3 +1,4 @@
+import type { GoogleConnectionRow } from "@/integrations/schema-extra";
 import { useCallback, useEffect, useState } from "react";
 import { Calendar, Loader2, ListChecks, RefreshCw, AlertTriangle } from "lucide-react";
 import type { Tables } from "@/integrations/supabase/types";
@@ -20,7 +21,7 @@ const when = (iso: string | null) =>
 
 // Settings card: one Google account for Calendar (tasks → events) and Google Tasks (→ tasks). P-17, P-50.
 export default function GoogleConnect() {
-  const [conn, setConn] = useState<Tables<"google_connections"> | null>(null);
+  const [conn, setConn] = useState<GoogleConnectionRow | null>(null);
   const [loading, setLoading] = useState(true);
   const [calendars, setCalendars] = useState<GoogleCalendar[]>([]);
   const [busy, setBusy] = useState<"connect" | "import" | "sync" | "disconnect" | null>(null);
