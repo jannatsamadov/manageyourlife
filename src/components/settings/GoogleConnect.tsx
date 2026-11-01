@@ -1,7 +1,11 @@
+import type { GoogleConnectionRow } from "@/integrations/schema-extra";
 import { useCallback, useEffect, useState } from "react";
 import { Calendar, Loader2, ListChecks, RefreshCw, AlertTriangle } from "lucide-react";
 import type { Tables } from "@/integrations/supabase/types";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase as typedSupabase } from "@/integrations/supabase/client";
+// Generated types lag behind the live schema; queries here are untyped.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const supabase = typedSupabase as any;
 import { toast } from "@/hooks/use-toast";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -17,7 +21,7 @@ const when = (iso: string | null) =>
 
 // Settings card: one Google account for Calendar (tasks → events) and Google Tasks (→ tasks). P-17, P-50.
 export default function GoogleConnect() {
-  const [conn, setConn] = useState<Tables<"google_connections"> | null>(null);
+  const [conn, setConn] = useState<GoogleConnectionRow | null>(null);
   const [loading, setLoading] = useState(true);
   const [calendars, setCalendars] = useState<GoogleCalendar[]>([]);
   const [busy, setBusy] = useState<"connect" | "import" | "sync" | "disconnect" | null>(null);

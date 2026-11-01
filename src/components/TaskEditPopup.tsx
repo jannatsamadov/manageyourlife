@@ -3,7 +3,10 @@ import { X, Save, AlertTriangle, Trash2, Plus, CheckSquare, FileText, Send } fro
 import { Task, TaskPriority, useAppState } from "@/context/AppContext";
 import ShareTaskDialog from "@/components/ShareTaskDialog";
 import TimingFields from "@/components/TimingFields";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase as typedSupabase } from "@/integrations/supabase/client";
+// Generated types lag behind the live schema; queries here are untyped.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const supabase = typedSupabase as any;
 import { useAuth } from "@/context/AuthContext";
 import { cn } from "@/lib/utils";
 import { useStrategyNodes } from "@/hooks/useStrategy";

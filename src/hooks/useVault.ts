@@ -2,7 +2,10 @@
 import { useEffect, useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/context/AuthContext";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase as typedSupabase } from "@/integrations/supabase/client";
+// Generated types lag behind the live schema; queries here are untyped.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const supabase = typedSupabase as any;
 import { toast } from "@/hooks/use-toast";
 import { buildTree, fileName, folderOf, joinPath, loadIndex, resolver, safeName, scanAll, vault, type VaultFile } from "@/lib/vault";
 

@@ -1,5 +1,8 @@
 // Notes as files (P-21, P-57): the `vault` function (files in R2), the index, folders and Obsidian-style name resolution.
-import { supabase } from "@/integrations/supabase/client";
+import { supabase as typedSupabase } from "@/integrations/supabase/client";
+// Generated types lag behind the live schema; queries here are untyped.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const supabase = typedSupabase as any;
 
 export type VaultFile = {
   id: string;
@@ -62,7 +65,7 @@ export async function searchText(q: string) {
     .ilike("body", `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`)
     .limit(300);
   if (error) throw error;
-  return new Set(data.map((r) => r.path));
+  return new Set<string>((data as { path: string }[]).map((r) => r.path));
 }
 
 export const isNote = (path: string) => /\.md$/i.test(path);

@@ -2,7 +2,10 @@
 // Documents folders — gathered on the Tasks page by project. The files stay the truth: a tick writes "- [x]".
 // Two kinds: "- [ ] text" lines (any depth, - * +) and rows of task tables (a Markdown table with a Status column,
 // like the projects' TASKS.md), shown read-only.
-import { supabase } from "@/integrations/supabase/client";
+import { supabase as typedSupabase } from "@/integrations/supabase/client";
+// Generated types lag behind the live schema; queries here are untyped.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const supabase = typedSupabase as any;
 import { fileName, folderOf } from "@/lib/vault";
 
 export type TodoFile = { id: string; path: string; title: string; modified_at: string };

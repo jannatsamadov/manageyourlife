@@ -9,7 +9,10 @@ import { CalendarPlus, CheckCheck, ChevronDown, ChevronRight, Eye, EyeOff, FileT
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/context/AuthContext";
 import { useAppState } from "@/context/AppContext";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase as typedSupabase } from "@/integrations/supabase/client";
+// Generated types lag behind the live schema; queries here are untyped.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const supabase = typedSupabase as any;
 import { toast } from "@/hooks/use-toast";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";

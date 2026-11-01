@@ -1,13 +1,17 @@
+import type { StrategyNodeRow } from "@/integrations/schema-extra";
 import { useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase as typedSupabase } from "@/integrations/supabase/client";
+// Generated types lag behind the live schema; queries here are untyped.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const supabase = typedSupabase as any;
 import { useAuth } from "@/context/AuthContext";
 import { toast } from "@/hooks/use-toast";
 import type { Database } from "@/integrations/supabase/types";
 import type { StrategyNode } from "@/lib/strategy";
 
-type NodeInsert = Database["public"]["Tables"]["strategy_nodes"]["Insert"];
-type NodeUpdate = Database["public"]["Tables"]["strategy_nodes"]["Update"];
+type NodeInsert = Partial<StrategyNodeRow> & Pick<StrategyNodeRow, "kind" | "title">;
+type NodeUpdate = Partial<StrategyNodeRow>;
 
 const keyOf = (userId?: string) => ["strategy-nodes", userId];
 

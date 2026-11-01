@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
 import { Trash2, Undo2, AlertTriangle, Loader2 } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase as typedSupabase } from "@/integrations/supabase/client";
+// Generated types lag behind the live schema; queries here are untyped.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const supabase = typedSupabase as any;
 import { useAuth } from "@/context/AuthContext";
 import { queueCalendarSync } from "@/lib/gcal";
 import { vault } from "@/lib/vault";
