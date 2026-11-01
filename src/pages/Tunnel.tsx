@@ -35,11 +35,11 @@ export default function Tunnel() {
     queryFn: async () => {
       const [mem, vids] = await Promise.all([
         loadMemories(),
-        supabase.from("vault_files").select("path").is("trashed_at", null).like("path", "Inbox/files/%"),
+        (supabase as any).from("vault_files").select("path").is("trashed_at", null).like("path", "Inbox/files/%"),
       ]);
       const list: TunnelMedia[] = [];
       for (const [iso, m] of mem) { const d = dayNumber(iso); if (d !== null) m.images.forEach(path => list.push({ path, day: d, video: false })); }
-      for (const v of vids.data ?? []) { const d = dayOfName(v.path); if (d !== null && isVideo(v.path)) list.push({ path: v.path, day: d, video: true }); }
+      for (const v of (vids.data ?? []) as { path: string }[]) { const d = dayOfName(v.path); if (d !== null && isVideo(v.path)) list.push({ path: v.path, day: d, video: true }); }
       return list;
     },
   });
