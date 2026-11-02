@@ -13,7 +13,6 @@ import {
 const navItems = [
   { title: "Schedule", path: "/", icon: Calendar },
   { title: "Tasks", path: "/tasks", icon: ListChecks },
-  { title: "Tunnel", path: "/tunnel", icon: Milestone },
   { title: "Ideas", path: "/ideas", icon: Lightbulb },
   { title: "Strategy", path: "/strategy", icon: Orbit },
   { title: "Money", path: "/money", icon: Wallet },
