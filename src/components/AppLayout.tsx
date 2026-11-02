@@ -1,5 +1,5 @@
 import { NavLink, useLocation } from "react-router-dom";
-import { Calendar, Settings, LogOut, StickyNote, Trash2, Orbit, ListChecks, Lightbulb, Wallet, Milestone } from "lucide-react";
+import { Calendar, Settings, LogOut, StickyNote, Trash2, Orbit, ListChecks, Lightbulb, Wallet } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/context/AuthContext";
 import ChatPanel from "@/components/ChatPanel";
