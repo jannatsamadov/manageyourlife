@@ -24,7 +24,6 @@ import { lazy, Suspense } from "react";
 
 // three.js is big: the Strategy page loads only when opened.
 const Strategy = lazy(() => import("@/pages/Strategy"));
-const Tunnel = lazy(() => import("@/pages/Tunnel"));
 
 const queryClient = new QueryClient();
 
@@ -66,7 +65,6 @@ const AppRoutes = () => (
                       </Suspense>
                     }
                   />
-                  <Route path="/tunnel" element={<Suspense fallback={<div className="flex justify-center p-10"><Loader2 className="animate-spin" /></div>}><Tunnel /></Suspense>} />
                   <Route path="/tasks" element={<Tasks />} />
                   <Route path="/ideas" element={<Ideas />} />
                   <Route path="/money" element={<Money />} />
