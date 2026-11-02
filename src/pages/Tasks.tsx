@@ -64,7 +64,7 @@ export default function Tasks() {
     queryFn: async () => {
       const { data, error } = await supabase.from("vault_folders").select("path").eq("todos_hidden", true);
       if (error) throw error;
-      return new Set(data.map((r) => r.path));
+      return new Set<string>(data.map((r: any) => String(r.path)));
     },
   });
   const hidden = useMemo(() => hiddenQ.data ?? new Set<string>(), [hiddenQ.data]);
