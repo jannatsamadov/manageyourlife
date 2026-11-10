@@ -1,5 +1,6 @@
 // Money (P-67, owner 2026-10-26: "make a money section — what I have, debts, recurring payments, income"): the balance,
-// the month's in / out / left, income and bills (ticked per month), debts and loans with their instalments.
+// the month's in / out / left, income and bills (ticked per month), debts and loans with their instalments, things to
+// buy and what was spent (2026-11-10). Notes show as tooltips on the name ("description gözə girir").
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, ChevronLeft, ChevronRight, Circle, CircleCheck, Loader2, Plus, Trash2, X } from "lucide-react";
@@ -8,8 +9,9 @@ import { useAuth } from "@/context/AuthContext";
 import { toast } from "@/hooks/use-toast";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
-  type Draft, type Kind, type Money as Data, type MoneyItem, activeIn, addMonths, azn, deleteItem, loadMoney, monthLabel,
-  monthOf, monthly, parsePlan, pay, paymentFor, paymentsOf, remaining, repeats, saveItem, setBalance, setPlan, toggleMonth, totals,
+  type Draft, type Kind, type Money as Data, type MoneyItem, activeIn, addMonths, azn, boughtOf, buy, deleteItem, loadMoney,
+  monthLabel, monthOf, monthly, parsePlan, pay, paymentFor, paymentsOf, remaining, repeats, saveItem, setBalance, setPlan,
+  toggleMonth, totals, unbuy,
 } from "@/lib/money";
 
 const SECTIONS: { kind: Kind; title: string; done: string }[] = [
@@ -35,6 +37,22 @@ function Icon({ label, onClick, disabled, children, className }: { label: string
 
 const field = "rounded-md border border-border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-primary/40";
 
+// The item's name; its note is a tooltip (a dotted underline says there is one).
+function Name({ item, struck }: { item: MoneyItem; struck?: boolean }) {
+  const name = (
+    <span className={cn("text-sm text-foreground", struck && "line-through", item.note && "underline decoration-muted-foreground/50 decoration-dotted underline-offset-4")}>
+      {item.name}
+    </span>
+  );
+  if (!item.note) return name;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{name}</TooltipTrigger>
+      <TooltipContent className="max-w-xs whitespace-pre-wrap">{item.note}</TooltipContent>
+    </Tooltip>
+  );
+}
+
 function Stat({ label, value, hint, tone, onClick }: { label: string; value: string; hint?: string; tone?: "good" | "bad"; onClick?: () => void }) {
   const body = (
     <div onClick={onClick} className={cn("rounded-xl border border-border bg-card px-3 py-2", onClick && "cursor-pointer hover:border-primary/40")}>
@@ -51,11 +69,14 @@ function Stat({ label, value, hint, tone, onClick }: { label: string; value: str
   );
 }
 
-// New or edited item; a debt / loan can get instalments ("200 200 200 300" from a month on).
-function ItemForm({ kind, item, data, month, onDone }: { kind: Kind; item: MoneyItem | null; data: Data; month: string; onDone: (changed: boolean) => void }) {
+// New or edited item; a debt / loan can get instalments ("200 200 200 300" from a month on). A 'buy' item: price
+// (may stay empty) — or, when `spend` / already bought, what it cost in that month.
+function ItemForm({ kind, item, data, month, spend, onDone }: { kind: Kind; item: MoneyItem | null; data: Data; month: string; spend?: boolean; onDone: (changed: boolean) => void }) {
   const planned = item ? paymentsOf(item, data.payments).filter((p) => p.month && !p.paid_at) : [];
+  const bought = kind === "buy" && item ? boughtOf(item, data.payments) : undefined;
+  const spent = spend || !!bought;
   const [name, setName] = useState(item?.name ?? "");
-  const [amount, setAmount] = useState(item ? String(item.amount) : "");
+  const [amount, setAmount] = useState(bought ? String(bought.amount) : item?.amount ? String(item.amount) : "");
   const [period, setPeriod] = useState(item?.period ?? "month");
   const [from, setFrom] = useState(item?.starts_on ?? "");
   const [note, setNote] = useState(item?.note ?? "");
@@ -66,13 +87,15 @@ function ItemForm({ kind, item, data, month, onDone }: { kind: Kind; item: Money
   const total = Number(amount) || amounts.reduce((s, n) => s + n, 0);
 
   const save = async () => {
-    if (!name.trim() || !(total > 0)) return;
+    if (!name.trim() || !(total > 0 || (kind === "buy" && !spent && !amount.trim()))) return;
     setBusy(true);
     try {
       const d: Draft = { name, amount: total, period, starts_on: from || null, note };
       const position = data.items.filter((i) => i.kind === kind).length;
       const id = await saveItem(kind, d, item?.id ?? null, position);
-      if (!repeats(kind) && (amounts.length || planned.length)) await setPlan(id, `${first}-01`, amounts, data.payments);
+      if (kind === "buy") {
+        if (spent) await buy(item ?? ({ id } as MoneyItem), bought?.month ?? month, total, data.payments);
+      } else if (!repeats(kind) && (amounts.length || planned.length)) await setPlan(id, `${first}-01`, amounts, data.payments);
       onDone(true);
     } catch (e) {
       toast({ title: "Not saved", description: (e as Error).message, variant: "destructive" });
@@ -97,8 +120,8 @@ function ItemForm({ kind, item, data, month, onDone }: { kind: Kind; item: Money
     <div className="flex flex-wrap items-center gap-2 rounded-lg border border-primary/30 bg-background/60 p-2" onKeyDown={keys}>
       <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Name" className={cn(field, "min-w-[8rem] flex-1")} />
       <input value={amount} onChange={(e) => setAmount(e.target.value.replace(",", "."))} inputMode="decimal"
-        placeholder={repeats(kind) ? "Amount" : amounts.length ? String(total) : "Total"} className={cn(field, "w-24 tabular-nums")} />
-      {repeats(kind) ? (
+        placeholder={kind === "buy" ? (spent ? "Amount" : "Price") : repeats(kind) ? "Amount" : amounts.length ? String(total) : "Total"} className={cn(field, "w-24 tabular-nums")} />
+      {kind === "buy" ? null : repeats(kind) ? (
         <>
           <select value={period} onChange={(e) => setPeriod(e.target.value)} className={field}>
             <option value="month">a month</option>
@@ -142,6 +165,8 @@ export default function Money() {
   const [editing, setEditing] = useState<{ kind: Kind; id: string | null } | null>(null);
   const [balanceDraft, setBalanceDraft] = useState<string | null>(null);
   const [paying, setPaying] = useState<{ id: string; amount: string } | null>(null);
+  const [buying, setBuying] = useState<{ id: string; amount: string } | null>(null);
+  const [spending, setSpending] = useState(false);
   const reload = () => qc.invalidateQueries({ queryKey: key });
   const run = async (f: () => Promise<unknown>) => {
     try {
@@ -171,6 +196,15 @@ export default function Money() {
     setPaying(null);
     if (id && n > 0) run(() => pay(id, n));
   };
+  const bought = () => {
+    const n = Number((buying?.amount ?? "").replace(",", "."));
+    const item = data.items.find((i) => i.id === buying?.id);
+    setBuying(null);
+    if (item && n > 0) run(() => buy(item, month, n, data.payments));
+  };
+  const toBuy = data.items.filter((i) => i.kind === "buy" && !boughtOf(i, data.payments));
+  const spent = data.items.filter((i) => i.kind === "buy" && boughtOf(i, data.payments)?.month === month);
+  const closeForm = (c: boolean) => { setEditing(null); setSpending(false); if (c) reload(); };
 
   return (
     <div className="mx-auto max-w-4xl animate-fade-in">
@@ -196,7 +230,7 @@ export default function Money() {
             hint={data.balance ? `Updated ${new Date(data.balance.noted_at).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}` : "Set"} />
         )}
         <Stat label="In" value={azn(t.in)} hint="Income + money coming back this month" />
-        <Stat label="Out" value={azn(t.out)} hint="Bills + instalments this month" />
+        <Stat label="Out" value={azn(t.out)} hint="Bills + instalments + spent this month" />
         <Stat label="Left" value={azn(t.left)} tone={t.left < 0 ? "bad" : "good"} hint="In − Out" />
         <Stat label="I owe" value={azn(t.owe)} tone={t.owe > 0 ? "bad" : undefined} />
         <Stat label="Owed to me" value={azn(t.owed)} />
@@ -237,8 +271,7 @@ export default function Money() {
                           {ticked ? <CircleCheck className="h-4 w-4 text-primary" /> : <Circle className="h-4 w-4" />}
                         </Icon>
                       )}
-                      <span className={cn("text-sm text-foreground", settled && "line-through")}>{i.name}</span>
-                      {i.note && <span className="truncate text-xs text-muted-foreground">{i.note}</span>}
+                      <Name item={i} struck={settled} />
                       {i.starts_on && i.starts_on > today && (
                         <span className="text-xs text-muted-foreground">from {new Date(`${i.starts_on}T00:00`).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}</span>
                       )}
@@ -273,6 +306,57 @@ export default function Money() {
                   );
                 })}
                 {!open.length && editing?.kind !== kind && <li className="px-2 py-1 text-xs text-muted-foreground">—</li>}
+              </ul>
+            </div>
+          );
+        })}
+
+        {/* To buy: every month until bought. Spent: what was bought this month (also one-off expenses). */}
+        {([
+          { title: "To buy", items: toBuy, total: toBuy.reduce((s, i) => s + i.amount, 0), add: () => { setSpending(false); setEditing({ kind: "buy", id: null }); } },
+          { title: "Spent", items: spent, total: spent.reduce((s, i) => s + (boughtOf(i, data.payments)?.amount ?? 0), 0), add: () => { setEditing(null); setSpending(true); } },
+        ] as const).map(({ title, items, total, add }) => {
+          const isSpent = title === "Spent";
+          const adding = isSpent ? spending : editing?.kind === "buy" && editing.id === null;
+          return (
+            <div key={title} className="rounded-xl border border-border bg-card">
+              <div className="flex items-center gap-2 px-3 py-2">
+                <span className="text-sm font-medium text-foreground">{title}</span>
+                <span className="text-xs tabular-nums text-muted-foreground">{azn(total)}</span>
+                <Icon label={isSpent ? "Add an expense" : "Add"} onClick={add} className="ml-auto"><Plus className="h-4 w-4" /></Icon>
+              </div>
+              <ul className="space-y-0.5 border-t border-border px-2 py-2">
+                {adding && <li><ItemForm kind="buy" item={null} data={data} month={month} spend={isSpent} onDone={closeForm} /></li>}
+                {items.map((i) => {
+                  if (editing?.id === i.id) return <li key={i.id}><ItemForm kind="buy" item={i} data={data} month={month} onDone={closeForm} /></li>;
+                  const paid = boughtOf(i, data.payments);
+                  return (
+                    <li key={i.id} onClick={() => { setSpending(false); setEditing({ kind: "buy", id: i.id }); }}
+                      className="group flex cursor-pointer items-center gap-x-3 rounded-md px-2 py-1.5 hover:bg-muted/40">
+                      {isSpent ? (
+                        <Icon label="Not bought" onClick={() => run(() => unbuy(i, data.payments))} className="-my-1 p-1">
+                          <CircleCheck className="h-4 w-4 text-primary" />
+                        </Icon>
+                      ) : (
+                        <Icon label={`Bought in ${monthLabel(month, true)}`} onClick={() => setBuying({ id: i.id, amount: i.amount ? String(i.amount) : "" })} className="-my-1 p-1">
+                          <Circle className="h-4 w-4" />
+                        </Icon>
+                      )}
+                      <Name item={i} />
+                      <span className="ml-auto flex items-center gap-2">
+                        {buying?.id === i.id ? (
+                          <input autoFocus value={buying.amount} inputMode="decimal" placeholder="Cost" onClick={(e) => e.stopPropagation()}
+                            onChange={(e) => setBuying({ id: i.id, amount: e.target.value })} onBlur={() => setBuying(null)}
+                            onKeyDown={(e) => { if (e.key === "Enter") bought(); if (e.key === "Escape") setBuying(null); }}
+                            className={cn(field, "w-20 py-0.5 tabular-nums")} />
+                        ) : (
+                          <span className="text-sm tabular-nums text-foreground">{paid ? azn(paid.amount) : i.amount ? azn(i.amount) : "—"}</span>
+                        )}
+                      </span>
+                    </li>
+                  );
+                })}
+                {!items.length && !adding && <li className="px-2 py-1 text-xs text-muted-foreground">—</li>}
               </ul>
             </div>
           );

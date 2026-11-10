@@ -7,7 +7,8 @@ import type { Tables } from "@/integrations/supabase/types";
 export type MoneyItem = Tables<"money_items">;
 export type Payment = Tables<"money_payments">;
 export type Balance = Tables<"money_balances">;
-export type Kind = "income" | "bill" | "debt" | "loan";
+// buy: a thing to buy (amount = price, 0 = not known) or, once bought, spending in that month (one payment row).
+export type Kind = "income" | "bill" | "debt" | "loan" | "buy";
 export type Money = { items: MoneyItem[]; payments: Payment[]; balance: Balance | null };
 
 export const WEEKS_PER_MONTH = 52 / 12;
@@ -34,8 +35,8 @@ const sum = (ps: Payment[]) => ps.reduce((s, p) => s + p.amount, 0);
 export const paymentsOf = (i: MoneyItem, payments: Payment[]) => payments.filter((p) => p.item_id === i.id);
 export const remaining = (i: MoneyItem, payments: Payment[]) => Math.max(0, i.amount - sum(paymentsOf(i, payments).filter((p) => p.paid_at)));
 
-// The month at a glance: what comes in (income + loans paid back that month), what goes out (bills + instalments),
-// what is left, and the open debts both ways.
+// The month at a glance: what comes in (income + loans paid back that month), what goes out (bills + instalments +
+// what was bought), what is left, and the open debts both ways.
 export function totals({ items, payments }: Money, m: string) {
   const t = { in: 0, out: 0, owe: 0, owed: 0 };
   for (const i of items) {
@@ -44,6 +45,7 @@ export function totals({ items, payments }: Money, m: string) {
     else if (i.kind === "bill" && activeIn(i, m)) t.out += monthly(i);
     else if (i.kind === "debt") { t.owe += remaining(i, payments); t.out += due; }
     else if (i.kind === "loan") { t.owed += remaining(i, payments); t.in += due; }
+    else if (i.kind === "buy") t.out += due;
   }
   return { ...t, left: t.in - t.out };
 }
@@ -104,6 +106,22 @@ export async function toggleMonth(item: MoneyItem, m: string, payments: Payment[
     check(await supabase.from("money_payments").update({ paid_at: p.paid_at ? null : new Date().toISOString() }).eq("id", p.id));
   }
 }
+
+// The payment that made a 'buy' item spending (none = still to buy).
+export const boughtOf = (i: MoneyItem, payments: Payment[]) => payments.find((p) => p.item_id === i.id);
+
+// Bought in month m for this amount; again → the amount changes.
+export async function buy(item: MoneyItem, m: string, amount: number, payments: Payment[]) {
+  const p = boughtOf(item, payments);
+  if (p) check(await supabase.from("money_payments").update({ amount }).eq("id", p.id));
+  else check(await supabase.from("money_payments").insert({ item_id: item.id, month: m, amount, paid_at: new Date().toISOString() }));
+}
+
+// Not bought after all: back to the list.
+export const unbuy = async (item: MoneyItem, payments: Payment[]) => {
+  const p = boughtOf(item, payments);
+  if (p) check(await supabase.from("money_payments").delete().eq("id", p.id));
+};
 
 // A debt / loan paid back now, whole or in part, outside the plan.
 export const pay = async (itemId: string, amount: number) =>
