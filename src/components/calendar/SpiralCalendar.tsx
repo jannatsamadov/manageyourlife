@@ -8,7 +8,6 @@ import type { TreeNode } from "@/lib/strategy";
 import { localDay } from "@/hooks/useGoogleEvents";
 import { TimeTag } from "@/components/TimingFields";
 import { byTime } from "@/lib/timing";
-import { OPEN_TAIL, spansOf, type Span } from "@/lib/spans";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import "./SpiralCalendar.css";
@@ -22,7 +21,9 @@ const DAY = 86400000;
 const S_MIN = 0.12, S_MAX = 96; // zoom = px per day: ~18 years … a few days on screen
 const CARDS_GONE = 13, CARDS_FULL = 22; // the cards fade into lines between these zooms
 const TITLES_FROM = 34; // task titles on the cards from this zoom, coloured dots below it
-const LANE_GAP = 5;
+const LONG_DAYS = 28; // a goal or mission this long (or a goal still open) gets a line
+const OPEN_TAIL = 90; // an open goal fades out this many days after today
+const LANE_GAP = 5, LANES = 8;
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -36,14 +37,52 @@ const smoothstep = (min: number, max: number, v: number) => {
 // Days counted from 1970-01-01 in the user's own calendar.
 const dayOf = (iso: string) => Math.floor(Date.parse(`${iso.slice(0, 10)}T00:00:00Z`) / DAY);
 const isoOf = (n: number) => new Date(n * DAY).toISOString().slice(0, 10);
+const localDayOf = (timestamp: string) => dayOf(localDay(new Date(timestamp)));
 const fmt = (n: number) => {
   const d = new Date(n * DAY);
   return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
 };
 
+type Span = { id: string; title: string; color: string; start: number; end: number | null; done: boolean; lane: number };
 type Hit = { span: Span; x: number; y: number };
 
 const laneOffset = (lane: number) => (lane % 2 ? -1 : 1) * (Math.floor(lane / 2) + 1) * LANE_GAP;
+
+function walk(t: TreeNode, f: (n: TreeNode) => void) {
+  f(t);
+  t.children.forEach((c) => walk(c, f));
+}
+
+// Long goals and missions. Start: the start date, else the first sign of the work (created, earliest task).
+// End: the day it was done, else the due date, else open (goals only).
+function spansOf(roots: TreeNode[], hidden: Set<string>, today: number): Span[] {
+  const spans: Span[] = [];
+  const visit = (t: TreeNode) => {
+    if (t.node.status === "dropped" || (t.kind === "goal" && hidden.has(t.node.id))) return;
+    if (t.kind === "goal" || t.kind === "mission") {
+      let first = localDayOf(t.node.created_at);
+      walk(t, (n) => n.tasks.forEach((k) => { if (k.date) first = Math.min(first, dayOf(k.date)); }));
+      const done = t.node.status === "done";
+      const end = done ? localDayOf(t.node.done_at ?? t.node.updated_at) : t.node.due_date ? dayOf(t.node.due_date) : null;
+      const start = Math.min(t.node.start_date ? dayOf(t.node.start_date) : first, end ?? Infinity);
+      if (end === null ? t.kind === "goal" && start <= today + OPEN_TAIL : end - start >= LONG_DAYS) {
+        spans.push({ id: t.node.id, title: t.node.title, color: t.color, start, end, done, lane: 0 });
+      }
+    }
+    if (t.kind === "area" || t.kind === "goal") t.children.forEach(visit);
+  };
+  roots.forEach(visit);
+  // Lanes beside the calendar line, alternating sides; a lane is reused once its line has ended.
+  spans.sort((a, b) => a.start - b.start);
+  const ends: number[] = [];
+  for (const s of spans) {
+    let lane = ends.findIndex((e) => e < s.start);
+    if (lane < 0) lane = ends.length < LANES ? ends.length : ends.indexOf(Math.min(...ends));
+    ends[lane] = s.end ?? today + OPEN_TAIL;
+    s.lane = lane;
+  }
+  return spans;
+}
 
 export default function SpiralCalendar({ tasks, roots, byId, hidden, onOpenDay }: {
   tasks: Task[];
