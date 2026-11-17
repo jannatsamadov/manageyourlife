@@ -3,7 +3,7 @@
 // and missions run beside it as coloured lines (start → due), up to many years on screen.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Crosshair, ZoomIn, ZoomOut } from "lucide-react";
-import type { Task } from "@/context/AppContext";
+import type { Task } from "@/core/tasks";
 import type { TreeNode } from "@/lib/strategy";
 import { localDay } from "@/hooks/useGoogleEvents";
 import { TimeTag } from "@/components/TimingFields";

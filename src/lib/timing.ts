@@ -1,7 +1,7 @@
 // When a task happens (P-60, owner 2026-10-25): an event (fixed time, goes to Google Calendar as a timed event), a
 // planned day (optionally a time block), a deadline, or none (it waits in the store). Only "event" is stored as such;
 // the others follow from the planned day and the deadline.
-import type { Task } from "@/context/AppContext";
+import type { Task } from "@/core/tasks";
 
 export type Timing = "event" | "planned" | "deadline" | null;
 

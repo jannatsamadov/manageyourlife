@@ -1,11 +1,9 @@
 // Strategy tree (P-2): area → goal → mission → step (steps nest). Progress is computed here, never stored,
 // so every theme (P-24) draws the same numbers: progress in → picture out.
-import type { Database } from "@/integrations/supabase/types";
-import type { Task } from "@/context/AppContext";
+import type { Task } from "@/core/tasks";
+import type { NodeKind, StrategyNode } from "@/core/strategy";
 
-export type StrategyNode = Database["public"]["Tables"]["strategy_nodes"]["Row"];
-export type NodeKind = "area" | "goal" | "mission" | "step";
-export type NodeStatus = "open" | "done" | "dropped";
+export type { NodeKind, NodeStatus, StrategyNode } from "@/core/strategy";
 
 export type TreeNode = {
   node: StrategyNode;

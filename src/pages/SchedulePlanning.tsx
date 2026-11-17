@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef, useCallback, useEffect, lazy, Suspense } from "react";
 import { ChevronLeft, ChevronRight, ChevronUp, Clock, Plus, Trash2, ExternalLink, GripVertical, CalendarX, RefreshCw, Loader2, RotateCcw, X, Play, CheckCircle2, Timer, Filter, Search } from "lucide-react";
-import { useAppState, type TaskPriority, type Task } from "@/context/AppContext";
+import { useTasks, type TaskPriority, type Task } from "@/core/tasks";
 import { getSettings } from "@/lib/settings";
 import { getGoogleConnection, googleAction } from "@/lib/gcal";
 import { localDay, useGoogleEvents } from "@/hooks/useGoogleEvents";
@@ -17,7 +17,6 @@ import {
 import TaskEditPopup from "@/components/TaskEditPopup";
 import TimingFields, { TimeTag } from "@/components/TimingFields";
 import { byTime } from "@/lib/timing";
-import IncomingShares from "@/components/IncomingShares";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Select,
@@ -26,7 +25,7 @@ import {
   SelectTrigger,
   SelectValue } from
 "@/components/ui/select";
-import { useStrategyNodes } from "@/hooks/useStrategy";
+import { useStrategyNodes } from "@/core/strategy";
 import { buildForest } from "@/lib/strategy";
 
 const SpiralCalendar = lazy(() => import("@/components/calendar/SpiralCalendar"));
@@ -135,7 +134,7 @@ function getTaskProgress(task: Task): number {
 const today = new Date().toISOString().slice(0, 10);
 
 export default function SchedulePlanning() {
-  const { tasks, updateTask, addTask, deleteTask, permanentDeleteTask, reorderTasks } = useAppState();
+  const { tasks, updateTask, addTask, deleteTask, permanentDeleteTask, reorderTasks } = useTasks();
   const [view, setView] = useState<View>("spiral"); // owner, 2026-10-25: the spiral calendar first
   const [currentDate, setCurrentDate] = useState(new Date());
   const [showForm, setShowForm] = useState(false);
@@ -490,8 +489,6 @@ export default function SchedulePlanning() {
 
             {/* Right: All action buttons */}
             <div className="flex items-center gap-1.5">
-              {/* Incoming shares */}
-              <IncomingShares />
               {/* Search toggle */}
               {searchOpen ? (
                 <div className="flex items-center gap-1 animate-in slide-in-from-right-2 duration-200">

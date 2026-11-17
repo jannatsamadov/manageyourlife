@@ -10,7 +10,7 @@ import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import gsap from "gsap";
 import { BookHeart, ChevronDown, ChevronUp, Crosshair, Pause, Play } from "lucide-react";
-import type { Task } from "@/context/AppContext";
+import type { Task } from "@/core/tasks";
 import type { TreeNode } from "@/lib/strategy";
 import { useAuth } from "@/context/AuthContext";
 import { localDay } from "@/hooks/useGoogleEvents";

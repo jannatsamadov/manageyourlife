@@ -3,7 +3,7 @@ import { MessageCircle, X, Send, Plus, Loader2 } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
-import { dbTaskToLocal, useAppState } from "@/context/AppContext";
+import { useItemActions } from "@/core/items";
 import { googleAction, isGoogleConnected } from "@/lib/gcal";
 import { getSettings } from "@/lib/settings";
 import { toast } from "@/hooks/use-toast";
@@ -25,15 +25,11 @@ export default function ChatPanel() {
   const panelRef = useRef<HTMLDivElement>(null);
   const fabRef = useRef<HTMLButtonElement>(null);
 
-  const { setTasks } = useAppState();
+  const { refresh } = useItemActions();
 
-  // After the assistant changed tasks: the list again (as the app loads it) and the new ones to Google.
+  // After the assistant changed tasks: the list again (Realtime brings them too) and the new ones to Google.
   const refreshData = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-    const tasksRes = await supabase.from("tasks").select("*").eq("user_id", user.id).is("deleted_at", null)
-      .order("position", { ascending: true }).order("created_at", { ascending: true });
-    if (tasksRes.data) setTasks(tasksRes.data.map(dbTaskToLocal));
+    refresh();
     if (await isGoogleConnected()) googleAction.syncCalendar().catch(() => {});
   };
 

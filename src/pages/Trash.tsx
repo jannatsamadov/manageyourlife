@@ -1,8 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Trash2, Undo2, AlertTriangle, Loader2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/context/AuthContext";
 import { queueCalendarSync } from "@/lib/gcal";
+import { useItemActions, useItems } from "@/core/items";
+import { PRIORITIES } from "@/core/types";
 import { vault } from "@/lib/vault";
 import { toast } from "@/hooks/use-toast";
 
@@ -22,44 +24,32 @@ interface TrashNote {
 
 export default function Trash() {
   const { user } = useAuth();
-  const [tasks, setTasks] = useState<TrashTask[]>([]);
   const [notes, setNotes] = useState<TrashNote[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [notesLoading, setNotesLoading] = useState(true);
+  // Items in the trash (v2 items, P-70): the item layer has them, newest first.
+  const items = useItems();
+  const { update, remove } = useItemActions();
+  const tasks = useMemo<TrashTask[]>(() => (items.data ?? [])
+    .filter((i) => i.deleted_at)
+    .sort((a, b) => b.deleted_at!.localeCompare(a.deleted_at!))
+    .map((i) => ({ id: i.id, title: i.title, status: i.status, priority: PRIORITIES.find((p) => p.id === i.priority)?.name ?? null, deleted_at: i.deleted_at! })),
+  [items.data]);
+  const loading = items.isLoading || notesLoading;
 
   useEffect(() => {
     if (!user) return;
     (async () => {
-      setLoading(true);
-      const [taskRes, noteRes] = await Promise.all([
-        supabase
-          .from("tasks" as any)
-          .select("id,title,status,priority,deleted_at" as any)
-          .eq("user_id", user.id)
-          .not("deleted_at", "is", null as any)
-          .order("deleted_at", { ascending: false }) as any,
-        // Notes are files now (P-57): the trashed ones of the vault.
-        supabase
-          .from("vault_files")
-          .select("id, title, trashed_at")
-          .not("trashed_at", "is", null)
-          .order("trashed_at", { ascending: false }),
-      ]);
-
-      if (!taskRes.error && taskRes.data) setTasks(taskRes.data as TrashTask[]);
+      setNotesLoading(true);
+      // Notes are files now (P-57): the trashed ones of the vault.
+      const noteRes = await supabase.from("vault_files").select("id, title, trashed_at").not("trashed_at", "is", null)
+        .order("trashed_at", { ascending: false });
       if (!noteRes.error && noteRes.data) setNotes(noteRes.data.map((n) => ({ id: n.id, title: n.title, deleted_at: n.trashed_at! })));
-      setLoading(false);
+      setNotesLoading(false);
     })();
   }, [user]);
 
   const restoreTask = async (id: string) => {
-    const { error } = await (supabase
-      .from("tasks" as any)
-      .update({ deleted_at: null } as any)
-      .eq("id", id) as any);
-    if (!error) {
-      setTasks((prev) => prev.filter((t) => t.id !== id));
-      queueCalendarSync(id);
-    }
+    if (await update(id, { deleted_at: null })) queueCalendarSync(id);
   };
 
   const restoreNote = async (id: string) => {
@@ -71,12 +61,7 @@ export default function Trash() {
     }
   };
 
-  const wipeTask = async (id: string) => {
-    const { error } = await (supabase.from("tasks" as any).delete().eq("id", id) as any);
-    if (!error) {
-      setTasks((prev) => prev.filter((t) => t.id !== id));
-    }
-  };
+  const wipeTask = (id: string) => remove([id]);
 
   const wipeNote = async (id: string) => {
     try {

@@ -7,7 +7,7 @@ import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber"
 import { Billboard, CameraControls, Html, Line, Stars } from "@react-three/drei";
 import { Bloom, EffectComposer, ToneMapping, Vignette } from "@react-three/postprocessing";
 import { ToneMappingMode } from "postprocessing";
-import type { Task } from "@/context/AppContext";
+import type { Task } from "@/core/tasks";
 import { daysLeft, percent, seeded, type TreeNode } from "@/lib/strategy";
 import { SUN_RADIUS, layoutSystem, lookFor, type BodyLook, type MoonLayout, type PlanetLayout } from "./layout";
 import { atmosphereMaterial, glowTexture, nebulaMaterial, planetMaterial, raysTexture, ringMaterial, sunMaterial } from "./shaders";

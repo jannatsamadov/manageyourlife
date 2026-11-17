@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildForest, type StrategyNode } from "./strategy";
-import type { Task } from "@/context/AppContext";
+import type { Task } from "@/core/tasks";
 
 let n = 0;
 const node = (p: Partial<StrategyNode> & { kind: string }): StrategyNode => ({

@@ -1,11 +1,12 @@
 // One note (P-21, P-57): reading view, edit and save back to the file (version-checked), the tasks it is linked to
-// (its "- [ ]" lines become their subtasks) and the hover menu. Reloads when a sync changed the file.
+// (they show its "- [ ]" lines, read from the file) and the hover menu. Reloads when a sync changed the file.
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, ChevronLeft, Link2, Loader2, Pencil, X } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/context/AuthContext";
-import { useAppState } from "@/context/AppContext";
+import { useTasks } from "@/core/tasks";
+import { useNoteItems, useNoteLinkActions } from "@/core/notes";
 import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -32,37 +33,18 @@ function Icon({ label, onClick, disabled, children }: { label: string; onClick: 
   );
 }
 
-// Tasks this note is linked to; linking turns the note's to-dos into the task's subtasks (server side).
+// Tasks this note is linked to (item_links, kind 'note'); a linked task shows the note's to-dos from the file.
 function LinkTasks({ noteId }: { noteId: string }) {
-  const { user } = useAuth();
-  const { tasks } = useAppState();
-  const qc = useQueryClient();
+  const { tasks } = useTasks();
   const [q, setQ] = useState("");
-  const key = ["note-links", noteId];
-  const links = useQuery({
-    queryKey: key,
-    queryFn: async () => {
-      const { data, error } = await supabase.from("note_task_links").select("task_id").eq("note_id", noteId);
-      if (error) throw error;
-      return data.map((r) => r.task_id);
-    },
-  });
+  const links = useNoteItems(noteId);
+  const actions = useNoteLinkActions();
   const linked = new Set(links.data ?? []);
   const live = tasks.filter((t) => !t.deletedAt && t.status !== "abandoned");
   const shown = live.filter((t) => !linked.has(t.id) && (!q.trim() || t.title.toLowerCase().includes(q.trim().toLowerCase()))).slice(0, 40);
 
-  const link = async (taskId: string) => {
-    if (!user) return;
-    const { error } = await supabase.from("note_task_links").insert({ note_id: noteId, task_id: taskId, user_id: user.id });
-    if (error) return toast({ title: "Not linked", description: error.message, variant: "destructive" });
-    await vault("sync_todos", { note_id: noteId }).catch((e: Error) => toast({ title: "To-dos not copied", description: e.message, variant: "destructive" }));
-    qc.invalidateQueries({ queryKey: key });
-  };
-  const unlink = async (taskId: string) => {
-    await supabase.from("note_task_links").delete().eq("note_id", noteId).eq("task_id", taskId);
-    await supabase.from("subtasks").delete().eq("note_id", noteId).eq("parent_task_id", taskId);
-    qc.invalidateQueries({ queryKey: key });
-  };
+  const link = (taskId: string) => actions.link(taskId, noteId);
+  const unlink = (taskId: string) => actions.unlink(taskId, noteId);
 
   return (
     <Popover>

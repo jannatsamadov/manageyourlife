@@ -8,7 +8,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CalendarPlus, CheckCheck, ChevronDown, ChevronRight, Eye, EyeOff, FileText, Loader2, RefreshCw, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/context/AuthContext";
-import { useAppState } from "@/context/AppContext";
+import { useTasks } from "@/core/tasks";
+import { useNoteLinkActions } from "@/core/notes";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -48,7 +49,8 @@ const tick = (body: string, line: number, done: boolean) =>
 
 export default function Tasks() {
   const { user } = useAuth();
-  const { addTask } = useAppState();
+  const { addTask } = useTasks();
+  const noteLinks = useNoteLinkActions();
   const qc = useQueryClient();
   const navigate = useNavigate();
   const key = useMemo(() => ["todo-files", user?.id], [user?.id]);
@@ -136,7 +138,7 @@ export default function Tasks() {
   const toSchedule = async (t: Todo) => {
     const saved = await addTask({ title: t.text, description: "", estimatedTime: null, status: "idle", startTime: null, endTime: null, date: "", deadline: "", position: 0, link: "", priority: "medium" });
     if (!saved) return;
-    await supabase.from("tasks").update({ linked_note_id: t.file.id }).eq("id", saved.id);
+    await noteLinks.link(saved.id, t.file.id);
     toast({ title: "Added to Schedule" });
   };
 

@@ -1,14 +1,12 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from "react";
-import { X, Save, AlertTriangle, Trash2, Plus, CheckSquare, FileText, Send } from "lucide-react";
-import { Task, TaskPriority, useAppState } from "@/context/AppContext";
-import ShareTaskDialog from "@/components/ShareTaskDialog";
+import { X, Save, AlertTriangle, Trash2, Plus, CheckSquare, FileText } from "lucide-react";
+import { Task, TaskPriority, useTasks } from "@/core/tasks";
 import TimingFields from "@/components/TimingFields";
-import { supabase } from "@/integrations/supabase/client";
-import { useAuth } from "@/context/AuthContext";
+import { useItemActions, useItems } from "@/core/items";
+import { type NoteTodo, useNoteLinkActions, useNoteTodos } from "@/core/notes";
 import { cn } from "@/lib/utils";
-import { useStrategyNodes } from "@/hooks/useStrategy";
+import { useStrategyNodes } from "@/core/strategy";
 import { buildForest, pickList } from "@/lib/strategy";
-import { vault } from "@/lib/vault";
 
 function formatDuration(ms: number): string {
   const seconds = Math.floor(ms / 1000);
@@ -49,12 +47,9 @@ interface TaskEditPopupProps {
 }
 
 export default function TaskEditPopup({ task, onClose }: TaskEditPopupProps) {
-  const { tasks, updateTask } = useAppState();
-  const { user } = useAuth();
+  const { tasks, updateTask } = useTasks();
   const popupRef = useRef<HTMLDivElement>(null);
-  const [subtasks, setSubtasks] = useState<Subtask[]>([]);
   const [newSubtask, setNewSubtask] = useState("");
-  const [shareOpen, setShareOpen] = useState(false);
 
   const [editForm, setEditForm] = useState<EditForm>({
     title: task.title,
@@ -74,42 +69,17 @@ export default function TaskEditPopup({ task, onClose }: TaskEditPopupProps) {
   const { data: strategyNodes } = useStrategyNodes();
   const strategyRoots = useMemo(() => buildForest(strategyNodes ?? [], []).roots, [strategyNodes]);
 
-  // Fetch subtasks with note titles
-  useEffect(() => {
-    const fetchSubtasks = async () => {
-      const { data } = await (supabase
-        .from("subtasks" as any)
-        .select("*")
-        .eq("parent_task_id", task.id)
-        .order("position", { ascending: true }) as any);
-      if (!data) return;
-
-      const items = data as any[];
-      // Get unique note IDs to fetch titles
-      const noteIds = [...new Set(items.filter(s => s.note_id).map(s => s.note_id))];
-      let noteTitles: Record<string, string> = {};
-      if (noteIds.length > 0) {
-        // Notes are vault files (P-57); the id survives renames.
-        const { data: notes } = await supabase
-          .from("vault_files")
-          .select("id, title")
-          .in("id", noteIds as string[]);
-        if (notes) {
-          (notes as any[]).forEach(n => { noteTitles[n.id] = n.title; });
-        }
-      }
-
-      setSubtasks(items.map((s: any) => ({
-        id: s.id,
-        title: s.title,
-        completed: s.completed,
-        position: s.position,
-        note_id: s.note_id || null,
-        note_title: s.note_id ? (noteTitles[s.note_id] || "Untitled Note") : undefined,
-      })));
-    };
-    fetchSubtasks();
-  }, [task.id]);
+  // Its steps (task items inside it) and the to-dos of its linked notes (read from the files; ticking one ticks the
+  // line in the note).
+  const items = useItems();
+  const { create, update, remove } = useItemActions();
+  const noteTodos = useNoteTodos(task.id);
+  const { toggleTodo } = useNoteLinkActions();
+  const steps = useMemo<Subtask[]>(() => (items.data ?? [])
+    .filter((i) => i.parent_id === task.id && i.type === "task" && !i.deleted_at)
+    .sort((a, b) => a.position - b.position)
+    .map((i) => ({ id: i.id, title: i.title, completed: i.status === "done", position: i.position, note_id: null })), [items.data, task.id]);
+  const subtasks = useMemo<Subtask[]>(() => [...(noteTodos.data ?? []), ...steps], [noteTodos.data, steps]);
 
   // Conflict detection
   const conflict = useMemo(() => {
@@ -134,47 +104,21 @@ export default function TaskEditPopup({ task, onClose }: TaskEditPopupProps) {
     return () => document.removeEventListener("mousedown", handler);
   }, [onClose]);
 
-  // Toggle subtask - two-way sync for note-sourced subtasks
   const toggleSubtask = useCallback(async (id: string, completed: boolean) => {
-    const subtask = subtasks.find(s => s.id === id);
-    if (!subtask) return;
+    const todo = noteTodos.data?.find((t) => t.id === id);
+    if (todo) return toggleTodo(todo as NoteTodo, completed, task.id);
+    await update(id, { status: completed ? "done" : "todo" });
+  }, [noteTodos.data, toggleTodo, update, task.id]);
 
-    // Update subtask in DB
-    await (supabase.from("subtasks" as any).update({ completed } as any).eq("id", id) as any);
-    setSubtasks((prev) => prev.map((s) => s.id === id ? { ...s, completed } : s));
-
-    // Two-way sync: the same "- [ ]" line in the note file is ticked (server side, version-checked).
-    if (subtask.note_id) {
-      await vault("toggle_todo", { note_id: subtask.note_id, title: subtask.title, completed }).catch(() => {});
-    }
-  }, [subtasks]);
-
-  // Delete subtask - only for non-note-sourced subtasks
+  // A note's to-dos are changed in the note; only the task's own steps are deleted here.
   const deleteSubtask = useCallback(async (id: string) => {
-    const subtask = subtasks.find(s => s.id === id);
-    if (!subtask) return;
-
-    // Note-sourced subtasks can't be deleted from task view (one-way: note controls structure)
-    if (subtask.note_id) return;
-
-    await (supabase.from("subtasks" as any).delete().eq("id", id) as any);
-    setSubtasks((prev) => prev.filter((s) => s.id !== id));
-  }, [subtasks]);
+    if (steps.some((s) => s.id === id)) await remove([id]);
+  }, [steps, remove]);
 
   const addSubtask = useCallback(async () => {
-    if (!newSubtask.trim() || !user) return;
-    const { data } = await (supabase.from("subtasks" as any).insert({
-      user_id: user.id,
-      parent_task_id: task.id,
-      title: newSubtask.trim(),
-      completed: false,
-      position: subtasks.length,
-    } as any).select().single() as any);
-    if (data) {
-      setSubtasks((prev) => [...prev, { id: data.id, title: data.title, completed: data.completed, position: data.position, note_id: null }]);
-      setNewSubtask("");
-    }
-  }, [newSubtask, user, task.id, subtasks.length]);
+    if (!newSubtask.trim()) return;
+    if (await create({ type: "task", parent_id: task.id, title: newSubtask.trim(), position: steps.length })) setNewSubtask("");
+  }, [newSubtask, create, task.id, steps.length]);
 
   const saveEdit = async () => {
     const updates: Partial<Task> = {};
@@ -225,9 +169,6 @@ export default function TaskEditPopup({ task, onClose }: TaskEditPopupProps) {
         <div className="flex items-center justify-between border-b border-border px-5 py-3">
           <h3 className="text-base font-semibold text-foreground">Edit Task</h3>
           <div className="flex items-center gap-1.5">
-            <button onClick={() => setShareOpen(true)} className="text-muted-foreground hover:text-primary shrink-0" title="Göndər">
-              <Send className="h-4 w-4" />
-            </button>
             <button onClick={onClose} className="text-muted-foreground hover:text-foreground shrink-0">
               <X className="h-4 w-4" />
             </button>
@@ -402,7 +343,6 @@ export default function TaskEditPopup({ task, onClose }: TaskEditPopupProps) {
           </div>
         </div>
       </div>
-      <ShareTaskDialog task={task} open={shareOpen} onOpenChange={setShareOpen} />
     </div>
   );
 }

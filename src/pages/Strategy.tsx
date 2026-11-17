@@ -4,8 +4,8 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { LayoutDashboard, Loader2, Orbit, PanelRight, Plus, Sparkles, Sun } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { useAppState } from "@/context/AppContext";
-import { useStrategyActions, useStrategyNodes } from "@/hooks/useStrategy";
+import { useTasks } from "@/core/tasks";
+import { useStrategyActions, useStrategyNodes } from "@/core/strategy";
 import { AREA_COLORS, buildForest, type TreeNode } from "@/lib/strategy";
 import { cn } from "@/lib/utils";
 import ProView from "@/components/strategy/ProView";
@@ -125,7 +125,7 @@ function AddChip({ label, onAdd, big, dark = true }: { label: string; onAdd: (ti
 }
 
 export default function Strategy() {
-  const { tasks } = useAppState();
+  const { tasks } = useTasks();
   const { data: nodes, isLoading, error } = useStrategyNodes();
   const { create } = useStrategyActions();
   const { roots, byId } = useMemo(() => buildForest(nodes ?? [], tasks), [nodes, tasks]);

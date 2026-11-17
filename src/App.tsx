@@ -4,7 +4,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
-import { AppProvider } from "@/context/AppContext";
+import { CoreSync } from "@/core/sync";
 import AppLayout from "@/components/AppLayout";
 import ErrorBoundary from "@/components/ErrorBoundary";
 
@@ -56,7 +56,8 @@ const AppRoutes = () => (
         path="/*"
         element={
           <ProtectedRoute>
-            <AppProvider>
+            <>
+              <CoreSync />
               <AppLayout>
                 <PageBoundary>
                 <Routes>
@@ -83,7 +84,7 @@ const AppRoutes = () => (
                 </Routes>
                 </PageBoundary>
               </AppLayout>
-            </AppProvider>
+            </>
           </ProtectedRoute>
         }
       />

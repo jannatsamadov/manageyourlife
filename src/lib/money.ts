@@ -1,10 +1,15 @@
 // Money (P-67): the user's balance, income, bills, debts (I owe) and loans (owed to me), and the month's numbers made
 // from them. AZN; a weekly amount counts 52 / 12 weeks a month, a yearly one 1 / 12 a month (paid once a year).
 // Months are keyed by their first day ("2026-11-01").
+// Since v2 (P-70) a money entry is an item (type income / bill / debt / loan / buy; title, note = body) plus its
+// money_details row (amount, period, dates); payments and balances stay ledgers. Money never reaches MCP / AI.
 import { supabase } from "@/integrations/supabase/client";
 import type { Tables } from "@/integrations/supabase/types";
 
-export type MoneyItem = Tables<"money_items">;
+export type MoneyItem = {
+  id: string; kind: Kind; name: string; amount: number; period: string | null; starts_on: string | null; ends_on: string | null;
+  note: string; position: number; created_at: string;
+};
 export type Payment = Tables<"money_payments">;
 export type Balance = Tables<"money_balances">;
 // buy: a thing to buy (amount = price, 0 = not known) or, once bought, spending in that month (one payment row).
@@ -58,13 +63,24 @@ const check = <T,>(r: { data: T; error: { message: string } | null }) => {
   return r.data;
 };
 
+type Row = { id: string; type: string; title: string; body: string; position: number; created_at: string;
+  money_details: { amount: number; period: string | null; starts_on: string | null; ends_on: string | null } | { amount: number; period: string | null; starts_on: string | null; ends_on: string | null }[] | null };
+const MONEY = ["income", "bill", "debt", "loan", "buy"];
+
+const toMoney = (r: Row): MoneyItem => {
+  const d = Array.isArray(r.money_details) ? r.money_details[0] : r.money_details;
+  return { id: r.id, kind: r.type as Kind, name: r.title, note: r.body, position: r.position, created_at: r.created_at,
+    amount: Number(d?.amount ?? 0), period: d?.period ?? null, starts_on: d?.starts_on ?? null, ends_on: d?.ends_on ?? null };
+};
+
 export async function loadMoney(): Promise<Money> {
   const [items, payments, balance] = await Promise.all([
-    supabase.from("money_items").select("*").order("position").order("created_at"),
+    supabase.from("items").select("id, type, title, body, position, created_at, money_details(amount, period, starts_on, ends_on)")
+      .in("type", MONEY).is("deleted_at", null).order("position").order("created_at"),
     supabase.from("money_payments").select("*").order("month", { nullsFirst: false }).order("created_at"),
     supabase.from("money_balances").select("*").order("noted_at", { ascending: false }).limit(1).maybeSingle(),
   ]);
-  return { items: check(items) ?? [], payments: check(payments) ?? [], balance: check(balance) };
+  return { items: ((check(items) ?? []) as unknown as Row[]).map(toMoney), payments: check(payments) ?? [], balance: check(balance) };
 }
 
 export const setBalance = async (amount: number) => check(await supabase.from("money_balances").insert({ amount }));
@@ -72,15 +88,26 @@ export const setBalance = async (amount: number) => check(await supabase.from("m
 export type Draft = { name: string; amount: number; period: string | null; starts_on: string | null; note: string };
 
 export async function saveItem(kind: Kind, d: Draft, id: string | null, position: number) {
-  const row = { kind, name: d.name.trim(), amount: d.amount, period: repeats(kind) ? d.period ?? "month" : null, starts_on: d.starts_on || null, note: d.note };
+  const item = { title: d.name.trim(), body: d.note };
+  const details = { amount: d.amount, period: repeats(kind) ? d.period ?? "month" : null, starts_on: d.starts_on || null };
   if (id) {
-    check(await supabase.from("money_items").update(row).eq("id", id));
+    check(await supabase.from("items").update(item).eq("id", id));
+    check(await supabase.from("money_details").update(details).eq("item_id", id));
     return id;
   }
-  return (check(await supabase.from("money_items").insert({ ...row, position }).select("id").single()) as { id: string }).id;
+  // The workspace: the personal one (DB default); the details take the item's (trigger).
+  const made = check(await supabase.from("items").insert({ ...item, type: kind, position }).select("id, workspace_id").single()) as
+    { id: string; workspace_id: string };
+  const { error } = await supabase.from("money_details").insert({ ...details, item_id: made.id, workspace_id: made.workspace_id });
+  if (error) {
+    await supabase.from("items").delete().eq("id", made.id); // no money item without its amount
+    throw new Error(error.message);
+  }
+  return made.id;
 }
 
-export const deleteItem = async (id: string) => check(await supabase.from("money_items").delete().eq("id", id));
+// The details and the payments go with it.
+export const deleteItem = async (id: string) => check(await supabase.from("items").delete().eq("id", id));
 
 // Instalments of a debt / loan from a month on; the unpaid ones are replaced, paid months stay.
 export async function setPlan(itemId: string, first: string, amounts: number[], payments: Payment[]) {

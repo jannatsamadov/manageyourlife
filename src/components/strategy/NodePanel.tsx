@@ -6,8 +6,8 @@ import {
   Sparkles, Sun, Trash2, X,
 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { useAppState } from "@/context/AppContext";
-import { useStrategyActions } from "@/hooks/useStrategy";
+import { useTasks } from "@/core/tasks";
+import { useStrategyActions } from "@/core/strategy";
 import { CHILD_KIND, daysLeft, percent, type NodeKind, type TreeNode } from "@/lib/strategy";
 import { cn } from "@/lib/utils";
 
@@ -66,7 +66,7 @@ export default function NodePanel({ tree, onSelect, onOpenTask, onClose }: {
   onClose?: () => void;
 }) {
   const { create, update, remove } = useStrategyActions();
-  const { addTask, updateTask } = useAppState();
+  const { addTask, updateTask } = useTasks();
   const node = tree.node;
   const kind = tree.kind;
   const childKind = CHILD_KIND[kind];
