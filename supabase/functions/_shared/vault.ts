@@ -1,6 +1,6 @@
 // Notes as files (P-21, P-57). A user's vault lives in R2 under users/<id>/vault/ (the laptop syncs it with rclone
 // bisync); vault_files indexes it — one row per file, with a stable id that survives renames, moves and the trash, so
-// task links (note_task_links, subtasks) keep working. Used by the vault function (the app), mcp and telegram-webhook.
+// links to items (item_links, kind "note") keep working. Used by the vault function (the app), mcp and telegram-webhook.
 import { AwsClient } from "npm:aws4fetch@1.0.20";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2.45.4";
 
@@ -230,7 +230,6 @@ export async function scan(db: SupabaseClient, userId: string) {
     }
     check(await db.from("vault_files").update(fields(o, text)).eq("id", id));
     counts.updated++;
-    if (text !== null) await syncTodos(db, userId, id, text);
   });
   for (let i = 0; i < inserts.length; i += 100) {
     const chunk = inserts.slice(i, i + 100);
@@ -285,7 +284,6 @@ export async function writeNote(db: SupabaseClient, userId: string, rawPath: unk
   }
   const o = { path, etag: await put(key, text, "text/markdown; charset=utf-8"), size: new TextEncoder().encode(text).length, modified: new Date().toISOString() };
   const id = await saveRow(db, userId, await liveId(db, userId, path), path, fields(o, text));
-  await syncTodos(db, userId, id, text);
   return { id, path, etag: o.etag };
 }
 
@@ -372,31 +370,9 @@ export async function purgeFile(db: SupabaseClient, userId: string, id: unknown)
   return { id: row.id, purged: true };
 }
 
-// ── note to-dos ↔ subtasks of linked tasks (P-57; the rule of the old notes: top-level "- [ ]" lines, by position) ──
-const TODO = /^- \[( |x)\] (.+)$/gm;
-const todosOf = (text: string) =>
-  [...text.replace(/\r\n/g, "\n").matchAll(TODO)].map((m) => ({ title: m[2].replace(/\s\^[\w-]+$/, ""), completed: m[1] === "x" }));
-
-export async function syncTodos(db: SupabaseClient, userId: string, noteId: string, text: string) {
-  const links = check(await db.from("note_task_links").select("task_id").eq("note_id", noteId)) as { task_id: string }[];
-  if (!links.length) return;
-  const todos = todosOf(text);
-  for (const { task_id } of links) {
-    const existing = check(await db.from("subtasks").select("id, title, completed").eq("note_id", noteId).eq("parent_task_id", task_id)
-      .order("position")) as { id: string; title: string; completed: boolean }[];
-    for (const [i, t] of todos.entries()) {
-      const ex = existing[i];
-      if (!ex) check(await db.from("subtasks").insert({ user_id: userId, note_id: noteId, parent_task_id: task_id, title: t.title, completed: t.completed, position: i }));
-      else if (ex.title !== t.title || ex.completed !== t.completed) {
-        check(await db.from("subtasks").update({ title: t.title, completed: t.completed, position: i }).eq("id", ex.id));
-      }
-    }
-    const extra = existing.slice(todos.length).map((s) => s.id);
-    if (extra.length) check(await db.from("subtasks").delete().in("id", extra));
-  }
-}
-
-// A subtask ticked in a task → the same line in the note.
+// ── note to-dos (P-57: top-level "- [ ]" lines). v1 copied them into the subtasks of linked tasks; v2 keeps them only
+// in the note (P-70; phase 4 makes them items of their own, two-way with the file). ──
+// A to-do ticked in the app → the same line in the note.
 export async function toggleTodo(db: SupabaseClient, userId: string, noteId: unknown, title: string, completed: boolean) {
   const { path } = await noteById(db, userId, noteId);
   return editNote(db, userId, path, (text) => {

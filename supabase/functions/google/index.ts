@@ -8,6 +8,7 @@
 //   disconnect     → revoke the access at Google and forget the tokens
 import { GoogleError, ReconnectNeeded, cors, db, decrypt, google, json, userFrom } from "../_shared/google.ts";
 import { CAL, TASKS, gtaskFor, gtaskHash, syncCalendar, syncTasks } from "../_shared/gsync.ts";
+import { type ItemRow, TASK_COLS, V2_STATUS, scopeOf, setSource, setSourceHash, v1Task } from "../_shared/items.ts";
 
 class BadInput extends Error {}
 
@@ -81,30 +82,26 @@ async function importTasks(userId: string) {
     ? `showCompleted=true&showHidden=true&showDeleted=true&updatedMin=${encodeURIComponent(since)}`
     : "showCompleted=false&showHidden=false";
 
+  const { home } = await scopeOf(db, userId);
   const lists = await allPages(userId, `${TASKS}/users/@me/lists`);
   let found = 0, added = 0, changed = 0;
   const calendarToo: string[] = [];
   for (const list of lists) {
     const all = await allPages(userId, `${TASKS}/lists/${encodeURIComponent(list.id)}/tasks?${query}`);
     if (!all.length) continue;
-    const { data: linked, error: linkedError } = await db.from("tasks")
-      .select("id, title, description, link, status, date, deadline, actual_end, gtask_id, gtask_hash")
-      .eq("user_id", userId).in("gtask_id", all.map((t) => t.id));
+    // Linked already (a task, or a capture of the v1 Inbox that came from Google Tasks): never imported twice.
+    const { data: linked, error: linkedError } = await db.from("item_sources").select(`external_id, items!inner(${TASK_COLS})`)
+      .eq("workspace_id", home).eq("source", "google_tasks").in("external_id", all.map((t) => t.id));
     if (linkedError) throw linkedError;
-    const byGoogle = new Map(linked.map((t) => [t.gtask_id, t]));
-    // Imported before the link moved to tasks (an Inbox item still waiting to be sorted): not again.
-    const { data: old, error: oldError } = await db.from("inbox_items").select("source_ref").eq("user_id", userId)
-      .eq("source", "google_tasks").in("source_ref", all.map((t) => t.id));
-    if (oldError) throw oldError;
-    const oldRefs = new Set(old.map((o) => o.source_ref));
+    const byGoogle = new Map((linked as unknown as { external_id: string; items: ItemRow }[]).map((l) => [l.external_id, l.items]));
 
     for (const g of all) {
-      const task = byGoogle.get(g.id);
-      if (task) {
-        if (await applyFromGoogle(task, g, calendarToo)) changed++;
+      const item = byGoogle.get(g.id);
+      if (item) {
+        if (item.type === "task" && await applyFromGoogle(item, g, calendarToo)) changed++;
         continue;
       }
-      if (g.deleted || g.status === "completed" || oldRefs.has(g.id) || !(g.title?.trim() || g.notes?.trim())) continue;
+      if (g.deleted || g.status === "completed" || !(g.title?.trim() || g.notes?.trim())) continue;
       found++;
       const title = (g.title?.trim() || String(g.notes).trim().split("\n")[0]).slice(0, 500);
       const row = {
@@ -114,14 +111,22 @@ async function importTasks(userId: string) {
         link: "",
         status: "idle",
       };
-      const { error } = await db.from("tasks").insert({
-        user_id: userId,
-        ...row,
-        gtask_id: g.id,
-        gtask_list_id: list.id,
-        gtask_hash: await gtaskHash(gtaskFor(row)),
-      });
+      const { data: created, error } = await db.from("items").insert({
+        workspace_id: home,
+        type: "task",
+        title: row.title,
+        body: row.description,
+        due_on: row.deadline || null,
+        priority: 3,
+        created_by: userId,
+      }).select("id").single();
       if (error) throw error;
+      try {
+        await setSource(db, created.id, "google_tasks", { external_id: g.id, container: list.id, hash: await gtaskHash(gtaskFor(row)) });
+      } catch (e) {
+        await db.from("items").delete().eq("id", created.id); // no task without its link (it would come in again)
+        throw e;
+      }
       added++;
     }
   }
@@ -132,10 +137,12 @@ async function importTasks(userId: string) {
 }
 
 // A linked task changed in Google. What Google shows equal to what the app sent last → our own change, nothing to do.
-async function applyFromGoogle(task: any, g: any, calendarToo: string[]) {
+async function applyFromGoogle(item: ItemRow, g: any, calendarToo: string[]) {
+  const link = item.item_sources?.find((s) => s.source === "google_tasks");
+  const task = { ...v1Task(item), gtask_hash: link?.hash ?? null };
   if (task.gtask_hash === "deleted") return false;
   if (g.deleted) {
-    await db.from("tasks").update({ gtask_hash: "deleted" }).eq("id", task.id);
+    await setSourceHash(db, task.id, "google_tasks", "deleted");
     return false;
   }
   const done = g.status === "completed";
@@ -148,19 +155,28 @@ async function applyFromGoogle(task: any, g: any, calendarToo: string[]) {
   };
   if ((await gtaskHash(theirs)) === task.gtask_hash) return false;
 
-  const updates: Record<string, unknown> = {};
+  // In the v1 task shape first (the hash is over that shape), then as item columns.
+  const updates: Record<string, string> = {};
   if (g.title?.trim() && g.title.trim() !== task.title) updates.title = g.title.trim().slice(0, 500);
-  if (done && task.status !== "complete") {
-    updates.status = "complete";
-    updates.actual_end = task.actual_end ?? g.completed ?? new Date().toISOString();
-  }
+  if (done && task.status !== "complete") updates.status = "complete";
   if (!done && task.status === "complete") updates.status = "idle"; // reopened in Google
   // The day only when the task has no planned day of its own (then Google's day is its deadline).
   const due = g.due ? String(g.due).slice(0, 10) : "";
   if (!task.date && due !== (task.deadline || "")) updates.deadline = due;
   // From now on the app's version is what Google has (notes come from the app: description + link).
   const hash = await gtaskHash(gtaskFor({ ...task, ...updates }));
-  await db.from("tasks").update({ ...updates, gtask_hash: hash }).eq("id", task.id);
+  const row: Record<string, unknown> = {};
+  if ("title" in updates) row.title = updates.title;
+  if ("status" in updates) {
+    row.status = V2_STATUS[updates.status];
+    if (updates.status === "complete") row.done_at = item.done_at ?? g.completed ?? new Date().toISOString();
+  }
+  if ("deadline" in updates) row.due_on = updates.deadline || null;
+  if (Object.keys(row).length) {
+    const { error } = await db.from("items").update(row).eq("id", task.id);
+    if (error) throw error;
+  }
+  await setSourceHash(db, task.id, "google_tasks", hash);
   if ("status" in updates) calendarToo.push(task.id);
   return Object.keys(updates).length > 0;
 }

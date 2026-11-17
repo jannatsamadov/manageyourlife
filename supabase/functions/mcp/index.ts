@@ -8,6 +8,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 import { TOOLS, ToolError } from "./tools.ts";
 import { syncTasksIfConnected } from "../_shared/gsync.ts";
+import { scopeOf } from "../_shared/items.ts";
 
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void } | undefined;
 // Task changes also go to Google Calendar / Google Tasks when the user connected Google (T-69).
@@ -75,7 +76,7 @@ async function callTool(auth: Auth, name: string, args: unknown) {
   }
   const input = args && typeof args === "object" ? args : {};
   try {
-    const out = await tool.run(input, { db, userId: auth.user_id });
+    const out = await tool.run(input, { db, userId: auth.user_id, scope: await scopeOf(db, auth.user_id) });
     if (tool.scope === "write") await log(auth, tool.name, (out as any).id ?? (input as any).id, true);
     if (GOOGLE_SYNCED.has(tool.name)) {
       // After the reply; the client does not wait for Google.

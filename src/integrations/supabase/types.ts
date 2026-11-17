@@ -97,6 +97,53 @@ export type Database = {
         }
         Relationships: []
       }
+      fields: {
+        Row: {
+          created_at: string
+          id: string
+          item_types: string[] | null
+          key: string
+          kind: string
+          name: string
+          options: Json
+          position: number
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          item_types?: string[] | null
+          key: string
+          kind: string
+          name: string
+          options?: Json
+          position?: number
+          updated_at?: string
+          workspace_id?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          item_types?: string[] | null
+          key?: string
+          kind?: string
+          name?: string
+          options?: Json
+          position?: number
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "fields_workspace_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       google_connections: {
         Row: {
           calendar_id: string
@@ -205,6 +252,253 @@ export type Database = {
         }
         Relationships: []
       }
+      item_links: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          file_id: string | null
+          from_id: string
+          id: string
+          kind: string
+          to_id: string | null
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          file_id?: string | null
+          from_id: string
+          id?: string
+          kind: string
+          to_id?: string | null
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          file_id?: string | null
+          from_id?: string
+          id?: string
+          kind?: string
+          to_id?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "item_links_file_fkey"
+            columns: ["file_id"]
+            isOneToOne: false
+            referencedRelation: "vault_files"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "item_links_from_fkey"
+            columns: ["from_id", "workspace_id"]
+            isOneToOne: false
+            referencedRelation: "items"
+            referencedColumns: ["id", "workspace_id"]
+          },
+          {
+            foreignKeyName: "item_links_to_fkey"
+            columns: ["to_id", "workspace_id"]
+            isOneToOne: false
+            referencedRelation: "items"
+            referencedColumns: ["id", "workspace_id"]
+          },
+        ]
+      }
+      item_sources: {
+        Row: {
+          container: string | null
+          created_at: string
+          external_id: string
+          hash: string | null
+          item_id: string
+          meta: Json
+          source: string
+          synced_at: string | null
+          url: string | null
+          workspace_id: string
+        }
+        Insert: {
+          container?: string | null
+          created_at?: string
+          external_id: string
+          hash?: string | null
+          item_id: string
+          meta?: Json
+          source: string
+          synced_at?: string | null
+          url?: string | null
+          workspace_id: string
+        }
+        Update: {
+          container?: string | null
+          created_at?: string
+          external_id?: string
+          hash?: string | null
+          item_id?: string
+          meta?: Json
+          source?: string
+          synced_at?: string | null
+          url?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "item_sources_item_fkey"
+            columns: ["item_id", "workspace_id"]
+            isOneToOne: false
+            referencedRelation: "items"
+            referencedColumns: ["id", "workspace_id"]
+          },
+        ]
+      }
+      item_types: {
+        Row: {
+          parents: string[] | null
+          private: boolean
+          root_ok: boolean
+          type: string
+        }
+        Insert: {
+          parents?: string[] | null
+          private?: boolean
+          root_ok?: boolean
+          type: string
+        }
+        Update: {
+          parents?: string[] | null
+          private?: boolean
+          root_ok?: boolean
+          type?: string
+        }
+        Relationships: []
+      }
+      items: {
+        Row: {
+          archived_at: string | null
+          body: string
+          color: string | null
+          cost_planned: number | null
+          cost_spent: number | null
+          created_at: string
+          created_by: string | null
+          deleted_at: string | null
+          done_at: string | null
+          due_on: string | null
+          due_time: string | null
+          estimate_min: number | null
+          id: string
+          is_event: boolean
+          parent_id: string | null
+          planned_on: string | null
+          planned_time: string | null
+          position: number
+          priority: number | null
+          progress: number | null
+          props: Json
+          spent_min: number
+          start_on: string | null
+          status: string
+          target_count: number | null
+          title: string
+          type: string
+          updated_at: string
+          url: string | null
+          weight: number
+          workspace_id: string
+        }
+        Insert: {
+          archived_at?: string | null
+          body?: string
+          color?: string | null
+          cost_planned?: number | null
+          cost_spent?: number | null
+          created_at?: string
+          created_by?: string | null
+          deleted_at?: string | null
+          done_at?: string | null
+          due_on?: string | null
+          due_time?: string | null
+          estimate_min?: number | null
+          id?: string
+          is_event?: boolean
+          parent_id?: string | null
+          planned_on?: string | null
+          planned_time?: string | null
+          position?: number
+          priority?: number | null
+          progress?: number | null
+          props?: Json
+          spent_min?: number
+          start_on?: string | null
+          status?: string
+          target_count?: number | null
+          title: string
+          type: string
+          updated_at?: string
+          url?: string | null
+          weight?: number
+          workspace_id?: string
+        }
+        Update: {
+          archived_at?: string | null
+          body?: string
+          color?: string | null
+          cost_planned?: number | null
+          cost_spent?: number | null
+          created_at?: string
+          created_by?: string | null
+          deleted_at?: string | null
+          done_at?: string | null
+          due_on?: string | null
+          due_time?: string | null
+          estimate_min?: number | null
+          id?: string
+          is_event?: boolean
+          parent_id?: string | null
+          planned_on?: string | null
+          planned_time?: string | null
+          position?: number
+          priority?: number | null
+          progress?: number | null
+          props?: Json
+          spent_min?: number
+          start_on?: string | null
+          status?: string
+          target_count?: number | null
+          title?: string
+          type?: string
+          updated_at?: string
+          url?: string | null
+          weight?: number
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "items_parent_fkey"
+            columns: ["parent_id", "workspace_id"]
+            isOneToOne: false
+            referencedRelation: "items"
+            referencedColumns: ["id", "workspace_id"]
+          },
+          {
+            foreignKeyName: "items_type_fkey"
+            columns: ["type"]
+            isOneToOne: false
+            referencedRelation: "item_types"
+            referencedColumns: ["type"]
+          },
+          {
+            foreignKeyName: "items_workspace_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       money_balances: {
         Row: {
           amount: number
@@ -225,6 +519,41 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      money_details: {
+        Row: {
+          amount: number
+          ends_on: string | null
+          item_id: string
+          period: string | null
+          starts_on: string | null
+          workspace_id: string
+        }
+        Insert: {
+          amount: number
+          ends_on?: string | null
+          item_id: string
+          period?: string | null
+          starts_on?: string | null
+          workspace_id: string
+        }
+        Update: {
+          amount?: number
+          ends_on?: string | null
+          item_id?: string
+          period?: string | null
+          starts_on?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "money_details_item_fkey"
+            columns: ["item_id", "workspace_id"]
+            isOneToOne: false
+            referencedRelation: "items"
+            referencedColumns: ["id", "workspace_id"]
+          },
+        ]
       }
       money_items: {
         Row: {
@@ -751,6 +1080,50 @@ export type Database = {
         }
         Relationships: []
       }
+      time_logs: {
+        Row: {
+          created_at: string
+          ended_at: string | null
+          id: string
+          item_id: string
+          note: string
+          started_at: string
+          updated_at: string
+          user_id: string
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string
+          ended_at?: string | null
+          id?: string
+          item_id: string
+          note?: string
+          started_at: string
+          updated_at?: string
+          user_id?: string
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string
+          ended_at?: string | null
+          id?: string
+          item_id?: string
+          note?: string
+          started_at?: string
+          updated_at?: string
+          user_id?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "time_logs_item_fkey"
+            columns: ["item_id", "workspace_id"]
+            isOneToOne: false
+            referencedRelation: "items"
+            referencedColumns: ["id", "workspace_id"]
+          },
+        ]
+      }
       user_attributes: {
         Row: {
           attribute: string
@@ -874,6 +1247,106 @@ export type Database = {
         }
         Relationships: []
       }
+      views: {
+        Row: {
+          config: Json
+          created_at: string
+          id: string
+          layout: string
+          name: string
+          owner_id: string | null
+          page: string
+          position: number
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          config?: Json
+          created_at?: string
+          id?: string
+          layout: string
+          name: string
+          owner_id?: string | null
+          page: string
+          position?: number
+          updated_at?: string
+          workspace_id?: string
+        }
+        Update: {
+          config?: Json
+          created_at?: string
+          id?: string
+          layout?: string
+          name?: string
+          owner_id?: string | null
+          page?: string
+          position?: number
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "views_workspace_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      workspace_members: {
+        Row: {
+          created_at: string
+          role: string
+          user_id: string
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string
+          role?: string
+          user_id: string
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string
+          role?: string
+          user_id?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "workspace_members_workspace_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      workspaces: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          personal_of: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name: string
+          personal_of?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+          personal_of?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
@@ -896,10 +1369,14 @@ export type Database = {
           whole: boolean
         }[]
       }
+      my_workspaces: { Args: never; Returns: string[] }
+      my_writable_workspaces: { Args: never; Returns: string[] }
+      personal_workspace: { Args: never; Returns: string }
       redeem_telegram_link_code: {
         Args: { p_chat_id: number; p_code: string; p_username: string }
         Returns: string
       }
+      v2_copy_from_v1: { Args: never; Returns: Json }
     }
     Enums: {
       [_ in never]: never

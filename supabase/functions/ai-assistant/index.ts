@@ -162,22 +162,27 @@ serve(async (req) => {
     if (toolCalls && toolCalls.length > 0) {
       const results: string[] = [];
       let totalCreated = 0;
+      // New tasks go to the user's personal workspace (v2 items, P-70).
+      const { data: home, error: homeError } = await supabase.from("workspaces").select("id").eq("personal_of", user.id).single();
+      if (homeError) throw homeError;
+      const priorityOf = (p: unknown) => ({ urgent: 1, high: 2, medium: 3, low: 4 } as Record<string, number>)[String(p)] ?? 3;
+      const taskRow = (t: any) => ({
+        workspace_id: home.id,
+        type: "task",
+        created_by: user.id,
+        title: String(t.title ?? "").slice(0, 500),
+        body: t.description || "",
+        estimate_min: Number.isInteger(t.estimated_time) && t.estimated_time > 0 ? t.estimated_time : null,
+        due_on: /^\d{4}-\d{2}-\d{2}$/.test(t.deadline ?? "") ? t.deadline : null,
+        url: t.link || null,
+        priority: priorityOf(t.priority),
+      });
 
       for (const call of toolCalls) {
         const args = JSON.parse(call.function.arguments);
 
         if (call.function.name === "create_task") {
-          const { error } = await supabase.from("tasks").insert({
-            user_id: user.id,
-            title: args.title,
-            description: args.description || "",
-            estimated_time: args.estimated_time || null,
-            status: "idle",
-            date: null,
-            deadline: args.deadline || "",
-            link: args.link || "",
-            priority: args.priority || "medium",
-          });
+          const { error } = await supabase.from("items").insert(taskRow(args));
           if (error) {
             results.push(`Failed "${args.title}": ${error.message}`);
           } else {
@@ -189,17 +194,7 @@ serve(async (req) => {
         if (call.function.name === "create_tasks") {
           const taskList = args.tasks || [];
           for (const t of taskList) {
-            const { error } = await supabase.from("tasks").insert({
-              user_id: user.id,
-              title: t.title,
-              description: t.description || "",
-              estimated_time: t.estimated_time || null,
-              status: "idle",
-              date: null,
-              deadline: t.deadline || "",
-              link: t.link || "",
-              priority: t.priority || "medium",
-            });
+            const { error } = await supabase.from("items").insert(taskRow(t));
             if (error) {
               results.push(`Failed "${t.title}": ${error.message}`);
             } else {

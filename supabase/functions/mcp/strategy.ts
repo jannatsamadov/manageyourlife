@@ -1,18 +1,29 @@
-// Strategy tree for MCP (P-2): the same progress rules as the app (src/lib/strategy.ts) — keep them in step.
+// Strategy tree for MCP (P-2) on the v2 items (P-70): area / goal / mission / step items and the tasks inside them.
+// The same progress rules as the app (src/lib/strategy.ts) — keep them in step. The tools still speak the v1 node
+// shape (kind, description, open / done / dropped, start_date, due_date).
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2.45.4";
+import { type Scope, STRATEGY_TYPES, V1_STATUS } from "../_shared/items.ts";
 
-export const NODE_COLS = "id, parent_id, kind, title, description, status, weight, target_count, progress, start_date, due_date, position";
+export const ITEM_NODE_COLS = "id, workspace_id, parent_id, type, title, body, status, weight, target_count, progress, start_on, due_on, position";
 export const CHILD_KIND: Record<string, string> = { area: "goal", goal: "mission", mission: "step", step: "step" };
 
 type Row = {
-  id: string; parent_id: string | null; kind: string; title: string; description: string; status: string;
+  id: string; workspace_id: string; parent_id: string | null; kind: string; title: string; description: string; status: string;
   weight: number; target_count: number | null; progress: number | null; start_date: string | null; due_date: string | null; position: number;
 };
-type LinkedTask = { id: string; title: string; status: string; node_id: string; date: string | null };
+type LinkedTask = { id: string; title: string; status: string; date: string | null };
 export type Node = Row & { children: Node[]; tasks: LinkedTask[]; value: number; slots: number };
 
+// An item as a v1 strategy node.
+// deno-lint-ignore no-explicit-any
+export const nodeOut = (i: any): Row => ({
+  id: i.id, workspace_id: i.workspace_id, parent_id: i.parent_id, kind: i.type, title: i.title, description: i.body,
+  status: i.status === "done" || i.status === "dropped" ? i.status : "open", weight: Number(i.weight), target_count: i.target_count,
+  progress: i.progress === null ? null : Number(i.progress), start_date: i.start_on, due_date: i.due_on, position: i.position,
+});
+
 // done → 1; "at least N" → done children counted out of N; children → weighted average (dropped ones out);
-// leaf → share of its linked tasks done (abandoned ignored); else the value set by hand.
+// leaf → share of its tasks done (abandoned ignored); else the value set by hand.
 function compute(t: Node) {
   t.children.forEach(compute);
   const live = t.children.filter((c) => c.status !== "dropped");
@@ -29,21 +40,24 @@ function compute(t: Node) {
   t.value = Math.min(1, Math.max(0, value));
 }
 
-export async function loadTree(db: SupabaseClient, userId: string) {
-  const nodes = await db.from("strategy_nodes").select(NODE_COLS).eq("user_id", userId).order("position").order("created_at");
+export async function loadTree(db: SupabaseClient, scope: Scope) {
+  const nodes = await db.from("items").select(ITEM_NODE_COLS).in("workspace_id", scope.workspaces).in("type", STRATEGY_TYPES)
+    .is("deleted_at", null).order("position").order("created_at");
   if (nodes.error) throw nodes.error;
-  const tasks = await db.from("tasks").select("id, title, status, node_id, date")
-    .eq("user_id", userId).is("deleted_at", null).not("node_id", "is", null).neq("status", "abandoned");
+  const tasks = await db.from("items").select("id, title, status, parent_id, planned_on").in("workspace_id", scope.workspaces)
+    .eq("type", "task").is("deleted_at", null).not("parent_id", "is", null).neq("status", "dropped");
   if (tasks.error) throw tasks.error;
   const byId = new Map<string, Node>();
-  for (const n of nodes.data as Row[]) byId.set(n.id, { ...n, children: [], tasks: [], value: 0, slots: 0 });
+  for (const n of nodes.data) byId.set(n.id, { ...nodeOut(n), children: [], tasks: [], value: 0, slots: 0 });
   const roots: Node[] = [];
   for (const n of byId.values()) {
     const parent = n.parent_id ? byId.get(n.parent_id) : undefined;
     if (parent) parent.children.push(n);
     else roots.push(n);
   }
-  for (const t of tasks.data as LinkedTask[]) byId.get(t.node_id)?.tasks.push(t);
+  for (const t of tasks.data) {
+    byId.get(t.parent_id)?.tasks.push({ id: t.id, title: t.title, status: V1_STATUS[t.status] ?? t.status, date: t.planned_on });
+  }
   roots.forEach(compute);
   return { roots, byId };
 }

@@ -2,6 +2,7 @@
 //   calendar     → scheduled tasks as events in the chosen calendar (timed or all-day); create / update / delete
 //   Google Tasks → every open task as a Google task (title, notes, day, done); create / update / delete
 import { GoogleError, ReconnectNeeded, db, google, hex, sha256 } from "./google.ts";
+import { type ItemRow, TASK_COLS, scopeOf, setSource, setSourceHash, sourceOf, v1Task } from "./items.ts";
 
 export const CAL = "https://www.googleapis.com/calendar/v3";
 export const TASKS = "https://tasks.googleapis.com/tasks/v1";
@@ -14,7 +15,7 @@ const idsFrom = (taskIds: unknown) =>
 // The event of a task's planned day. An event (P-60) or a time block: at its time, in the calendar's time zone,
 // as long as its minutes (60 if not set); an event blocks the time, a task does not. A whole-day task: an all-day
 // event (end date is exclusive in Google Calendar).
-function eventFor(t: any, timeZone: string) {
+export function eventFor(t: any, timeZone: string) {
   const details = [t.description?.trim(), t.link || null, t.estimated_time && !t.is_event ? `Estimate: ${t.estimated_time} min` : null].filter(Boolean);
   const summary = (t.status === "complete" && !t.is_event ? "✓ " : "") + t.title;
   const description = [...details, "— ManageYourLife"].join("\n\n");
@@ -31,6 +32,28 @@ function eventFor(t: any, timeZone: string) {
   return { summary, description, start: { date: t.date }, end: { date: end.toISOString().slice(0, 10) }, transparency: "transparent", extendedProperties };
 }
 
+// The user's tasks to look at for one Google side: the given ids, else the ones `wanted` picks plus every task
+// already linked there (it may have to be removed). Tasks of the personal workspace (the Google account is the user's).
+// deno-lint-ignore no-explicit-any
+async function syncedTasks(userId: string, ids: string[] | undefined, source: string, wanted: (q: any) => any): Promise<ItemRow[]> {
+  const { home } = await scopeOf(db, userId);
+  const base = () => db.from("items").select(TASK_COLS).eq("workspace_id", home).eq("type", "task");
+  if (ids) {
+    const { data, error } = await base().in("id", ids);
+    if (error) throw error;
+    return data as unknown as ItemRow[];
+  }
+  const picked = await wanted(base());
+  if (picked.error) throw picked.error;
+  const linked = await db.from("item_sources").select(`item_id, items!inner(${TASK_COLS})`)
+    .eq("workspace_id", home).eq("source", source).eq("items.type", "task");
+  if (linked.error) throw linked.error;
+  const all = new Map<string, ItemRow>();
+  for (const i of picked.data as ItemRow[]) all.set(i.id, i);
+  for (const l of linked.data as unknown as { items: ItemRow }[]) all.set(l.items.id, l.items);
+  return [...all.values()];
+}
+
 export async function syncCalendar(userId: string, taskIds?: unknown) {
   const { data: conn, error: connError } = await db.from("google_connections").select("calendar_id").eq("user_id", userId).maybeSingle();
   if (connError) throw connError;
@@ -38,13 +61,11 @@ export async function syncCalendar(userId: string, taskIds?: unknown) {
   const calendarId: string = conn.calendar_id;
   const eventsUrl = (cal: string, id?: string) => `${CAL}/calendars/${encodeURIComponent(cal)}/events${id ? `/${encodeURIComponent(id)}` : ""}`;
 
-  const ids = idsFrom(taskIds);
-  let q = db.from("tasks")
-    .select("id, title, description, status, date, link, estimated_time, is_event, start_time, deleted_at, gcal_event_id, gcal_calendar_id, gcal_hash")
-    .eq("user_id", userId);
-  q = ids ? q.in("id", ids) : q.or("date.not.is.null,gcal_event_id.not.is.null");
-  const { data: tasks, error } = await q;
-  if (error) throw error;
+  const tasks = (await syncedTasks(userId, idsFrom(taskIds), "google_calendar", (q) => q.not("planned_on", "is", null)))
+    .map((i) => {
+      const ev = sourceOf(i, "google_calendar");
+      return { ...v1Task(i), gcal_event_id: ev?.external_id ?? null, gcal_calendar_id: ev?.container ?? null, gcal_hash: ev?.hash ?? null };
+    });
 
   const counts = { created: 0, updated: 0, removed: 0, unchanged: 0, failed: 0 };
   const errors: string[] = [];
@@ -64,7 +85,7 @@ export async function syncCalendar(userId: string, taskIds?: unknown) {
         await google(userId, eventsUrl(t.gcal_calendar_id ?? calendarId, t.gcal_event_id), { method: "DELETE" }).catch((e) => {
           if (!gone(e)) throw e;
         });
-        await db.from("tasks").update({ gcal_event_id: null, gcal_calendar_id: null, gcal_hash: null }).eq("id", t.id);
+        await setSource(db, t.id, "google_calendar", null);
         t.gcal_event_id = null;
         if (!wanted) counts.removed++;
       }
@@ -89,7 +110,7 @@ export async function syncCalendar(userId: string, taskIds?: unknown) {
         event = await google(userId, eventsUrl(calendarId), { method: "POST", body });
         counts.created++;
       }
-      await db.from("tasks").update({ gcal_event_id: event.id, gcal_calendar_id: calendarId, gcal_hash: hash }).eq("id", t.id);
+      await setSource(db, t.id, "google_calendar", { external_id: event.id, container: calendarId, hash });
     } catch (e) {
       if (e instanceof ReconnectNeeded) throw e;
       counts.failed++;
@@ -122,13 +143,12 @@ export function gtaskFor(t: { title: string; description?: string | null; link?:
 export const gtaskHash = async (body: unknown) => hex(await sha256(JSON.stringify(body)));
 
 export async function syncGoogleTasks(userId: string, taskIds?: unknown) {
-  const ids = idsFrom(taskIds);
-  let q = db.from("tasks")
-    .select("id, title, description, link, status, date, deadline, is_event, deleted_at, gtask_id, gtask_list_id, gtask_hash")
-    .eq("user_id", userId);
-  q = ids ? q.in("id", ids) : q.or("gtask_id.not.is.null,and(deleted_at.is.null,status.in.(idle,active),is_event.is.false)");
-  const { data: tasks, error } = await q;
-  if (error) throw error;
+  const tasks = (await syncedTasks(userId, idsFrom(taskIds), "google_tasks",
+    (q) => q.is("deleted_at", null).in("status", ["todo", "doing", "waiting", "someday"]).eq("is_event", false)))
+    .map((i) => {
+      const gt = sourceOf(i, "google_tasks");
+      return { ...v1Task(i), gtask_id: gt?.external_id ?? null, gtask_list_id: gt?.container ?? null, gtask_hash: gt?.hash ?? null };
+    });
 
   const counts = { created: 0, updated: 0, removed: 0, unchanged: 0, failed: 0 };
   for (const t of tasks) {
@@ -140,7 +160,7 @@ export async function syncGoogleTasks(userId: string, taskIds?: unknown) {
           await google(userId, tasksUrl(t.gtask_list_id ?? DEFAULT_LIST, t.gtask_id), { method: "DELETE" }).catch((e) => {
             if (!gone(e)) throw e;
           });
-          await db.from("tasks").update({ gtask_id: null, gtask_list_id: null, gtask_hash: null }).eq("id", t.id);
+          await setSource(db, t.id, "google_tasks", null);
           counts.removed++;
         }
         continue;
@@ -157,11 +177,11 @@ export async function syncGoogleTasks(userId: string, taskIds?: unknown) {
           return false;
         });
         // Deleted in Google meanwhile: it stays deleted there; the app task stays as it is.
-        await db.from("tasks").update({ gtask_hash: sent ? hash : "deleted" }).eq("id", t.id);
+        await setSourceHash(db, t.id, "google_tasks", sent ? hash : "deleted");
         if (sent) counts.updated++;
       } else {
         const g = await google(userId, tasksUrl(DEFAULT_LIST), { method: "POST", body });
-        await db.from("tasks").update({ gtask_id: g.id, gtask_list_id: DEFAULT_LIST, gtask_hash: hash }).eq("id", t.id);
+        await setSource(db, t.id, "google_tasks", { external_id: g.id, container: DEFAULT_LIST, hash });
         counts.created++;
       }
     } catch (e) {

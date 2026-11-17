@@ -1,13 +1,15 @@
-// MCP tools (P-18). Every query is filtered by the token owner's user_id (the client is the service role).
+// MCP tools (P-18). The client is the service role: every query is limited to the token owner's workspaces (v2 items,
+// P-70) or their own vault. Tool names and fields stay as in v1, so connected clients keep working.
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2.45.4";
-import { CHILD_KIND, NODE_COLS, loadTree, present } from "./strategy.ts";
+import { CHILD_KIND, ITEM_NODE_COLS, loadTree, nodeOut, present } from "./strategy.ts";
 import { collectIdeas } from "../_shared/ideas.ts";
+import { PRIORITY_NAME, PRIORITY_NUM, type Scope, STRATEGY_TYPES, V1_STATUS, V2_STATUS } from "../_shared/items.ts";
 import {
-  addItem, CAPTURE_SECTIONS, captureItem, editNote, INBOX, inboxNotePath, localTime, moveFile, noteById, readNote, safeName, syncTodos, userTimeZone,
+  addItem, CAPTURE_SECTIONS, captureItem, editNote, INBOX, inboxNotePath, localTime, moveFile, noteById, readNote, safeName, userTimeZone,
   VaultError, writeNote,
 } from "../_shared/vault.ts";
 
-export type Ctx = { db: SupabaseClient; userId: string };
+export type Ctx = { db: SupabaseClient; userId: string; scope: Scope };
 
 export type Tool = {
   name: string;
@@ -44,18 +46,51 @@ const checkWrite = <T>({ data, error }: { data: T; error: { code?: string; messa
   return data;
 };
 
-const STATUSES = ["idle", "active", "complete", "abandoned"];
-const PRIORITIES = ["high", "medium", "low"];
+const STATUSES = ["idle", "active", "waiting", "someday", "complete", "abandoned"];
+const PRIORITIES = ["urgent", "high", "medium", "low"];
 const KINDS = ["idea", "question", "todo", "resource"];
-const TASK_COLS = "id, title, description, status, date, start_time, is_event, deadline, deadline_time, priority, estimated_time, link, node_id, created_at";
+const TASK_COLS =
+  "id, workspace_id, title, body, status, parent_id, planned_on, planned_time, is_event, due_on, due_time, priority, estimate_min, " +
+  "spent_min, url, created_at";
 const isTime = (v: unknown) => typeof v === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(v);
 const NODE_STATUSES = ["open", "done", "dropped"];
 const DATE = { type: "string", description: "YYYY-MM-DD" };
 const ID = { type: "string", description: "uuid" };
 
-// estimated_time is minutes; the API calls it estimated_minutes.
-const taskOut = ({ estimated_time, ...t }: any) => ({ ...t, estimated_minutes: estimated_time });
+// A task item in the v1 field names of the tools; node_id = the strategy node it sits in, parent_task_id = the task
+// it is a step of.
+const taskOut = (i: any) => ({
+  id: i.id,
+  title: i.title,
+  description: i.body,
+  status: V1_STATUS[i.status] ?? i.status,
+  date: i.planned_on,
+  start_time: i.planned_time,
+  is_event: i.is_event,
+  deadline: i.due_on ?? "",
+  deadline_time: i.due_time,
+  priority: i.priority ? PRIORITY_NAME[i.priority] : null,
+  estimated_minutes: i.estimate_min,
+  spent_minutes: i.spent_min || undefined,
+  link: i.url ?? "",
+  node_id: i.parent && STRATEGY_TYPES.includes(i.parent.type) ? i.parent.id : null,
+  parent_task_id: i.parent?.type === "task" ? i.parent.id : undefined,
+  created_at: i.created_at,
+});
+// The parent of each task (PostgREST does not embed a table in itself without a computed relationship).
+async function tasksOut({ db }: Ctx, rows: any[]) {
+  const ids = [...new Set(rows.map((r) => r.parent_id).filter(Boolean))];
+  const parents = ids.length ? check(await db.from("items").select("id, type, title").in("id", ids)) as any[] : [];
+  const byId = new Map(parents.map((p) => [p.id, p]));
+  return rows.map((r) => taskOut({ ...r, parent: r.parent_id ? byId.get(r.parent_id) ?? null : null }));
+}
+const taskOutOne = async (ctx: Ctx, row: any) => (await tasksOut(ctx, [row]))[0];
+const nodePublic = (i: any) => {
+  const { workspace_id: _, ...n } = nodeOut(i);
+  return n;
+};
 
+// Tool fields (v1 names) → item columns.
 function taskFields(a: any, creating: boolean) {
   const row: Record<string, unknown> = {};
   if (creating || a.title !== undefined) {
@@ -64,28 +99,28 @@ function taskFields(a: any, creating: boolean) {
   }
   if (a.description !== undefined) {
     need(typeof a.description === "string" && a.description.length <= 20000, "description: text up to 20000 characters");
-    row.description = a.description;
+    row.body = a.description;
   }
   if (a.status !== undefined) {
     need(STATUSES.includes(a.status), `status: one of ${STATUSES.join(", ")}`);
-    row.status = a.status;
+    row.status = V2_STATUS[a.status];
   }
   if (a.date !== undefined) {
     need(a.date === null || isDate(a.date), "date: YYYY-MM-DD or null (unscheduled)");
-    row.date = a.date;
+    row.planned_on = a.date;
   }
   if (a.deadline !== undefined) {
     need(a.deadline === null || a.deadline === "" || isDate(a.deadline), "deadline: YYYY-MM-DD, or null to clear");
-    row.deadline = a.deadline ?? "";
+    row.due_on = a.deadline || null;
   }
   // When it happens (P-60): times go with a date / a deadline; the database drops them when those are cleared.
   if (a.start_time !== undefined) {
     need(a.start_time === null || isTime(a.start_time), "start_time: HH:MM (24 h) or null");
-    row.start_time = a.start_time;
+    row.planned_time = a.start_time;
   }
   if (a.deadline_time !== undefined) {
     need(a.deadline_time === null || isTime(a.deadline_time), "deadline_time: HH:MM (24 h) or null");
-    row.deadline_time = a.deadline_time;
+    row.due_time = a.deadline_time;
   }
   if (a.is_event !== undefined) {
     need(typeof a.is_event === "boolean", "is_event: true or false");
@@ -94,19 +129,19 @@ function taskFields(a: any, creating: boolean) {
   }
   if (a.estimated_minutes !== undefined) {
     need(a.estimated_minutes === null || (Number.isInteger(a.estimated_minutes) && a.estimated_minutes > 0 && a.estimated_minutes <= 100000), "estimated_minutes: positive whole number or null");
-    row.estimated_time = a.estimated_minutes;
+    row.estimate_min = a.estimated_minutes;
   }
   if (a.priority !== undefined) {
-    need(PRIORITIES.includes(a.priority), `priority: one of ${PRIORITIES.join(", ")}`);
-    row.priority = a.priority;
+    need(a.priority === null || PRIORITIES.includes(a.priority), `priority: one of ${PRIORITIES.join(", ")}, or null`);
+    row.priority = a.priority === null ? null : PRIORITY_NUM[a.priority];
   }
   if (a.link !== undefined) {
     need(a.link === null || (typeof a.link === "string" && a.link.length <= 2000), "link: URL or null");
-    row.link = a.link ?? "";
+    row.url = a.link?.trim() || null;
   }
   if (a.node_id !== undefined) {
-    need(a.node_id === null || isUuid(a.node_id), "node_id: uuid of a goal / mission / step, or null to unlink");
-    row.node_id = a.node_id;
+    need(a.node_id === null || isUuid(a.node_id), "node_id: uuid of an area / goal / mission / step, or null to unlink");
+    row.parent_id = a.node_id;
   }
   return row;
 }
@@ -114,7 +149,7 @@ function taskFields(a: any, creating: boolean) {
 const TASK_INPUT = {
   title: { type: "string" },
   description: { type: "string" },
-  status: { type: "string", enum: STATUSES },
+  status: { type: "string", enum: STATUSES, description: "waiting = waiting for someone / something; someday = maybe later" },
   date: { ...DATE, description: "Day the task is planned for, or the day of an event (YYYY-MM-DD); null = unscheduled" },
   start_time: { type: ["string", "null"], description: "HH:MM (24 h, user's local time): an event's start, or the time block of a planned task; needs date" },
   is_event: { type: "boolean", description: "true = happens at a fixed time (meeting, exam, conference, call): needs date + start_time, estimated_minutes = its length; synced to Google Calendar as a timed event" },
@@ -126,16 +161,21 @@ const TASK_INPUT = {
   node_id: { type: ["string", "null"], description: "Strategy goal / mission / step this task serves (from strategy_tree); null unlinks" },
 };
 
-async function ownTask(db: SupabaseClient, userId: string, id: unknown) {
+// Items of the caller's workspaces only.
+const tasksOf = ({ db, scope }: Ctx) =>
+  db.from("items").select(TASK_COLS).in("workspace_id", scope.workspaces).eq("type", "task").is("deleted_at", null);
+
+async function ownTask(ctx: Ctx, id: unknown) {
   need(isUuid(id), "task id: uuid");
-  const task = check(await db.from("tasks").select(TASK_COLS).eq("user_id", userId).eq("id", id).is("deleted_at", null).maybeSingle());
+  const task = check(await tasksOf(ctx).eq("id", id).maybeSingle());
   need(task, "task not found");
   return task as any;
 }
 
-async function ownNode(db: SupabaseClient, userId: string, id: unknown) {
+async function ownNode({ db, scope }: Ctx, id: unknown) {
   need(isUuid(id), "strategy node id: uuid");
-  const node = check(await db.from("strategy_nodes").select(NODE_COLS).eq("user_id", userId).eq("id", id).maybeSingle());
+  const node = check(await db.from("items").select(ITEM_NODE_COLS).in("workspace_id", scope.workspaces).in("type", STRATEGY_TYPES)
+    .is("deleted_at", null).eq("id", id).maybeSingle());
   need(node, "strategy node not found");
   return node as any;
 }
@@ -176,16 +216,17 @@ export const TOOLS: Tool[] = [
     scope: "read",
     inputSchema: { type: "object", properties: { date: { ...DATE, description: "The user's local date; default: today in UTC" } } },
     annotations: READ,
-    run: async ({ date }, { db, userId }) => {
+    run: async ({ date }, ctx) => {
+      const { db, userId } = ctx;
       const day = isDate(date) ? date : new Date().toISOString().slice(0, 10);
-      const planned = check(await db.from("tasks").select(TASK_COLS).eq("user_id", userId).is("deleted_at", null)
-        .eq("date", day).neq("status", "abandoned").order("start_time", { ascending: true, nullsFirst: false }).order("position"));
-      const overdue = check(await db.from("tasks").select(TASK_COLS).eq("user_id", userId).is("deleted_at", null)
-        .neq("deadline", "").lt("deadline", day).not("status", "in", "(complete,abandoned)").order("deadline"));
+      const planned = check(await tasksOf(ctx)
+        .eq("planned_on", day).neq("status", "dropped").order("planned_time", { ascending: true, nullsFirst: false }).order("position"));
+      const overdue = check(await tasksOf(ctx)
+        .not("due_on", "is", null).lt("due_on", day).not("status", "in", "(done,dropped)").order("due_on"));
       const { count, error } = await db.from("vault_files").select("id", { count: "exact", head: true }).eq("user_id", userId)
         .is("trashed_at", null).like("path", `${INBOX}/%`).ilike("path", "%.md");
       if (error) throw error;
-      return { date: day, planned: (planned as any[]).map(taskOut), overdue: (overdue as any[]).map(taskOut), inbox_notes: count ?? 0 };
+      return { date: day, planned: await tasksOut(ctx, planned as any[]), overdue: await tasksOut(ctx, overdue as any[]), inbox_notes: count ?? 0 };
     },
   },
   {
@@ -200,26 +241,26 @@ export const TOOLS: Tool[] = [
         date_from: { ...DATE, description: "Planned on or after (YYYY-MM-DD)" },
         date_to: { ...DATE, description: "Planned on or before (YYYY-MM-DD)" },
         unscheduled: { type: "boolean", description: "Only tasks without a planned day" },
-        node_id: { ...ID, description: "Only tasks serving this strategy node" },
+        node_id: { ...ID, description: "Only tasks directly inside this strategy node (or this task: its steps)" },
         search: { type: "string", description: "Text in title or description" },
         limit: { type: "integer", minimum: 1, maximum: 200, default: 50 },
       },
     },
     annotations: READ,
-    run: async (a, { db, userId }) => {
-      let q = db.from("tasks").select(TASK_COLS).eq("user_id", userId).is("deleted_at", null);
+    run: async (a, ctx) => {
+      let q = tasksOf(ctx);
       if (a.status !== undefined) {
         need(STATUSES.includes(a.status), `status: one of ${STATUSES.join(", ")}`);
-        q = q.eq("status", a.status);
-      } else q = q.neq("status", "abandoned");
-      if (a.date_from !== undefined) { need(isDate(a.date_from), "date_from: YYYY-MM-DD"); q = q.gte("date", a.date_from); }
-      if (a.date_to !== undefined) { need(isDate(a.date_to), "date_to: YYYY-MM-DD"); q = q.lte("date", a.date_to); }
-      if (a.unscheduled) q = q.is("date", null);
-      if (a.node_id !== undefined) { need(isUuid(a.node_id), "node_id: uuid"); q = q.eq("node_id", a.node_id); }
+        q = q.eq("status", V2_STATUS[a.status]);
+      } else q = q.neq("status", "dropped");
+      if (a.date_from !== undefined) { need(isDate(a.date_from), "date_from: YYYY-MM-DD"); q = q.gte("planned_on", a.date_from); }
+      if (a.date_to !== undefined) { need(isDate(a.date_to), "date_to: YYYY-MM-DD"); q = q.lte("planned_on", a.date_to); }
+      if (a.unscheduled) q = q.is("planned_on", null);
+      if (a.node_id !== undefined) { need(isUuid(a.node_id), "node_id: uuid"); q = q.eq("parent_id", a.node_id); }
       const term = searchTerm(a.search);
-      if (term) q = q.or(`title.ilike.*${term}*,description.ilike.*${term}*`);
-      const rows = check(await q.order("date", { ascending: true, nullsFirst: false }).order("position").limit(limitOf(a.limit, 50, 200)));
-      return { tasks: (rows as any[]).map(taskOut) };
+      if (term) q = q.or(`title.ilike.*${term}*,body.ilike.*${term}*`);
+      const rows = check(await q.order("planned_on", { ascending: true, nullsFirst: false }).order("position").limit(limitOf(a.limit, 50, 200)));
+      return { tasks: await tasksOut(ctx, rows as any[]) };
     },
   },
   {
@@ -229,12 +270,15 @@ export const TOOLS: Tool[] = [
     scope: "read",
     inputSchema: { type: "object", properties: { id: ID }, required: ["id"] },
     annotations: READ,
-    run: async ({ id }, { db, userId }) => {
-      const task = await ownTask(db, userId, id);
-      const subtasks = check(await db.from("subtasks").select("id, title, completed, position").eq("user_id", userId).eq("parent_task_id", id).order("position"));
-      const links = check(await db.from("note_task_links").select("vault_files(id, title, path, trashed_at)").eq("user_id", userId).eq("task_id", id));
+    run: async ({ id }, ctx) => {
+      const { db } = ctx;
+      const task = await ownTask(ctx, id);
+      const steps = check(await db.from("items").select("id, title, status, position").eq("parent_id", task.id).eq("type", "task")
+        .is("deleted_at", null).order("position")) as any[];
+      const subtasks = steps.map(({ status, ...s }) => ({ ...s, completed: status === "done" }));
+      const links = check(await db.from("item_links").select("vault_files(id, title, path, trashed_at)").eq("from_id", task.id).eq("kind", "note"));
       const notes = (links as any[]).map((l) => l.vault_files).filter((n) => n && !n.trashed_at).map(({ trashed_at: _, ...n }) => n);
-      return { ...taskOut(task), subtasks, notes };
+      return { ...(await taskOutOne(ctx, task)), subtasks, notes };
     },
   },
   {
@@ -244,10 +288,11 @@ export const TOOLS: Tool[] = [
     scope: "write",
     inputSchema: { type: "object", properties: TASK_INPUT, required: ["title"] },
     annotations: WRITE,
-    run: async (a, { db, userId }) => {
-      const row = { status: "idle", priority: "medium", ...taskFields(a, true), user_id: userId };
-      if (row.node_id) await ownNode(db, userId, row.node_id);
-      return taskOut(checkWrite(await db.from("tasks").insert(row).select(TASK_COLS).single()));
+    run: async (a, ctx) => {
+      const { db, userId, scope } = ctx;
+      const row: Record<string, unknown> = { priority: 3, ...taskFields(a, true), type: "task", workspace_id: scope.home, created_by: userId };
+      if (row.parent_id) row.workspace_id = (await ownNode(ctx, row.parent_id)).workspace_id;
+      return taskOutOne(ctx, checkWrite(await db.from("items").insert(row).select(TASK_COLS).single()));
     },
   },
   {
@@ -257,12 +302,13 @@ export const TOOLS: Tool[] = [
     scope: "write",
     inputSchema: { type: "object", properties: { id: ID, ...TASK_INPUT }, required: ["id"] },
     annotations: { ...WRITE, idempotentHint: true },
-    run: async ({ id, ...a }, { db, userId }) => {
-      await ownTask(db, userId, id);
+    run: async ({ id, ...a }, ctx) => {
+      const { db } = ctx;
+      const task = await ownTask(ctx, id);
       const row = taskFields(a, false);
       need(Object.keys(row).length, "nothing to change");
-      if (row.node_id) await ownNode(db, userId, row.node_id);
-      return taskOut(checkWrite(await db.from("tasks").update(row).eq("user_id", userId).eq("id", id).select(TASK_COLS).single()));
+      if (row.parent_id) need((await ownNode(ctx, row.parent_id)).workspace_id === task.workspace_id, "that node is in another workspace");
+      return taskOutOne(ctx, checkWrite(await db.from("items").update(row).eq("id", task.id).select(TASK_COLS).single()));
     },
   },
   {
@@ -272,9 +318,9 @@ export const TOOLS: Tool[] = [
     scope: "write",
     inputSchema: { type: "object", properties: { id: ID }, required: ["id"] },
     annotations: { ...WRITE, destructiveHint: true, idempotentHint: true },
-    run: async ({ id }, { db, userId }) => {
-      const task = await ownTask(db, userId, id);
-      check(await db.from("tasks").update({ deleted_at: new Date().toISOString() }).eq("user_id", userId).eq("id", id));
+    run: async ({ id }, ctx) => {
+      const task = await ownTask(ctx, id);
+      check(await ctx.db.from("items").update({ deleted_at: new Date().toISOString() }).eq("id", task.id));
       return { id, title: task.title, trashed: true };
     },
   },
@@ -285,12 +331,15 @@ export const TOOLS: Tool[] = [
     scope: "write",
     inputSchema: { type: "object", properties: { task_id: ID, title: { type: "string" } }, required: ["task_id", "title"] },
     annotations: WRITE,
-    run: async ({ task_id, title }, { db, userId }) => {
-      await ownTask(db, userId, task_id);
+    run: async ({ task_id, title }, ctx) => {
+      const { db, userId } = ctx;
+      const task = await ownTask(ctx, task_id);
       need(isText(title, 500), "title: 1–500 characters");
-      const { count } = await db.from("subtasks").select("id", { count: "exact", head: true }).eq("user_id", userId).eq("parent_task_id", task_id);
-      return check(await db.from("subtasks").insert({ user_id: userId, parent_task_id: task_id, title: title.trim(), position: count ?? 0 })
-        .select("id, title, completed, position").single()) as Record<string, unknown>;
+      const { count } = await db.from("items").select("id", { count: "exact", head: true }).eq("parent_id", task.id).eq("type", "task");
+      const step = check(await db.from("items").insert({
+        workspace_id: task.workspace_id, type: "task", parent_id: task.id, title: title.trim(), position: count ?? 0, created_by: userId,
+      }).select("id, title, status, position").single()) as any;
+      return { id: step.id, title: step.title, completed: false, position: step.position };
     },
   },
   {
@@ -300,15 +349,16 @@ export const TOOLS: Tool[] = [
     scope: "write",
     inputSchema: { type: "object", properties: { id: ID, completed: { type: "boolean" }, title: { type: "string" } }, required: ["id"] },
     annotations: { ...WRITE, idempotentHint: true },
-    run: async ({ id, completed, title }, { db, userId }) => {
+    run: async ({ id, completed, title }, ctx) => {
       need(isUuid(id), "id: uuid");
       const row: Record<string, unknown> = {};
-      if (completed !== undefined) { need(typeof completed === "boolean", "completed: true or false"); row.completed = completed; }
+      if (completed !== undefined) { need(typeof completed === "boolean", "completed: true or false"); row.status = completed ? "done" : "todo"; }
       if (title !== undefined) { need(isText(title, 500), "title: 1–500 characters"); row.title = title.trim(); }
       need(Object.keys(row).length, "nothing to change");
-      const sub = check(await db.from("subtasks").update(row).eq("user_id", userId).eq("id", id).select("id, title, completed, position").maybeSingle());
+      const sub = check(await ctx.db.from("items").update(row).in("workspace_id", ctx.scope.workspaces).eq("type", "task").eq("id", id)
+        .select("id, title, status, position").maybeSingle()) as any;
       need(sub, "subtask not found");
-      return sub as Record<string, unknown>;
+      return { id: sub.id, title: sub.title, completed: sub.status === "done", position: sub.position };
     },
   },
   {
@@ -367,10 +417,14 @@ export const TOOLS: Tool[] = [
     scope: "read",
     inputSchema: { type: "object", properties: { id: ID }, required: ["id"] },
     annotations: READ,
-    run: async ({ id }, { db, userId }) => {
+    run: async ({ id }, { db, userId, scope }) => {
       const note = await ownNote(db, userId, id);
-      const links = check(await db.from("note_task_links").select("tasks(id, title, status)").eq("user_id", userId).eq("note_id", id));
-      return { ...note, tasks: (links as any[]).map((l) => l.tasks).filter(Boolean) };
+      const links = check(await db.from("item_links").select("items!item_links_from_fkey(id, type, title, status, deleted_at, item_types(private))")
+        .in("workspace_id", scope.workspaces).eq("file_id", note.id).eq("kind", "note")) as any[];
+      // Private types (money) never reach MCP.
+      const tasks = links.map((l) => l.items).filter((i) => i && !i.deleted_at && !i.item_types?.private)
+        .map((i) => ({ id: i.id, title: i.title, status: i.type === "task" ? V1_STATUS[i.status] : i.status, ...(i.type === "task" ? {} : { type: i.type }) }));
+      return { ...note, tasks };
     },
   },
   {
@@ -438,11 +492,13 @@ export const TOOLS: Tool[] = [
     scope: "write",
     inputSchema: { type: "object", properties: { note_id: ID, task_id: ID }, required: ["note_id", "task_id"] },
     annotations: { ...WRITE, idempotentHint: true },
-    run: async ({ note_id, task_id }, { db, userId }) => {
+    run: async ({ note_id, task_id }, ctx) => {
+      const { db, userId } = ctx;
       const note = await ownNote(db, userId, note_id);
-      await ownTask(db, userId, task_id);
-      check(await db.from("note_task_links").upsert({ user_id: userId, note_id, task_id }, { onConflict: "note_id,task_id", ignoreDuplicates: true }));
-      await syncTodos(db, userId, note.id, note.content); // the note's "- [ ]" lines become the task's subtasks
+      const task = await ownTask(ctx, task_id);
+      // The note's "- [ ]" lines stay in the note (no copies; v2 phase 4 makes them items of their own).
+      const { error } = await db.from("item_links").insert({ from_id: task.id, file_id: note.id, kind: "note", created_by: userId });
+      if (error && error.code !== "23505") checkWrite({ data: null, error }); // 23505: linked already
       return { note_id, task_id, linked: true };
     },
   },
@@ -506,8 +562,8 @@ export const TOOLS: Tool[] = [
       properties: { id: { ...ID, description: "Start at this node (default: the whole tree)" }, depth: { type: "integer", minimum: 1, maximum: 10, default: 10 } },
     },
     annotations: READ,
-    run: async ({ id, depth }, { db, userId }) => {
-      const { roots, byId } = await loadTree(db, userId);
+    run: async ({ id, depth }, { db, scope }) => {
+      const { roots, byId } = await loadTree(db, scope);
       const levels = limitOf(depth, 10, 10);
       if (id !== undefined) {
         need(isUuid(id), "id: uuid");
@@ -542,21 +598,24 @@ export const TOOLS: Tool[] = [
       required: ["title"],
     },
     annotations: WRITE,
-    run: async (a, { db, userId }) => {
+    run: async (a, ctx) => {
+      const { db, userId, scope } = ctx;
       let kind: string;
+      let workspace = scope.home;
       if (a.parent_id !== undefined) {
-        const parent = await ownNode(db, userId, a.parent_id);
+        const parent = await ownNode(ctx, a.parent_id);
         need(a.kind === undefined, "kind: only without parent_id (it follows the parent)");
-        kind = CHILD_KIND[parent.kind];
+        kind = CHILD_KIND[parent.type];
+        workspace = parent.workspace_id;
       } else {
         need(a.kind === undefined || ["area", "goal"].includes(a.kind), "kind: area or goal");
         kind = a.kind ?? "area";
       }
-      let siblings = db.from("strategy_nodes").select("id", { count: "exact", head: true }).eq("user_id", userId);
+      let siblings = db.from("items").select("id", { count: "exact", head: true }).eq("workspace_id", workspace).in("type", STRATEGY_TYPES);
       siblings = a.parent_id ? siblings.eq("parent_id", a.parent_id) : siblings.is("parent_id", null);
       const { count } = await siblings;
-      const row = { ...nodeFields(a, true), user_id: userId, parent_id: a.parent_id ?? null, kind, position: count ?? 0 };
-      return checkWrite(await db.from("strategy_nodes").insert(row).select(NODE_COLS).single()) as Record<string, unknown>;
+      const row = { ...nodeFields(a, true), workspace_id: workspace, created_by: userId, parent_id: a.parent_id ?? null, type: kind, position: count ?? 0 };
+      return nodePublic(checkWrite(await db.from("items").insert(row).select(ITEM_NODE_COLS).single()));
     },
   },
   {
@@ -583,15 +642,15 @@ export const TOOLS: Tool[] = [
       required: ["id"],
     },
     annotations: { ...WRITE, idempotentHint: true },
-    run: async ({ id, parent_id, ...a }, { db, userId }) => {
-      await ownNode(db, userId, id);
+    run: async ({ id, parent_id, ...a }, ctx) => {
+      const node = await ownNode(ctx, id);
       const row = nodeFields(a, false);
       if (parent_id !== undefined) {
-        await ownNode(db, userId, parent_id);
+        need((await ownNode(ctx, parent_id)).workspace_id === node.workspace_id, "that node is in another workspace");
         row.parent_id = parent_id;
       }
       need(Object.keys(row).length, "nothing to change");
-      return checkWrite(await db.from("strategy_nodes").update(row).eq("user_id", userId).eq("id", id).select(NODE_COLS).single()) as Record<string, unknown>;
+      return nodePublic(checkWrite(await ctx.db.from("items").update(row).eq("id", node.id).select(ITEM_NODE_COLS).single()));
     },
   },
   {
@@ -601,13 +660,17 @@ export const TOOLS: Tool[] = [
     scope: "write",
     inputSchema: { type: "object", properties: { id: ID }, required: ["id"] },
     annotations: { ...WRITE, destructiveHint: true, idempotentHint: true },
-    run: async ({ id }, { db, userId }) => {
-      const node = await ownNode(db, userId, id);
-      const { byId } = await loadTree(db, userId);
-      const count = (n: { children: unknown[] }): number => 1 + (n.children as any[]).reduce((s, c) => s + count(c), 0);
-      const removed = count(byId.get(id)!);
-      check(await db.from("strategy_nodes").delete().eq("user_id", userId).eq("id", id));
-      return { id, title: node.title, deleted: true, nodes_removed: removed };
+    run: async ({ id }, ctx) => {
+      const { db } = ctx;
+      const node = await ownNode(ctx, id);
+      // The node and every strategy node below it (trashed ones too) go in one statement; the tasks and other items
+      // inside them stay, moved to the top (the parent link is cleared by the database).
+      const all = check(await db.from("items").select("id, parent_id").eq("workspace_id", node.workspace_id).in("type", STRATEGY_TYPES)) as
+        { id: string; parent_id: string | null }[];
+      const ids = [node.id];
+      for (let i = 0; i < ids.length; i++) ids.push(...all.filter((n) => n.parent_id === ids[i]).map((n) => n.id));
+      checkWrite(await db.from("items").delete().in("id", ids));
+      return { id, title: node.title, deleted: true, nodes_removed: ids.length };
     },
   },
 ];
@@ -620,11 +683,11 @@ function nodeFields(a: any, creating: boolean) {
   }
   if (a.description !== undefined) {
     need(typeof a.description === "string" && a.description.length <= 20000, "description: text up to 20000 characters");
-    row.description = a.description;
+    row.body = a.description;
   }
   if (a.status !== undefined) {
     need(NODE_STATUSES.includes(a.status), `status: one of ${NODE_STATUSES.join(", ")}`);
-    row.status = a.status;
+    row.status = a.status === "open" ? "todo" : a.status;
   }
   if (a.weight !== undefined) {
     need(typeof a.weight === "number" && a.weight > 0 && a.weight <= 100, "weight: number above 0, up to 100");
@@ -634,10 +697,10 @@ function nodeFields(a: any, creating: boolean) {
     need(a.target_count === null || (Number.isInteger(a.target_count) && a.target_count >= 1 && a.target_count <= 100), "target_count: 1–100 or null");
     row.target_count = a.target_count;
   }
-  for (const k of ["start_date", "due_date"]) {
+  for (const [k, col] of [["start_date", "start_on"], ["due_date", "due_on"]]) {
     if (a[k] === undefined) continue;
     need(a[k] === null || isDate(a[k]), `${k}: YYYY-MM-DD or null`);
-    row[k] = a[k];
+    row[col] = a[k];
   }
   if (a.progress !== undefined) {
     need(a.progress === null || (typeof a.progress === "number" && a.progress >= 0 && a.progress <= 1), "progress: 0–1 or null");
