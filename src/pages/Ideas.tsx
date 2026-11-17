@@ -43,7 +43,7 @@ function Icon({ label, onClick, disabled, children }: { label: string; onClick: 
   );
 }
 
-export default function Ideas() {
+export default function Ideas({ embedded }: { embedded?: boolean }) {
   const { user } = useAuth();
   const qc = useQueryClient();
   const navigate = useNavigate();
@@ -120,9 +120,9 @@ export default function Ideas() {
   };
 
   return (
-    <div className="mx-auto max-w-4xl animate-fade-in">
+    <div className={embedded ? "max-w-4xl" : "mx-auto max-w-4xl animate-fade-in"}>
       <div className="mb-4 flex flex-wrap items-center gap-2">
-        <h1 className="mr-1 text-xl font-bold text-foreground">Ideas</h1>
+        {!embedded && <h1 className="mr-1 text-xl font-bold text-foreground">Ideas</h1>}
         {!ideas.isLoading && <span className="text-sm tabular-nums text-muted-foreground">{total}</span>}
         <div className="relative ml-auto min-w-[10rem] max-w-sm flex-1">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />

@@ -1,264 +1,146 @@
-// Tasks (P-53, owner 2026-10-25): the task store — every to-do written in the files (Obsidian notes, the Projects and
-// Documents folders), grouped by project. A tick writes "- [x]" into the file; rows of task tables (TASKS.md) are
-// read-only. A folder or file full of other people's to-dos (downloaded repos, course material) can be hidden.
-// Ordering by priority comes later (P-58).
+// Tasks (P-69, P-70 phase 3, T-114): every item of the workspace through saved views — tasks, ideas, the Inbox,
+// money, the strategy — as a table, a board or a timeline, with filter / sort / group by (GitHub Projects style).
+// The views exist to feed the app's question "what is best to do now?" (P-65): the default view groups the open
+// tasks by when they need attention. Until phase 4 the to-dos and ideas written in notes are two extra tabs.
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CalendarPlus, CheckCheck, ChevronDown, ChevronRight, Eye, EyeOff, FileText, Loader2, RefreshCw, Search } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { useAuth } from "@/context/AuthContext";
-import { useTasks } from "@/core/tasks";
-import { useNoteLinkActions } from "@/core/notes";
-import { supabase } from "@/integrations/supabase/client";
-import { toast } from "@/hooks/use-toast";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { folderOf, scanAll, vault } from "@/lib/vault";
-import { isHidden, itemsOf, loadTodoFiles, projectName, projectOf, type Item, type Todo, type TodoFile } from "@/lib/todos";
+import { useSearchParams } from "react-router-dom";
+import { Lightbulb, ListChecks, Loader2 } from "lucide-react";
+import { useItems } from "@/core/items";
+import { useItemEdit } from "@/core/edit";
+import { ITEM_TYPES, type ItemType } from "@/core/types";
+import { useItemDrawer } from "@/features/items/ItemDrawer";
+import { type Layout, makeCtx, patchForGroup, runView, type ViewConfig } from "@/views/query";
+import { normalizeConfig, useViews, type View, type ViewSeed } from "@/views/useViews";
+import { type ExtraTab, ViewTabs, ViewToolbar } from "@/views/ViewBar";
+import { kidsOf } from "@/views/layouts/common";
+import { TableLayout } from "@/views/layouts/TableLayout";
+import { BoardLayout } from "@/views/layouts/BoardLayout";
+import { TimelineLayout } from "@/views/layouts/TimelineLayout";
+import NoteTodos from "./NoteTodos";
+import Ideas from "./Ideas";
 
-type FileGroup = { file: TodoFile; items: Item[] };
-type Group = { project: string; files: FileGroup[]; open: number; modified: string };
+const SEEDS: ViewSeed[] = [
+  { name: "Tasks", layout: "table", config: { filter: "type:task is:open", group_by: "when", sort: [{ field: "priority" }], fields: ["priority", "when", "estimate_min", "parent"], new_type: "task" } },
+  { name: "Board", layout: "board", config: { filter: "type:task,idea,capture -status:dropped", group_by: null, board_by: "status", sort: [{ field: "priority" }], fields: ["priority", "when", "parent"], new_type: "task" } },
+  { name: "Inbox", layout: "table", config: { filter: "type:capture,idea is:open no:parent", group_by: "type", sort: [{ field: "created_at", desc: true }], fields: ["type", "created_at"], new_type: "capture" } },
+  { name: "Ideas", layout: "table", config: { filter: "type:idea", group_by: "parent", sort: [{ field: "created_at", desc: true }], fields: ["status", "parent", "created_at"], new_type: "idea" } },
+  { name: "Timeline", layout: "timeline", config: { filter: "is:open -is:private", group_by: "type", sort: [{ field: "when" }], fields: [], zoom: "quarter" } },
+  { name: "All", layout: "table", config: { filter: "", group_by: "type", sort: [], fields: ["status", "priority", "when", "parent", "updated_at"] } },
+];
+
+const EXTRA: ExtraTab[] = [
+  { id: "note-todos", label: "Note to-dos", tip: "To-dos written in the notes; they become items later", icon: ListChecks },
+  { id: "note-ideas", label: "Note ideas", tip: "Ideas written in the notes; they become items later", icon: Lightbulb },
+];
 
 const remember = {
   get: (k: string) => { try { return localStorage.getItem(k); } catch { return null; } },
   set: (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* storage blocked */ } },
 };
 
-function Icon({ label, onClick, disabled, className, children }: { label: string; onClick: () => void; disabled?: boolean; className?: string; children: React.ReactNode }) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <button
-          type="button"
-          onClick={(e) => { e.stopPropagation(); onClick(); }}
-          disabled={disabled}
-          className={cn("rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground disabled:opacity-50", className)}
-        >
-          {children}
-        </button>
-      </TooltipTrigger>
-      <TooltipContent>{label}</TooltipContent>
-    </Tooltip>
-  );
+type Draft = { layout: Layout; config: ViewConfig };
+const same = (a: Draft, v: View) => a.layout === v.layout && JSON.stringify(a.config) === JSON.stringify(v.config);
+
+// The type a new item gets: the group's (a "Type" group or column), the view's, the first type in its filter, a task.
+function newType(config: ViewConfig, patchType: unknown): ItemType {
+  if (typeof patchType === "string" && ITEM_TYPES[patchType as ItemType]) return patchType as ItemType;
+  if (config.new_type) return config.new_type;
+  const m = config.filter.match(/(?:^|\s)type:([a-z]+)/);
+  return m && ITEM_TYPES[m[1] as ItemType] ? (m[1] as ItemType) : "task";
 }
 
-// The same line ticked in the cached text, so the page answers before the file is written.
-const tick = (body: string, line: number, done: boolean) =>
-  body.split("\n").map((l, i) => (i === line ? l.replace(/^([ \t]*[-*+] )\[( |x|X)\]/, `$1[${done ? "x" : " "}]`) : l)).join("\n");
-
 export default function Tasks() {
-  const { user } = useAuth();
-  const { addTask } = useTasks();
-  const noteLinks = useNoteLinkActions();
-  const qc = useQueryClient();
-  const navigate = useNavigate();
-  const key = useMemo(() => ["todo-files", user?.id], [user?.id]);
-  const hiddenKey = useMemo(() => ["todos-hidden", user?.id], [user?.id]);
+  const items = useItems();
+  const { views, isLoading, save, add, remove } = useViews("tasks", SEEDS);
+  const edit = useItemEdit();
+  const drawer = useItemDrawer();
+  const [params, setParams] = useSearchParams();
+  const [drafts, setDrafts] = useState<Record<string, Draft>>({});
 
-  const files = useQuery({ queryKey: key, queryFn: loadTodoFiles, enabled: !!user, staleTime: 60_000 });
-  const hiddenQ = useQuery({
-    queryKey: hiddenKey,
-    enabled: !!user,
-    queryFn: async () => {
-      const { data, error } = await supabase.from("vault_folders").select("path").eq("todos_hidden", true);
-      if (error) throw error;
-      return new Set(data.map((r) => r.path));
-    },
-  });
-  const hidden = useMemo(() => hiddenQ.data ?? new Set<string>(), [hiddenQ.data]);
+  const asked = params.get("view") ?? remember.get("tasks.view");
+  const extra = EXTRA.find((x) => x.id === asked);
+  const view = extra ? undefined : views?.find((v) => v.id === asked) ?? views?.[0];
+  const activeId = extra?.id ?? view?.id ?? null;
+  useEffect(() => { if (activeId) remember.set("tasks.view", activeId); }, [activeId]);
 
-  // What the laptop synced since last time.
-  const scan = useMutation({
-    mutationFn: scanAll,
-    onSuccess: (r) => {
-      if (r.added || r.updated || r.moved || r.removed) qc.invalidateQueries({ queryKey: key });
-    },
-    onError: (e: Error) => toast({ title: "Sync failed", description: e.message, variant: "destructive" }),
-  });
-  useEffect(() => {
-    if (user) scan.mutate();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id]);
+  const select = (id: string) => setParams((p) => { const n = new URLSearchParams(p); n.set("view", id); return n; });
+  const draft: Draft | null = useMemo(() => (view ? drafts[view.id] ?? { layout: view.layout, config: view.config } : null), [view, drafts]);
+  const dirty = new Set(Object.entries(drafts).filter(([id, d]) => { const v = views?.find((x) => x.id === id); return v && !same(d, v); }).map(([id]) => id));
+  const edit_ = (change: Partial<Draft>) => view && draft && setDrafts((d) => ({ ...d, [view.id]: { ...draft, ...change } }));
 
-  const [q, setQ] = useState("");
-  const [showDone, setShowDone] = useState(false);
-  const [showHidden, setShowHidden] = useState(false);
-  const [open, setOpen] = useState<Set<string>>(() => {
-    try { return new Set(JSON.parse(remember.get("tasks.open") ?? "[]")); } catch { return new Set(); }
-  });
-  const toggle = (project: string) =>
-    setOpen((prev) => {
-      const next = new Set(prev);
-      if (!next.delete(project)) next.add(project);
-      remember.set("tasks.open", JSON.stringify([...next]));
-      return next;
-    });
+  const all = useMemo(() => items.data ?? [], [items.data]);
+  const ctx = useMemo(() => makeCtx(all), [all]);
+  const kids = useMemo(() => kidsOf(all), [all]);
+  const groupBy = draft ? (draft.layout === "board" ? draft.config.board_by ?? "status" : draft.config.group_by) : null;
+  const groups = useMemo(() => (draft ? runView(all, draft.config, ctx, groupBy) : []), [all, draft, ctx, groupBy]);
+  const count = groups.reduce((n, g) => n + g.items.length, 0);
 
-  const groups = useMemo(() => {
-    const s = q.trim().toLowerCase();
-    const map = new Map<string, Group>();
-    for (const f of files.data ?? []) {
-      if (!f.body || isHidden(f.path, hidden)) continue;
-      const items = itemsOf(f, f.body).filter((it) => (showDone || !it.done) && (!s || it.text.toLowerCase().includes(s) || f.path.toLowerCase().includes(s)));
-      if (!items.length) continue;
-      const project = projectOf(f.path);
-      const g = map.get(project) ?? { project, files: [], open: 0, modified: "" };
-      g.files.push({ file: f, items });
-      g.open += items.filter((it) => !it.done).length;
-      if (f.modified_at > g.modified) g.modified = f.modified_at;
-      map.set(project, g);
-    }
-    // The projects worked on lately first; inside, the files the same way.
-    const list = [...map.values()].sort((a, b) => b.modified.localeCompare(a.modified));
-    list.forEach((g) => g.files.sort((a, b) => b.file.modified_at.localeCompare(a.file.modified_at)));
-    return list;
-  }, [files.data, hidden, q, showDone]);
-  const total = groups.reduce((n, g) => n + g.open, 0);
+  if (items.isLoading || isLoading) {
+    return <div className="flex items-center justify-center py-20"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>;
+  }
 
-  const setDone = async (t: Todo, done: boolean) => {
-    qc.setQueryData<Awaited<ReturnType<typeof loadTodoFiles>>>(key, (old) =>
-      old?.map((f) => (f.id === t.file.id && f.body ? { ...f, body: tick(f.body, t.line, done) } : f)));
-    try {
-      await vault("set_todo", { path: t.file.path, line: t.line, text: t.raw, done });
-    } catch (e) {
-      toast({ title: "Not saved", description: (e as Error).message, variant: "destructive" });
-    }
-    qc.invalidateQueries({ queryKey: key });
+  const onAdd = (title: string, groupKey: string) => {
+    if (!draft) return;
+    const patch = patchForGroup(groupBy, groupKey, ctx);
+    const type = newType(draft.config, patch.type);
+    const position = Math.max(0, ...all.filter((i) => i.type === type).map((i) => i.position)) + 1;
+    edit.create({ ...patch, type, title, position } as Parameters<typeof edit.create>[0]);
   };
 
-  const hide = async (path: string, on: boolean) => {
-    if (!user) return;
-    const { error } = await supabase.from("vault_folders").upsert({ user_id: user.id, path, todos_hidden: on, updated_at: new Date().toISOString() });
-    if (error) toast({ title: "Not saved", description: error.message, variant: "destructive" });
-    qc.invalidateQueries({ queryKey: hiddenKey });
+  const layoutProps = draft && {
+    groups, config: { ...draft.config, group_by: groupBy }, ctx, kids,
+    onOpen: drawer.open,
+    onChange: edit.change,
+    onAdd,
   };
-
-  // A to-do the user wants to plan → a task in Schedule's Unscheduled list, linked to its note.
-  const toSchedule = async (t: Todo) => {
-    const saved = await addTask({ title: t.text, description: "", estimatedTime: null, status: "idle", startTime: null, endTime: null, date: "", deadline: "", position: 0, link: "", priority: "medium" });
-    if (!saved) return;
-    await noteLinks.link(saved.id, t.file.id);
-    toast({ title: "Added to Schedule" });
-  };
-
-  const openFile = (path: string) => navigate(`/notes?open=${encodeURIComponent(path)}`);
 
   return (
-    <div className="mx-auto max-w-4xl animate-fade-in">
-      {/* Header */}
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-        <h1 className="mr-1 text-xl font-bold text-foreground">Tasks</h1>
-        {!files.isLoading && <span className="text-sm tabular-nums text-muted-foreground">{total}</span>}
-        <div className="relative ml-auto min-w-[10rem] max-w-sm flex-1">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Search"
-            className="w-full rounded-lg border border-border bg-card py-1.5 pl-9 pr-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary/40"
-          />
-        </div>
-        <Icon label={showDone ? "Hide done" : "Show done"} onClick={() => setShowDone((v) => !v)} className={cn("p-2", showDone && "bg-primary/10 text-primary")}>
-          <CheckCheck className="h-4 w-4" />
-        </Icon>
-        <Icon label="Sync" onClick={() => scan.mutate()} disabled={scan.isPending} className="p-2">
-          <RefreshCw className={cn("h-4 w-4", scan.isPending && "animate-spin")} />
-        </Icon>
+    <div className="animate-fade-in">
+      <div className="mb-1 flex items-center gap-2">
+        <h1 className="text-xl font-bold text-foreground">Tasks</h1>
       </div>
 
-      {files.isLoading ? (
-        <div className="flex justify-center py-20"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
-      ) : (
-        <div className="space-y-2">
-          {groups.map((g) => {
-            const expanded = open.has(g.project) || !!q.trim();
-            const Chevron = expanded ? ChevronDown : ChevronRight;
-            const parent = folderOf(g.project);
-            return (
-              <div key={g.project} className="rounded-xl border border-border bg-card">
-                <div role="button" tabIndex={0} onClick={() => toggle(g.project)} onKeyDown={(e) => e.key === "Enter" && toggle(g.project)}
-                  className="group flex cursor-pointer items-center gap-2 px-3 py-2">
-                  <Chevron className="h-4 w-4 shrink-0 text-muted-foreground" />
-                  <span className="min-w-0 truncate text-sm font-medium text-foreground">{projectName(g.project)}</span>
-                  {parent && <span className="truncate text-xs text-muted-foreground/60">{parent}</span>}
-                  <span className="ml-auto text-xs tabular-nums text-muted-foreground">{g.open}</span>
-                  {g.project && (
-                    <Icon label="Hide" onClick={() => hide(g.project, true)} className="opacity-0 group-hover:opacity-100 focus:opacity-100">
-                      <EyeOff className="h-3.5 w-3.5" />
-                    </Icon>
-                  )}
-                </div>
-                {expanded && (
-                  <div className="space-y-3 border-t border-border px-3 py-2">
-                    {g.files.map(({ file, items }) => {
-                      const sub = folderOf(file.path).slice(g.project.length).replace(/^\//, "");
-                      return (
-                        <div key={file.id}>
-                          <div className="group flex items-center gap-1.5 text-xs text-muted-foreground">
-                            <FileText className="h-3.5 w-3.5 shrink-0 opacity-60" />
-                            <button type="button" onClick={() => openFile(file.path)} className="min-w-0 truncate font-medium hover:text-foreground hover:underline">
-                              {file.title}
-                            </button>
-                            {sub && <span className="truncate opacity-60">{sub}</span>}
-                            <Icon label="Hide" onClick={() => hide(file.path, true)} className="ml-auto p-1 opacity-0 group-hover:opacity-100 focus:opacity-100">
-                              <EyeOff className="h-3 w-3" />
-                            </Icon>
-                          </div>
-                          <ul className="mt-1">
-                            {items.map((it) =>
-                              it.kind === "todo" ? (
-                                <li key={`${it.line}`} className="group flex items-start gap-2 rounded-md py-0.5 pr-1 hover:bg-muted/40" style={{ paddingLeft: 4 + it.depth * 16 }}>
-                                  <Checkbox checked={it.done} onCheckedChange={(v) => setDone(it, v === true)} className="mt-0.5" />
-                                  <span className={cn("min-w-0 flex-1 text-sm", it.done ? "text-muted-foreground line-through" : "text-foreground")}>{it.text}</span>
-                                  {!it.done && (
-                                    <Icon label="To Schedule" onClick={() => toSchedule(it)} className="p-1 opacity-0 group-hover:opacity-100 focus:opacity-100">
-                                      <CalendarPlus className="h-3.5 w-3.5" />
-                                    </Icon>
-                                  )}
-                                </li>
-                              ) : (
-                                <li key={`${it.line}`} onClick={() => openFile(file.path)} className="flex cursor-pointer items-start gap-2 rounded-md py-0.5 pl-1 pr-1 hover:bg-muted/40">
-                                  <span className={cn("mt-0.5 shrink-0 rounded border px-1 text-[10px] font-medium uppercase", it.done ? "border-border text-muted-foreground" : "border-primary/40 text-primary")}>
-                                    {it.status || "—"}
-                                  </span>
-                                  {it.ref && <span className="mt-px shrink-0 text-xs tabular-nums text-muted-foreground/70">{it.ref}</span>}
-                                  <span className={cn("line-clamp-2 min-w-0 flex-1 text-sm", it.done ? "text-muted-foreground" : "text-foreground")}>{it.text}</span>
-                                </li>
-                              ),
-                            )}
-                          </ul>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-          {!groups.length && <div className="py-16 text-center text-sm text-muted-foreground">—</div>}
+      <ViewTabs
+        views={views ?? []} active={activeId} dirty={dirty} extra={EXTRA}
+        onSelect={select}
+        onAdd={async () => {
+          const v = await add({ name: `View ${(views?.length ?? 0) + 1}`, layout: "table", config: normalizeConfig({ filter: "is:open", fields: ["status", "priority", "when", "parent"] }) });
+          if (v) select(v.id);
+        }}
+        onRename={(id, name) => save(id, { name })}
+        onDuplicate={async (id) => {
+          const v = views?.find((x) => x.id === id);
+          const d = drafts[id] ?? (v && { layout: v.layout, config: v.config });
+          const copy = v && d && await add({ name: `${v.name} copy`, layout: d.layout, config: d.config });
+          if (copy) select(copy.id);
+        }}
+        onDelete={async (id) => {
+          await remove(id);
+          setDrafts(({ [id]: _, ...rest }) => rest);
+          const next = views?.find((v) => v.id !== id);
+          if (next) select(next.id);
+        }}
+      />
 
-          {hidden.size > 0 && (
-            <div className="pt-4">
-              <button type="button" onClick={() => setShowHidden((v) => !v)} className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
-                {showHidden ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-                Hidden <span className="tabular-nums">{hidden.size}</span>
-              </button>
-              {showHidden && (
-                <ul className="mt-1 space-y-0.5">
-                  {[...hidden].sort((a, b) => a.localeCompare(b, "az")).map((p) => (
-                    <li key={p} className="group flex items-center gap-2 rounded-md px-2 py-0.5 text-xs text-muted-foreground hover:bg-muted/40">
-                      <span className="min-w-0 flex-1 truncate">{p}</span>
-                      <Icon label="Show" onClick={() => hide(p, false)} className="p-1">
-                        <Eye className="h-3 w-3" />
-                      </Icon>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          )}
-        </div>
+      {extra?.id === "note-todos" && <div className="pt-4"><NoteTodos embedded /></div>}
+      {extra?.id === "note-ideas" && <div className="pt-4"><Ideas embedded /></div>}
+
+      {view && draft && layoutProps && (
+        <>
+          <ViewToolbar
+            layout={draft.layout} config={draft.config} count={count} dirty={dirty.has(view.id)}
+            onLayout={(layout) => edit_({ layout })}
+            onConfig={(c) => edit_({ config: { ...draft.config, ...c } })}
+            onSave={async () => {
+              await save(view.id, { layout: draft.layout, config: draft.config });
+              setDrafts(({ [view.id]: _, ...rest }) => rest);
+            }}
+            onDiscard={() => setDrafts(({ [view.id]: _, ...rest }) => rest)}
+          />
+          {draft.layout === "table" && <TableLayout {...layoutProps} />}
+          {draft.layout === "board" && <BoardLayout {...layoutProps} />}
+          {draft.layout === "timeline" && <TimelineLayout {...layoutProps} />}
+        </>
       )}
     </div>
   );

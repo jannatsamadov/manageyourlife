@@ -1,6 +1,6 @@
-// Item types (P-70): what the app shows for each type. The rules that must hold for every writer (where a type may
-// sit, whether AI may see it) live in the DB table item_types; this registry is the UI side (names, groups, statuses).
-// A new type = a row in item_types + an entry here.
+// Item types (P-70): what the app shows for each type. The rules every writer must keep (where a type may sit,
+// whether AI may see it) live in the DB table item_types; `parents` / `rootOk` below mirror them so the UI offers only
+// what the DB accepts (the DB still decides). A new type = a row in item_types + an entry here.
 
 export type ItemType =
   | "area" | "goal" | "mission" | "step" | "project" | "routine" | "milestone" | "option" | "obstacle"
@@ -8,25 +8,30 @@ export type ItemType =
 
 export type TypeGroup = "strategy" | "work" | "inbox" | "money";
 
-export const ITEM_TYPES: Record<ItemType, { label: string; group: TypeGroup; private?: boolean }> = {
-  area: { label: "Area", group: "strategy" },
-  goal: { label: "Goal", group: "strategy" },
-  mission: { label: "Mission", group: "strategy" },
-  step: { label: "Step", group: "strategy" },
-  project: { label: "Project", group: "work" },
-  routine: { label: "Routine", group: "work" },
-  milestone: { label: "Milestone", group: "work" },
-  option: { label: "Option", group: "work" },
-  obstacle: { label: "Obstacle", group: "work" },
-  task: { label: "Task", group: "work" },
-  idea: { label: "Idea", group: "inbox" },
-  capture: { label: "Capture", group: "inbox" },
-  buy: { label: "To buy", group: "money", private: true },
-  bill: { label: "Bill", group: "money", private: true },
-  income: { label: "Income", group: "money", private: true },
-  debt: { label: "Debt", group: "money", private: true },
-  loan: { label: "Loan", group: "money", private: true },
+type TypeInfo = { label: string; group: TypeGroup; parents: ItemType[]; rootOk: boolean; private?: boolean };
+
+const WORK_PARENTS: ItemType[] = ["area", "goal", "mission", "step", "project"];
+
+export const ITEM_TYPES: Record<ItemType, TypeInfo> = {
+  task: { label: "Task", group: "work", parents: [...WORK_PARENTS, "routine", "milestone", "option", "task"], rootOk: true },
+  idea: { label: "Idea", group: "inbox", parents: [...WORK_PARENTS, "idea"], rootOk: true },
+  capture: { label: "Capture", group: "inbox", parents: [], rootOk: true },
+  project: { label: "Project", group: "work", parents: WORK_PARENTS, rootOk: true },
+  routine: { label: "Routine", group: "work", parents: ["area", "goal", "mission", "project"], rootOk: true },
+  milestone: { label: "Milestone", group: "work", parents: ["goal", "mission", "step", "project"], rootOk: true },
+  option: { label: "Option", group: "work", parents: WORK_PARENTS, rootOk: true },
+  obstacle: { label: "Obstacle", group: "work", parents: ["goal", "mission", "step", "project", "task"], rootOk: true },
+  area: { label: "Area", group: "strategy", parents: [], rootOk: true },
+  goal: { label: "Goal", group: "strategy", parents: ["area"], rootOk: true },
+  mission: { label: "Mission", group: "strategy", parents: ["goal"], rootOk: false },
+  step: { label: "Step", group: "strategy", parents: ["mission", "step"], rootOk: false },
+  buy: { label: "To buy", group: "money", parents: WORK_PARENTS, rootOk: true, private: true },
+  bill: { label: "Bill", group: "money", parents: ["area"], rootOk: true, private: true },
+  income: { label: "Income", group: "money", parents: ["area"], rootOk: true, private: true },
+  debt: { label: "Debt", group: "money", parents: ["area"], rootOk: true, private: true },
+  loan: { label: "Loan", group: "money", parents: ["area"], rootOk: true, private: true },
 };
+export const TYPE_ORDER = Object.keys(ITEM_TYPES) as ItemType[];
 
 // The strategy tree of v1 (P-2); phase 5 (P-54) widens it.
 export const STRATEGY_TYPES: ItemType[] = ["area", "goal", "mission", "step"];
@@ -42,6 +47,7 @@ export const STATUSES: { id: ItemStatus; label: string }[] = [
   { id: "done", label: "Done" },
   { id: "dropped", label: "Dropped" },
 ];
+export const CLOSED_STATUSES: ItemStatus[] = ["done", "dropped"];
 
 // 1 urgent … 4 low (Linear style); null = none.
 export const PRIORITIES = [
