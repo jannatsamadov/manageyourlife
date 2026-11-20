@@ -14,7 +14,7 @@ import {
   TooltipProvider,
   TooltipTrigger } from
 "@/components/ui/tooltip";
-import TaskEditPopup from "@/components/TaskEditPopup";
+import { useItemDrawer } from "@/features/items/ItemDrawer";
 import TimingFields, { TimeTag } from "@/components/TimingFields";
 import { byTime } from "@/lib/timing";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -138,7 +138,7 @@ export default function SchedulePlanning() {
   const [view, setView] = useState<View>("spiral"); // owner, 2026-10-25: the spiral calendar first
   const [currentDate, setCurrentDate] = useState(new Date());
   const [showForm, setShowForm] = useState(false);
-  const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const drawer = useItemDrawer(); // a task opens in the item drawer, as on every page (#190)
   const [taskQuery, setTaskQuery] = useState("");
   const [priorityFilter, setPriorityFilter] = useState<"all" | TaskPriority>("all");
   const [deadlineFilter, setDeadlineFilter] = useState<"any" | "overdue" | "due3" | "due7" | "due14" | "noDeadline">("any");
@@ -463,10 +463,7 @@ export default function SchedulePlanning() {
     setShowForm(false);
   };
 
-  const openEditPopup = (taskId: string) => {
-    const task = tasks.find((t) => t.id === taskId);
-    if (task) setEditingTask(task);
-  };
+  const openEditPopup = (taskId: string) => drawer.open(taskId);
 
   const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
@@ -1303,13 +1300,6 @@ export default function SchedulePlanning() {
           </div>
         }
 
-        {/* Edit popup */}
-        {editingTask &&
-        <TaskEditPopup
-          task={editingTask}
-          onClose={() => setEditingTask(null)} />
-
-        }
       </div>
     </TooltipProvider>);
 

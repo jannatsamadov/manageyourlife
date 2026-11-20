@@ -9,7 +9,7 @@ import { useStrategyActions, useStrategyNodes } from "@/core/strategy";
 import { AREA_COLORS, buildForest, type TreeNode } from "@/lib/strategy";
 import { cn } from "@/lib/utils";
 import ProView from "@/components/strategy/ProView";
-import TaskEditPopup from "@/components/TaskEditPopup";
+import { useItemDrawer } from "@/features/items/ItemDrawer";
 
 // three.js loads only with the Space theme.
 const SolarSystem = lazy(() => import("@/components/strategy/solar/SolarSystem"));
@@ -138,7 +138,7 @@ export default function Strategy() {
   const [galaxy, setGalaxy] = useState<boolean>(() => remember.get("strategy.galaxy", true));
   const [focusArea, setFocusArea] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [taskId, setTaskId] = useState<string | null>(null);
+  const drawer = useItemDrawer(); // a task opens in the item drawer, as on every page (#190)
   useEffect(() => remember.set("strategy.theme", theme), [theme]);
   useEffect(() => remember.set("strategy.area", areaId), [areaId]);
   useEffect(() => remember.set("strategy.goals", goalOf), [goalOf]);
@@ -210,8 +210,6 @@ export default function Strategy() {
     setFocusArea(galaxy ? null : area?.node.id ?? null);
     setGalaxy(!galaxy);
   };
-  const openTask = taskId ? tasks.find((t) => t.id === taskId) : undefined;
-  const taskPopup = openTask && <TaskEditPopup task={openTask} onClose={() => setTaskId(null)} />;
   const addArea = (t: string) => create({ kind: "area", title: t, color: AREA_COLORS[areas.length % AREA_COLORS.length] });
 
   if (isLoading) return <div className="flex h-[70vh] items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
@@ -226,11 +224,10 @@ export default function Strategy() {
           {SPACE_THEME && <ThemeSwitch theme={theme} onChange={switchTheme} dark={false} />}
         </div>
         {roots.length ? (
-          <ProView roots={roots} selected={proShown} onSelect={select} onOpenTask={setTaskId} />
+          <ProView roots={roots} selected={proShown} onSelect={select} onOpenTask={drawer.open} />
         ) : (
           <div className="flex h-[50vh] items-center justify-center"><AddChip big dark={false} label="Area" onAdd={addArea} /></div>
         )}
-        {taskPopup}
       </div>
     );
   }
@@ -252,7 +249,7 @@ export default function Strategy() {
             onOpenGoal={select}
           />
         ) : goal ? (
-          <SolarSystem goal={goal} area={area} selectedId={selectedId} onSelect={select} onTask={setTaskId} />
+          <SolarSystem goal={goal} area={area} selectedId={selectedId} onSelect={select} onTask={drawer.open} />
         ) : (
           <div className="flex h-full flex-col items-center justify-center gap-4 bg-[radial-gradient(ellipse_at_center,rgba(124,156,255,0.08),transparent_60%)]">
             <Orbit className="h-10 w-10 text-white/20" />
@@ -308,8 +305,6 @@ export default function Strategy() {
         )}
         <ThemeSwitch theme={theme} onChange={switchTheme} dark />
       </div>
-
-      {taskPopup}
     </div>
   );
 }
