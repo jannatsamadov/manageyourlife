@@ -117,8 +117,8 @@ async function handle(msg: any, auth: Auth) {
         instructions:
           "Tasks, notes, the Inbox and the strategy of the user's ManageYourLife account. Dates are YYYY-MM-DD in the user's local time " +
           "(pass the local date to `today`). Notes are Markdown files in folders (the same files the user edits in Obsidian; [[links]] " +
-          "between notes). The Inbox is the Inbox folder: new notes and the daily capture notes Inbox/<date>.md (Telegram, inbox_add), " +
-          "raw captures the user sorts later. " +
+          "between notes). The Inbox holds raw captures (Telegram, inbox_add, the app) waiting to be sorted: `inbox_list`, then " +
+          "`inbox_sort` makes each one a task, idea, project … in its place (ask the user when unsure). " +
           "The strategy is a tree: areas of life → goals → missions → steps (steps nest); daily tasks can serve a goal, mission or step (node_id). " +
           "Read `strategy_tree` before changing it.",
       });

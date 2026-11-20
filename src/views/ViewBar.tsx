@@ -1,8 +1,8 @@
-// The views' tabs and the toolbar of the open view (P-69): layout, filter, group by, sort, fields. Changes show at
-// once; a dot on the tab means "changed, not saved" — Save keeps them for every device, Discard drops them.
+// The views' tabs and the toolbar of the open view (P-69): layout, filter, slice, group by, sort, fields (+ new field).
+// Changes show at once; a dot on the tab means "changed, not saved" — Save keeps them for every device, Discard drops them.
 import { useState } from "react";
 import {
-  ArrowDown, ArrowUp, ArrowUpDown, ChartGantt, ChevronDown, Columns3, Copy, Kanban, ListFilter, Pencil, Plus, Rows3,
+  ArrowDown, ArrowUp, ArrowUpDown, ChartGantt, ChevronDown, Columns3, Copy, Kanban, ListFilter, PanelLeft, Pencil, Plus, Rows3,
   SlidersHorizontal, Table2, Trash2, X, CircleHelp,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -10,8 +10,10 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { BOARDABLE, FIELD_KEYS, FIELDS, type FieldKey, GROUPABLE, type Layout, type ViewConfig } from "./query";
+import { boardableFields, type Ctx, type CustomField, type FieldKey, fieldOf, groupableFields, type Layout, type ViewConfig } from "./query";
 import { Tip } from "./fields";
+import { FieldEditor } from "./FieldEditor";
+import type { FieldActions } from "./useFields";
 import type { View } from "./useViews";
 
 export const LAYOUTS: { id: Layout; label: string; icon: typeof Table2 }[] = [
@@ -101,15 +103,18 @@ function Menu({ icon: Icon, label, tip, children, wide }: { icon: typeof Table2;
   );
 }
 
-const FILTER_HELP = "type:task,idea · status:todo · -status:done · is:open · is:overdue · priority:urgent,high · in:thesis · day:@today · due:<@today+7 · no:due · has:estimate · estimate:>60 · free words";
+const FILTER_HELP = "type:task,idea · status:todo · -status:done · is:open · is:overdue · priority:urgent,high · in:thesis · day:@today · due:<@today+7 · no:due · has:estimate · estimate:>60 · <custom field>:<value> · free words";
 
-export function ViewToolbar({ layout, config, count, dirty, onLayout, onConfig, onSave, onDiscard }: {
-  layout: Layout; config: ViewConfig; count: number; dirty: boolean;
+export function ViewToolbar({ layout, config, ctx, count, dirty, fieldActions, extra, onLayout, onConfig, onSave, onDiscard }: {
+  layout: Layout; config: ViewConfig; ctx: Ctx; count: number; dirty: boolean; fieldActions: FieldActions; extra?: React.ReactNode;
   onLayout: (l: Layout) => void; onConfig: (c: Partial<ViewConfig>) => void; onSave: () => void; onDiscard: () => void;
 }) {
-  const groupLabel = config.group_by ? FIELDS[config.group_by].label : "None";
+  const [editing, setEditing] = useState<CustomField | "new" | null>(null);
+  const label = (f: string | null | undefined) => fieldOf(ctx, f)?.label ?? "None";
+  const all = Object.values(ctx.fields).map((d) => d.key);
   const boardBy = config.board_by ?? "status";
-  const sortable = FIELD_KEYS.filter((f) => !config.sort.some((s) => s.field === f));
+  const sortable = all.filter((f) => !config.sort.some((s) => s.field === f));
+  const groupable = groupableFields(ctx);
 
   return (
     <div className="flex flex-wrap items-center gap-2 py-3">
@@ -140,25 +145,32 @@ export function ViewToolbar({ layout, config, count, dirty, onLayout, onConfig, 
         </Tip>
       </div>
 
+      <Menu icon={PanelLeft} label={config.slice_by ? label(config.slice_by) : "Slice"} tip="Slice by: a list of its values on the side">
+        <button type="button" className={cn(menuRow, !config.slice_by && "bg-accent")} onClick={() => onConfig({ slice_by: null })}>None</button>
+        {groupable.map((f) => (
+          <button key={f} type="button" className={cn(menuRow, f === config.slice_by && "bg-accent")} onClick={() => onConfig({ slice_by: f })}>{label(f)}</button>
+        ))}
+      </Menu>
+
       {layout === "board" ? (
-        <Menu icon={Columns3} label={FIELDS[boardBy].label} tip="Columns by">
-          {BOARDABLE.map((f) => (
-            <button key={f} type="button" className={cn(menuRow, f === boardBy && "bg-accent")} onClick={() => onConfig({ board_by: f })}>{FIELDS[f].label}</button>
+        <Menu icon={Columns3} label={label(boardBy)} tip="Columns by">
+          {boardableFields(ctx).map((f) => (
+            <button key={f} type="button" className={cn(menuRow, f === boardBy && "bg-accent")} onClick={() => onConfig({ board_by: f })}>{label(f)}</button>
           ))}
         </Menu>
       ) : (
-        <Menu icon={Rows3} label={groupLabel} tip="Group by">
+        <Menu icon={Rows3} label={config.group_by ? label(config.group_by) : "Group"} tip="Group by">
           <button type="button" className={cn(menuRow, !config.group_by && "bg-accent")} onClick={() => onConfig({ group_by: null })}>None</button>
-          {GROUPABLE.map((f) => (
-            <button key={f} type="button" className={cn(menuRow, f === config.group_by && "bg-accent")} onClick={() => onConfig({ group_by: f })}>{FIELDS[f].label}</button>
+          {groupable.map((f) => (
+            <button key={f} type="button" className={cn(menuRow, f === config.group_by && "bg-accent")} onClick={() => onConfig({ group_by: f })}>{label(f)}</button>
           ))}
         </Menu>
       )}
 
-      <Menu icon={ArrowUpDown} label={config.sort.length ? FIELDS[config.sort[0].field].label : "Sort"} tip="Sort" wide>
+      <Menu icon={ArrowUpDown} label={config.sort.length ? label(config.sort[0].field) : "Sort"} tip="Sort; no sort = your own order (drag rows)" wide>
         {config.sort.map((s, k) => (
           <div key={s.field} className="flex items-center gap-1 px-1">
-            <span className="flex-1 px-1 text-sm">{FIELDS[s.field].label}</span>
+            <span className="flex-1 px-1 text-sm">{label(s.field)}</span>
             <Tip label={s.desc ? "Descending" : "Ascending"}>
               <button type="button" className="rounded p-1 hover:bg-accent"
                 onClick={() => onConfig({ sort: config.sort.map((x, j) => (j === k ? { ...x, desc: !x.desc } : x)) })}>
@@ -174,26 +186,36 @@ export function ViewToolbar({ layout, config, count, dirty, onLayout, onConfig, 
         <div className="max-h-56 overflow-y-auto">
           {sortable.map((f) => (
             <button key={f} type="button" className={menuRow} onClick={() => onConfig({ sort: [...config.sort, { field: f }] })}>
-              <Plus className="h-3 w-3 text-muted-foreground" />{FIELDS[f].label}
+              <Plus className="h-3 w-3 text-muted-foreground" />{label(f)}
             </button>
           ))}
         </div>
       </Menu>
 
       {layout !== "timeline" && (
-        <Menu icon={SlidersHorizontal} label="Fields" tip="Shown fields">
-          <div className="max-h-72 overflow-y-auto">
-            {FIELD_KEYS.filter((f) => f !== "title").map((f) => {
+        <Menu icon={SlidersHorizontal} label="Fields" tip="Shown fields; + New field" wide>
+          <div className="max-h-80 overflow-y-auto">
+            {all.filter((f) => f !== "title").map((f) => {
               const on = config.fields.includes(f);
+              const custom = ctx.fields[f]?.custom;
               return (
-                <label key={f} className={cn(menuRow, "cursor-pointer")}>
-                  <input type="checkbox" className="accent-primary" checked={on}
-                    onChange={() => onConfig({ fields: on ? config.fields.filter((x) => x !== f) : [...config.fields, f] as FieldKey[] })} />
-                  {FIELDS[f].label}
-                </label>
+                <div key={f} className="flex items-center">
+                  <label className={cn(menuRow, "flex-1 cursor-pointer")}>
+                    <input type="checkbox" className="accent-primary" checked={on}
+                      onChange={() => onConfig({ fields: on ? config.fields.filter((x) => x !== f) : [...config.fields, f] as FieldKey[] })} />
+                    {label(f)}
+                  </label>
+                  {custom && (
+                    <Tip label="Edit field">
+                      <button type="button" onClick={() => setEditing(custom)} className="rounded p-1.5 text-muted-foreground hover:bg-accent"><Pencil className="h-3 w-3" /></button>
+                    </Tip>
+                  )}
+                </div>
               );
             })}
           </div>
+          <div className="my-1 h-px bg-border" />
+          <button type="button" className={menuRow} onClick={() => setEditing("new")}><Plus className="h-3.5 w-3.5" />New field</button>
         </Menu>
       )}
 
@@ -208,12 +230,21 @@ export function ViewToolbar({ layout, config, count, dirty, onLayout, onConfig, 
         </div>
       )}
 
+      {extra}
       <span className="ml-auto text-xs text-muted-foreground">{count}</span>
       {dirty && (
         <>
           <button type="button" onClick={onDiscard} className={toolButton}>Discard</button>
           <button type="button" onClick={onSave} className="inline-flex h-8 items-center rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90">Save</button>
         </>
+      )}
+
+      {editing && (
+        <FieldEditor
+          key={editing === "new" ? "new" : editing.id}
+          field={editing === "new" ? null : editing} open onClose={() => setEditing(null)} actions={fieldActions}
+          onMade={(f) => onConfig({ fields: [...config.fields, `props.${f.key}`] })}
+        />
       )}
     </div>
   );

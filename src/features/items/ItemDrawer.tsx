@@ -12,9 +12,10 @@ import { useItemEdit } from "@/core/edit";
 import { useItemNotes, useNoteLinkActions, useNoteTodos } from "@/core/notes";
 import { ITEM_TYPES, TYPE_ORDER, type ItemType } from "@/core/types";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
-import { localDay, makeCtx, minutesLabel } from "@/views/query";
+import { customFields, localDay, makeCtx, minutesLabel } from "@/views/query";
+import { useFields } from "@/views/useFields";
 import {
-  DatePicker, dayLabel, MinutesPicker, ParentPicker, pathOf, PriorityPicker, StatusPicker, Tip, TypeIcon, TypePicker,
+  CustomPicker, DatePicker, dayLabel, MinutesPicker, ParentPicker, pathOf, PriorityPicker, StatusPicker, Tip, TypeIcon, TypePicker,
 } from "@/views/fields";
 import { AddRow } from "@/views/layouts/AddRow";
 
@@ -73,7 +74,8 @@ function Body({ item }: { item: Item }) {
   const logs = useTimeLogs();
   const timer = useTimer();
   const drawer = useItemDrawer();
-  const ctx = useMemo(() => makeCtx(items.data ?? []), [items.data]);
+  const custom = useFields();
+  const ctx = useMemo(() => makeCtx(items.data ?? [], new Date(), custom.fields), [items.data, custom.fields]);
   const change = (patch: Parameters<typeof edit.change>[1]) => edit.change(item, patch);
   const running = logs.data?.some((l) => l.item_id === item.id && !l.ended_at);
   const kids = useMemo(() => (items.data ?? []).filter((i) => i.parent_id === item.id && !i.deleted_at).sort((a, b) => a.position - b.position), [items.data, item.id]);
@@ -162,6 +164,9 @@ function Body({ item }: { item: Item }) {
             onBlur={(e) => { const v = e.target.value.trim() || null; if (v !== item.url) change({ url: v }); }}
           />
         </Row>
+        {customFields(ctx).map((d) => (
+          <Row key={d.key} label={d.label}><CustomPicker item={item} def={d} ctx={ctx} onChange={change} showEmpty /></Row>
+        ))}
       </div>
 
       <textarea

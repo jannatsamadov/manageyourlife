@@ -1,13 +1,13 @@
-// Telegram bot webhook (P-19, P-57): what you send lands in the Inbox — today's capture note Inbox/<date>.md in your
-// notes — under a heading per kind (Ideas, Questions, To-dos, Resources, Notes), one list item per message. No AI.
+// Telegram bot webhook (P-19, P-57, P-70 phase 3): what you send lands in the Inbox — one `capture` item per message
+// (title = the first line, the rest + a forward's origin + files in the text), to be sorted later in the app (Tasks →
+// Inbox) by hand or with AI. No AI here.
 // "/start <code>" (or the bare code) links the chat to an account (the code comes from Settings → Telegram).
-// "/idea", "/question", "/todo", "/resource" in front of the text set the kind; the buttons under ✓ move it, Undo removes it.
-// Photos and files go to Inbox/files/ after the reply (so the bot answers at once) and are embedded in the item.
+// "/idea", "/question", "/todo", "/resource" in front of the text set its Kind; the buttons under ✓ change it, Undo
+// moves it to the trash. Photos and files go to the notes' Inbox/files/ after the reply (so the bot answers at once).
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
-import {
-  addItem, CAPTURE_SECTIONS, captureItem, editNote, hasItem, INBOX, inboxNotePath, localTime, putFile, removeItem, replaceItem, safeName,
-  sectionOfItem, trashFile,
-} from "../_shared/vault.ts";
+import { INBOX, localTime, putFile, safeName, trashFile } from "../_shared/vault.ts";
+import { scopeOf } from "../_shared/items.ts";
+import { addCapture, captureBySource, captureParts, ensureKindField, KINDS } from "../_shared/capture.ts";
 
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void } | undefined;
 
@@ -18,11 +18,9 @@ const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPAB
 });
 
 const HOW_TO_LINK = "ManageYourLife → Settings → Telegram → Connect, then send me the code shown there.";
-const LINKED = "✓ Connected. Send me anything: it goes to today's note in your Inbox. Start with /idea, /question, /todo or /resource to file it.";
-const KINDS: Record<string, string> = { idea: "Idea", question: "Question", todo: "To-do", resource: "Resource" };
+const LINKED = "✓ Connected. Send me anything: it goes to your Inbox. Start with /idea, /question, /todo or /resource to mark its kind.";
 const KIND_COMMAND = /^\/(idea|question|todo|resource)(@\w+)?(\s+|$)/i;
 const TELEGRAM_FILE_LIMIT = 20 * 1024 * 1024; // bots can download up to 20 MB
-const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
 // Constant-time compare of Telegram's secret header.
 function sameSecret(given: string | null, expected: string) {
@@ -45,13 +43,13 @@ const answer = (method: string, body: Record<string, unknown>) =>
 const done = () => new Response("ok");
 const say = (chatId: number, text: string) => answer("sendMessage", { chat_id: chatId, text });
 
-// ✓ (+ kind) with the kind buttons and Undo; the buttons carry the capture note's date and the message id.
-const receipt = (day: string, messageId: number, kind: string | null) => ({
+// ✓ (+ kind) with the kind buttons and Undo; the buttons carry the message id.
+const receipt = (messageId: number, kind: string | null) => ({
   text: kind ? `✓ ${KINDS[kind]}` : "✓",
   reply_markup: {
     inline_keyboard: [
-      Object.entries(KINDS).map(([k, word]) => ({ text: k === kind ? `${word} ✓` : word, callback_data: `kind:${day}:${messageId}:${k}` })),
-      [{ text: "Undo", callback_data: `undo:${day}:${messageId}` }],
+      Object.entries(KINDS).map(([k, word]) => ({ text: k === kind ? `${word} ✓` : word, callback_data: `kind:${messageId}:${k}` })),
+      [{ text: "Undo", callback_data: `undo:${messageId}` }],
     ],
   },
 });
@@ -59,16 +57,21 @@ const receipt = (day: string, messageId: number, kind: string | null) => ({
 async function linkedUser(chatId: number) {
   const { data, error } = await supabase.from("telegram_links").select("user_id, time_zone").eq("chat_id", chatId).maybeSingle();
   if (error) throw error;
-  return data ? { userId: data.user_id as string, timeZone: (data.time_zone as string) || "UTC" } : null;
+  if (!data) return null;
+  const scope = await scopeOf(supabase, data.user_id as string);
+  return { userId: data.user_id as string, timeZone: (data.time_zone as string) || "UTC", home: scope.home };
 }
 
-// The message's day and time in the user's own time zone.
-const timeOf = (unix: number, timeZone: string) => localTime(new Date(unix * 1000), timeZone);
+// The message's day in the user's own time zone (for the files' names).
+const dayOf = (unix: number, timeZone: string) => localTime(new Date(unix * 1000), timeZone).day;
 
 type Attachment = { type: string; file_id: string; file_size: number | null; mime: string; name: string };
 
 const DEFAULT_NAMES: Record<string, string> = {
   photo: "photo.jpg", video: "video.mp4", audio: "audio.mp3", voice: "voice.ogg", video_note: "video.mp4", animation: "animation.mp4", document: "file",
+};
+const TYPE_WORDS: Record<string, string> = {
+  photo: "Photo", video: "Video", audio: "Audio", voice: "Voice message", video_note: "Video message", animation: "GIF", document: "File",
 };
 
 // The message's files, each with the name it gets in Inbox/files/ (the same name every time, so an edit finds them).
@@ -115,9 +118,7 @@ function contentOf(msg: any) {
   return { content: command ? text.slice(command[0].length) : text, kind: command ? command[1].toLowerCase() : null };
 }
 
-const kindOfSection = (section: string | null) => Object.keys(KINDS).find((k) => CAPTURE_SECTIONS[k] === section) ?? null;
-const itemOf = captureItem;
-
+// Lines added under the text: where a forward came from, the files (Obsidian embeds of Inbox/files/…).
 function moreOf(msg: any, files: Attachment[]) {
   const forward = forwardOf(msg);
   const more: string[] = [];
@@ -128,18 +129,8 @@ function moreOf(msg: any, files: Attachment[]) {
   return more;
 }
 
-// The parts of an item already in the draft (to change its kind without losing its text).
-function parseItem(text: string, marker: string) {
-  const lines = text.split("\n");
-  const start = lines.findIndex((l) => l.trimEnd().endsWith(` ^${marker}`));
-  if (start < 0) return null;
-  const m = lines[start].trimEnd().slice(0, -` ^${marker}`.length).match(/^- (?:\[( |x)\] )?(?:(\d{2}:\d{2}) )?(.*)$/);
-  const more: string[] = [];
-  for (let i = start + 1; i < lines.length && /^ {2,}\S/.test(lines[i]); i++) more.push(lines[i].trim());
-  return { checked: m?.[1] === "x", time: m?.[2] ?? "", text: m?.[3] ?? "", more };
-}
-
-const draftPath = inboxNotePath;
+const fallbackTitle = (msg: any, files: Attachment[]) =>
+  files.length ? (msg.document?.file_name ?? TYPE_WORDS[files[0].type] ?? "File") : "Capture";
 
 const inBackground = (job: Promise<unknown>) => {
   if (typeof EdgeRuntime !== "undefined") EdgeRuntime.waitUntil(job);
@@ -161,6 +152,8 @@ async function storeFiles(userId: string, files: Attachment[]) {
     }
   }
 }
+
+const externalId = (chatId: number, messageId: number | string) => `${chatId}:${messageId}`;
 
 async function onMessage(msg: any) {
   const chatId: number = msg.chat.id;
@@ -187,74 +180,73 @@ async function onMessage(msg: any) {
   if (!user) return say(chatId, HOW_TO_LINK);
 
   const { content, kind } = contentOf(msg);
-  const { day, time } = timeOf(msg.date, user.timeZone);
+  const day = dayOf(msg.date, user.timeZone);
   const files = attachmentsOf(msg, day);
   if (!content.trim() && !files.length) return say(chatId, kind ? `/${kind} your text` : "Nothing to save.");
 
-  const marker = `tg${msg.message_id}`;
-  let fresh = false;
-  await editNote(supabase, user.userId, draftPath(day), (draft) => {
-    fresh = !hasItem(draft, marker); // a retried update is already in the draft: no second ✓
-    if (!fresh) return null;
-    return addItem(draft, CAPTURE_SECTIONS[kind ?? "note"], itemOf({ kind, time, text: content, marker, more: moreOf(msg, files) }));
+  const forward = forwardOf(msg);
+  const saved = await addCapture(supabase, {
+    workspaceId: user.home, userId: user.userId, text: content, more: moreOf(msg, files), kind,
+    fallbackTitle: fallbackTitle(msg, files),
+    source: { source: "telegram", external_id: externalId(chatId, msg.message_id), url: forward.url, meta: { files: files.map((f) => f.name) } },
   });
-  if (!fresh) return done();
+  if (!saved) return done(); // a retried update is in already: no second ✓
   if (files.length) inBackground(storeFiles(user.userId, files));
 
   return answer("sendMessage", {
     chat_id: chatId,
     disable_notification: true,
     reply_parameters: { message_id: msg.message_id, allow_sending_without_reply: true },
-    ...receipt(day, msg.message_id, kind),
+    ...receipt(msg.message_id, kind),
   });
 }
 
-// An edited message updates its item (a command added to the text moves it to that kind).
+// An edited message updates its item while it is still unsorted (a command added to the text sets the kind).
 async function onEdit(msg: any) {
   if (msg.chat.type !== "private") return done();
   const user = await linkedUser(msg.chat.id);
   if (!user) return done();
+  const item = await captureBySource(supabase, user.home, "telegram", externalId(msg.chat.id, msg.message_id));
+  if (!item || item.type !== "capture") return done();
   const { content, kind } = contentOf(msg);
-  const { day, time } = timeOf(msg.date, user.timeZone);
-  const marker = `tg${msg.message_id}`;
-  await editNote(supabase, user.userId, draftPath(day), (draft) => {
-    if (!draft || !hasItem(draft, marker)) return null;
-    const section = sectionOfItem(draft, marker);
-    const old = parseItem(draft, marker);
-    const item = itemOf({ kind: kind ?? kindOfSection(section), time, text: content, marker, checked: old?.checked, more: moreOf(msg, attachmentsOf(msg, day)) });
-    return kind && CAPTURE_SECTIONS[kind] !== section ? addItem(removeItem(draft, marker), CAPTURE_SECTIONS[kind], item) : replaceItem(draft, marker, item);
-  });
+  const files = attachmentsOf(msg, dayOf(msg.date, user.timeZone));
+  const parts = captureParts(content, moreOf(msg, files), fallbackTitle(msg, files));
+  const { error } = await supabase.from("items")
+    .update({ ...parts, props: kind ? { ...item.props, kind } : item.props }).eq("id", item.id);
+  if (error) throw error;
+  if (kind) await ensureKindField(supabase, user.home);
   return done();
 }
 
+// Buttons under ✓: "kind:<message id>:<kind>" / "undo:<message id>". Older receipts carried the capture note's day
+// as well ("kind:<day>:<id>:<kind>"); their messages were moved into items with the same id, so they work too.
 async function onCallback(cq: any) {
-  const [action, day, messageId, kind] = String(cq.data ?? "").split(":");
+  const parts = String(cq.data ?? "").split(":");
+  const action = parts[0];
+  const messageId = parts.slice(1).find((p) => /^\d+$/.test(p));
+  const kind = parts[parts.length - 1];
   const chatId: number | undefined = cq.message?.chat?.id;
-  const valid = ["undo", "kind"].includes(action) && DAY.test(day ?? "") && /^\d+$/.test(messageId ?? "");
-  const user = chatId && valid ? await linkedUser(chatId) : null;
+  const user = chatId && messageId && ["undo", "kind"].includes(action) ? await linkedUser(chatId) : null;
   if (!user) return answer("answerCallbackQuery", { callback_query_id: cq.id });
-  const marker = `tg${messageId}`;
-  const sentAt = cq.message?.reply_to_message?.date;
+  const item = await captureBySource(supabase, user.home, "telegram", externalId(chatId!, messageId!));
+  if (!item || item.deleted_at) return answer("answerCallbackQuery", { callback_query_id: cq.id, text: "Not in the Inbox any more" });
 
   if (action === "kind" && KINDS[kind]) {
-    const saved = await editNote(supabase, user.userId, draftPath(day), (draft) => {
-      const old = draft ? parseItem(draft, marker) : null;
-      if (!draft || !old) return null;
-      const time = old.time || (sentAt ? timeOf(sentAt, user.timeZone).time : "");
-      return addItem(removeItem(draft, marker), CAPTURE_SECTIONS[kind], itemOf({ kind, time, text: old.text, marker, checked: old.checked, more: old.more }));
-    });
-    if (saved) await callTelegram("editMessageText", { chat_id: chatId, message_id: cq.message.message_id, ...receipt(day, Number(messageId), kind) });
-    return answer("answerCallbackQuery", { callback_query_id: cq.id, text: saved ? `${KINDS[kind]}` : "Not in the Inbox note any more" });
+    const { error } = await supabase.from("items").update({ props: { ...item.props, kind } }).eq("id", item.id);
+    if (error) throw error;
+    await ensureKindField(supabase, user.home);
+    await callTelegram("editMessageText", { chat_id: chatId, message_id: cq.message.message_id, ...receipt(Number(messageId), kind) });
+    return answer("answerCallbackQuery", { callback_query_id: cq.id, text: KINDS[kind] });
   }
 
-  const removed = await editNote(supabase, user.userId, draftPath(day), (draft) => (draft && hasItem(draft, marker) ? removeItem(draft, marker) : null));
-  if (removed) {
-    const { data } = await supabase.from("vault_files").select("path").eq("user_id", user.userId).is("trashed_at", null)
-      .like("path", `${INBOX}/files/${day}-${messageId}-%`);
-    for (const f of data ?? []) await trashFile(supabase, user.userId, f.path);
-    await callTelegram("editMessageText", { chat_id: chatId, message_id: cq.message.message_id, text: "↩ Removed" });
-  }
-  return answer("answerCallbackQuery", { callback_query_id: cq.id, text: removed ? "Removed" : "Not in the Inbox note any more" });
+  const { error } = await supabase.from("items").update({ deleted_at: new Date().toISOString() }).eq("id", item.id);
+  if (error) throw error;
+  const { data } = await supabase.from("vault_files").select("path").eq("user_id", user.userId).is("trashed_at", null)
+    .like("path", `${INBOX}/files/%-${messageId}-%`);
+  const own = new RegExp(`^${INBOX}/files/\\d{4}-\\d{2}-\\d{2}-${messageId}-\\d+-`);
+  for (const f of data ?? []) if (own.test(f.path)) await trashFile(supabase, user.userId, f.path);
+  await callTelegram("editMessageText", { chat_id: chatId, message_id: cq.message.message_id, text: "↩ Removed" });
+  return answer("answerCallbackQuery", { callback_query_id: cq.id, text: "Removed" });
 }
 
 Deno.serve(async (req) => {

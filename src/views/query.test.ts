@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { Item } from "@/core/items";
-import { applyFilter, dateBucket, groupItems, makeCtx, patchForGroup, runView, sortItems, totals } from "./query";
+import { applyFilter, type CustomField, dateBucket, groupItems, makeCtx, patchForGroup, runView, sortItems, totals } from "./query";
+import { placeAt } from "./layouts/common";
+import { shiftPatch } from "./layouts/TimelineLayout";
+import { captureParts } from "../../supabase/functions/_shared/capture-text";
 
 let n = 0;
 const item = (p: Partial<Item>): Item => ({
@@ -79,5 +82,71 @@ describe("sort and group", () => {
   it("runs the whole view and sums minutes", () => {
     const g = runView(all, { filter: "type:task", group_by: null, sort: [], fields: [] }, ctx);
     expect(totals(g[0].items)).toEqual({ count: 2, estimate: 120, spent: 0 });
+  });
+});
+
+describe("custom fields", () => {
+  const kind: CustomField = { id: "f1", key: "kind", name: "Kind", kind: "select", position: 0, options: [{ id: "idea", name: "Idea" }, { id: "todo", name: "To-do" }] };
+  const urgent: CustomField = { id: "f2", key: "hot", name: "Hot", kind: "checkbox", position: 1, options: [] };
+  const x = item({ title: "Inbox one", type: "capture", props: { kind: "idea", hot: true } });
+  const y = item({ title: "Inbox two", type: "capture", props: { kind: "todo" } });
+  const z = item({ title: "Inbox three", type: "capture" });
+  const c2 = makeCtx([x, y, z], now, [kind, urgent]);
+  const names = (q: string) => applyFilter([x, y, z], q, c2).map((i) => i.title);
+  it("filters by option name or id, none, has / no", () => {
+    expect(names("kind:idea")).toEqual(["Inbox one"]);
+    expect(names("kind:to-do")).toEqual(["Inbox two"]);
+    expect(names("kind:none")).toEqual(["Inbox three"]);
+    expect(names("no:kind")).toEqual(["Inbox three"]);
+    expect(names("hot:yes")).toEqual(["Inbox one"]);
+    expect(names("-hot:yes")).toEqual(["Inbox two", "Inbox three"]);
+  });
+  it("groups by a select in option order, then none", () => {
+    const g = groupItems([z, y, x], "props.kind", c2);
+    expect(g.map((k) => [k.key, k.items.length])).toEqual([["idea", 1], ["todo", 1], ["none", 1]]);
+  });
+  it("sorts by option order and gives the props patch of a group", () => {
+    expect(sortItems([z, y, x], [{ field: "props.kind" }], c2).map((i) => i.title)).toEqual(["Inbox one", "Inbox two", "Inbox three"]);
+    expect(patchForGroup("props.kind", "todo", c2)).toEqual({ props: { kind: "todo" } });
+    expect(patchForGroup("props.hot", "none", c2)).toEqual({ props: { hot: false } });
+  });
+  it("a deleted field is ignored, its key words again", () => {
+    const bare = makeCtx([x], now);
+    expect(groupItems([x], "props.kind", bare).map((g) => g.key)).toEqual(["all"]);
+    expect(applyFilter([x], "kind:idea", bare)).toEqual([]);
+  });
+});
+
+describe("moving rows and bars", () => {
+  const r = (position: number) => item({ position });
+  it("puts a row between its neighbours, or renumbers equal ones", () => {
+    expect(placeAt([r(1), r(2)], 1)).toEqual({ position: 1.5 });
+    expect(placeAt([r(1), r(2)], 0)).toEqual({ position: 0 });
+    expect(placeAt([r(1), r(2)], 2)).toEqual({ position: 3 });
+    const same = [r(0), r(0), r(0)];
+    expect(placeAt(same, 1)).toEqual({ renumber: [{ id: same[0].id, position: 0 }, { id: same[1].id, position: 2 }, { id: same[2].id, position: 3 }] });
+  });
+  it("a timeline drag shifts or stretches the right dates", () => {
+    const planned = item({ planned_on: "2026-11-20" });
+    expect(shiftPatch(planned, "move", 2)).toEqual({ planned_on: "2026-11-22" });
+    expect(shiftPatch(planned, "end", 3)).toEqual({ due_on: "2026-11-23" });
+    expect(shiftPatch(planned, "start", -1)).toEqual({ start_on: "2026-11-19" });
+    const span = item({ planned_on: "2026-11-20", due_on: "2026-11-25" });
+    expect(shiftPatch(span, "start", 2)).toEqual({ planned_on: "2026-11-22" });
+    expect(shiftPatch(span, "start", 9)).toEqual({ planned_on: "2026-11-25" }); // never past the end
+    expect(shiftPatch(span, "move", -1)).toEqual({ planned_on: "2026-11-19", due_on: "2026-11-24" });
+  });
+});
+
+describe("captures", () => {
+  it("first line = title, long ones cut, first link kept", () => {
+    expect(captureParts("Buy milk\nand bread")).toEqual({ title: "Buy milk", body: "and bread", url: null });
+    expect(captureParts("https://x.com/a watch this", ["— Channel"])).toEqual({ title: "https://x.com/a watch this", body: "— Channel", url: "https://x.com/a" });
+    const long = "word ".repeat(60).trim();
+    const p = captureParts(long);
+    expect(p.title.endsWith("…")).toBe(true);
+    expect(p.title.length).toBeLessThanOrEqual(161);
+    expect(p.body).toBe(long);
+    expect(captureParts("", [], "Photo").title).toBe("Photo");
   });
 });

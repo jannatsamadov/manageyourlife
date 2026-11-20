@@ -1,11 +1,13 @@
 import { CalendarDays, ChevronDown, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { type Ctx, FIELDS, type FieldKey, type Group, minutesLabel, totals } from "../query";
-import { PriorityIcon, StatusIcon, Tip, TypeIcon } from "../fields";
+import { type Ctx, type FieldKey, fieldOf, type Group, minutesLabel, optionOf, totals } from "../query";
+import { OptionDot, PriorityIcon, StatusIcon, Tip, TypeIcon } from "../fields";
 
 export function GroupIcon({ by, group, ctx }: { by: FieldKey | null; group: Group; ctx: Ctx }) {
-  if (!by) return null;
-  switch (FIELDS[by].kind) {
+  const def = fieldOf(ctx, by);
+  if (!def) return null;
+  switch (def.kind) {
+    case "select": return <OptionDot color={optionOf(def, group.key)?.color} className={group.key === "none" ? "opacity-30" : ""} />;
     case "status": return <StatusIcon status={group.key} />;
     case "type": return <TypeIcon type={group.key} />;
     case "priority": return <PriorityIcon priority={group.key === "none" ? null : Number(group.key)} />;

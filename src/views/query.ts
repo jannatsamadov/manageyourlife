@@ -1,12 +1,15 @@
 // The views engine (P-69, T-114): fields, the filter language, sort and group by over items. Pure functions, no React,
 // so the layouts (table, board, timeline …), the tests and later a phone app share them. One person's items are a few
 // thousand rows at most, so everything runs in the browser over the cached items.
+// Fields are the built-in columns plus the workspace's custom fields (table `fields`, values in items.props; their
+// key in a view is "props.<key>", in the filter just "<key>:").
 import type { Item, ItemPatch } from "@/core/items";
 import { CLOSED_STATUSES, ITEM_TYPES, PRIORITIES, STATUSES, TYPE_ORDER, type ItemType } from "@/core/types";
 
-export type FieldKey =
+export type BuiltinField =
   | "title" | "type" | "status" | "priority" | "parent" | "when" | "planned_on" | "due_on" | "start_on"
   | "estimate_min" | "spent_min" | "created_at" | "updated_at" | "done_at" | "url";
+export type FieldKey = BuiltinField | `props.${string}`;
 export type Layout = "table" | "board" | "timeline";
 export type SortRule = { field: FieldKey; desc?: boolean };
 export type ViewConfig = {
@@ -15,10 +18,21 @@ export type ViewConfig = {
   sort: SortRule[];
   fields: FieldKey[]; // table columns / lines on a card (title is always shown)
   board_by?: FieldKey; // the board's columns
+  slice_by?: FieldKey | null; // the slice panel's field
   zoom?: "month" | "quarter" | "year"; // the timeline's scale
   new_type?: ItemType; // what "+ Add" makes in this view
 };
-export type Ctx = { byId: Map<string, Item>; today: string };
+
+// A custom field (P-70 "Adding columns later"): a row of `fields`; select options keep their id when renamed.
+export type CustomKind = "text" | "number" | "date" | "select" | "checkbox" | "url";
+export type FieldOption = { id: string; name: string; color?: string };
+export type CustomField = { id: string; key: string; name: string; kind: CustomKind; options: FieldOption[]; position: number };
+export const CUSTOM_KINDS: { id: CustomKind; label: string }[] = [
+  { id: "text", label: "Text" }, { id: "number", label: "Number" }, { id: "date", label: "Date" },
+  { id: "select", label: "Select" }, { id: "checkbox", label: "Checkbox" }, { id: "url", label: "Link" },
+];
+
+export type Ctx = { byId: Map<string, Item>; today: string; fields: Record<string, FieldDef> };
 
 // ── dates (local days as YYYY-MM-DD) ──
 export const localDay = (d: Date) =>
@@ -30,17 +44,22 @@ export const addDays = (day: string, n: number) => {
 };
 export const daysBetween = (a: string, b: string) => Math.round((Date.parse(`${b}T12:00:00`) - Date.parse(`${a}T12:00:00`)) / 864e5);
 const dayOfStamp = (ts: string | null) => (ts ? localDay(new Date(ts)) : null);
-export const makeCtx = (items: Item[], now = new Date()): Ctx => ({ byId: new Map(items.map((i) => [i.id, i])), today: localDay(now) });
+export const makeCtx = (items: Item[], now = new Date(), custom: CustomField[] = []): Ctx => ({
+  byId: new Map(items.map((i) => [i.id, i])), today: localDay(now), fields: fieldsWith(custom),
+});
 
 export const isOpen = (i: Item) => !CLOSED_STATUSES.includes(i.status as never);
 // The day an item needs attention: its planned day or its deadline, whichever comes first.
 export const whenOf = (i: Item) => [i.planned_on, i.due_on].filter(Boolean).sort()[0] ?? null;
 
 // ── fields ──
-type Kind = "text" | "type" | "status" | "priority" | "parent" | "date" | "number";
-export type FieldDef = { key: FieldKey; label: string; kind: Kind; tip?: string; get: (i: Item, c: Ctx) => string | number | null };
+type Kind = "text" | "type" | "status" | "priority" | "parent" | "date" | "number" | "select" | "checkbox";
+export type FieldDef = {
+  key: FieldKey; label: string; kind: Kind; tip?: string; custom?: CustomField;
+  get: (i: Item, c: Ctx) => string | number | boolean | null;
+};
 
-export const FIELDS: Record<FieldKey, FieldDef> = {
+export const FIELDS: Record<BuiltinField, FieldDef> = {
   title: { key: "title", label: "Title", kind: "text", get: (i) => i.title },
   type: { key: "type", label: "Type", kind: "type", get: (i) => i.type },
   status: { key: "status", label: "Status", kind: "status", get: (i) => i.status },
@@ -57,9 +76,33 @@ export const FIELDS: Record<FieldKey, FieldDef> = {
   done_at: { key: "done_at", label: "Done on", kind: "date", get: (i) => dayOfStamp(i.done_at) },
   url: { key: "url", label: "Link", kind: "text", get: (i) => i.url },
 };
-export const FIELD_KEYS = Object.keys(FIELDS) as FieldKey[];
-export const GROUPABLE: FieldKey[] = ["status", "type", "priority", "parent", "when", "planned_on", "due_on", "start_on"];
-export const BOARDABLE: FieldKey[] = ["status", "type", "priority", "parent"];
+export const FIELD_KEYS = Object.keys(FIELDS) as BuiltinField[];
+const GROUPABLE: FieldKey[] = ["status", "type", "priority", "parent", "when", "planned_on", "due_on", "start_on"];
+const BOARDABLE: FieldKey[] = ["status", "type", "priority", "parent"];
+
+export const propsOf = (i: Item) => (i.props && typeof i.props === "object" && !Array.isArray(i.props) ? i.props as Record<string, unknown> : {});
+
+// A custom field as a field of the engine.
+export function customDef(f: CustomField): FieldDef {
+  const kind: Kind = f.kind === "url" ? "text" : f.kind;
+  return {
+    key: `props.${f.key}`, label: f.name, kind, custom: f,
+    get: (i) => {
+      const v = propsOf(i)[f.key];
+      if (v === null || v === undefined || v === "") return null;
+      if (f.kind === "checkbox") return v === true;
+      if (f.kind === "number") return typeof v === "number" ? v : Number.isNaN(Number(v)) ? null : Number(v);
+      return typeof v === "string" ? v : String(v);
+    },
+  };
+}
+export const fieldsWith = (custom: CustomField[]): Record<string, FieldDef> =>
+  ({ ...FIELDS, ...Object.fromEntries([...custom].sort((a, b) => a.position - b.position).map((f) => [`props.${f.key}`, customDef(f)])) });
+export const fieldOf = (c: Ctx, key: string | null | undefined): FieldDef | null => (key ? c.fields[key] ?? null : null);
+export const customFields = (c: Ctx) => Object.values(c.fields).filter((d) => d.custom);
+export const groupableFields = (c: Ctx) => [...GROUPABLE, ...customFields(c).filter((d) => ["select", "checkbox", "date"].includes(d.kind)).map((d) => d.key)];
+export const boardableFields = (c: Ctx) => [...BOARDABLE, ...customFields(c).filter((d) => ["select", "checkbox"].includes(d.kind)).map((d) => d.key)];
+export const optionOf = (d: FieldDef | null, id: unknown) => d?.custom?.options.find((o) => o.id === id) ?? null;
 
 // ── filter: a small GitHub-style language ──
 // type:task,idea  -status:done  priority:urgent,high  in:thesis  due:<@today  day:@today..@today+7  is:open  no:due
@@ -143,8 +186,8 @@ function predicate(key: string, values: string[]): Pred | null {
           default: return ITEM_TYPES[v as ItemType] ? i.type === v : false;
         }
       });
-    case "no": return (i) => values.every((v) => PRESENT[v] ? !PRESENT[v](i) : true);
-    case "has": return (i) => values.every((v) => PRESENT[v] ? !!PRESENT[v](i) : true);
+    case "no": return (i, c) => values.every((v) => !present(v, i, c));
+    case "has": return (i, c) => values.every((v) => present(v, i, c));
   }
   if (DATE_KEYS[key]) {
     const get = DATE_KEYS[key];
@@ -152,9 +195,40 @@ function predicate(key: string, values: string[]): Pred | null {
   }
   if (NUM_KEYS[key]) {
     const get = NUM_KEYS[key];
-    return (i) => values.some((v) => compare(get(i), v, (s) => (s.trim() !== "" && !Number.isNaN(Number(s)) ? Number(s) : null)));
+    return (i) => values.some((v) => compare(get(i), v, parseNumber));
   }
-  return null;
+  // Any other key may be a custom field ("kind:idea"); decided per item, since the fields come with the context.
+  // Without such a field the token is plain words, like an unknown key.
+  const words = `${key}:${values.join(",")}`;
+  return (i, c) => {
+    const def = c.fields[`props.${key}`];
+    return def ? matchCustom(def, i, values, c) : lower(i.title).includes(words) || lower(i.body).includes(words);
+  };
+}
+
+const parseNumber = (s: string) => (s.trim() !== "" && !Number.isNaN(Number(s)) ? Number(s) : null);
+const YES = ["yes", "true", "1", "on"];
+
+function matchCustom(def: FieldDef, i: Item, values: string[], c: Ctx) {
+  const v = def.get(i, c);
+  return values.some((x) => {
+    if (x === "none") return v === null || v === false;
+    switch (def.kind) {
+      case "select": { const o = optionOf(def, v); return !!o && (o.id.toLowerCase() === x || o.name.toLowerCase() === x); }
+      case "checkbox": return (v === true) === YES.includes(x);
+      case "number": return compare(v as number | null, x, parseNumber);
+      case "date": return compare(v as string | null, x, (s) => dayValue(s, c.today));
+      default: return lower(v as string | null).includes(x);
+    }
+  });
+}
+
+function present(key: string, i: Item, c: Ctx) {
+  if (PRESENT[key]) return !!PRESENT[key](i);
+  const def = c.fields[`props.${key}`];
+  if (!def) return true;
+  const v = def.get(i, c);
+  return v !== null && v !== false;
 }
 
 export function parseFilter(q: string): Filter {
@@ -197,8 +271,14 @@ function sortValue(key: FieldKey, i: Item, c: Ctx): string | number | null {
     case "type": return TYPE_ORDER.indexOf(i.type as ItemType);
     case "title": return lower(i.title);
     case "parent": return lower(FIELDS.parent.get(i, c) as string | null) || null;
-    default: return FIELDS[key].get(i, c);
   }
+  const def = fieldOf(c, key);
+  if (!def) return null;
+  const v = def.get(i, c);
+  if (def.kind === "select") { const k = def.custom!.options.findIndex((o) => o.id === v); return k < 0 ? null : k; }
+  if (def.kind === "checkbox") return v ? 0 : 1;
+  if (def.kind === "text") return typeof v === "string" ? v.toLowerCase() : null;
+  return v as string | number | null;
 }
 
 export function sortItems(items: Item[], rules: SortRule[], c: Ctx): Item[] {
@@ -238,17 +318,21 @@ export function dateBucket(day: string | null, today: string): string {
 // The groups a field gives, in their natural order (statuses in their order, priorities urgent → none, date buckets
 // from overdue to later). Empty groups are kept for status / priority (a board needs every column).
 export function groupItems(items: Item[], by: FieldKey | null, c: Ctx): Group[] {
-  if (!by) return [{ key: "all", label: "", items }];
-  const def = FIELDS[by];
+  const def = fieldOf(c, by);
+  if (!by || !def) return [{ key: "all", label: "", items }];
   const fixed: { key: string; label: string }[] | null =
     def.kind === "status" ? STATUSES.map((s) => ({ key: s.id, label: s.label }))
     : def.kind === "priority" ? [...PRIORITIES.map((p) => ({ key: String(p.id), label: p.label })), { key: "none", label: "No priority" }]
+    : def.kind === "select" ? [...def.custom!.options.map((o) => ({ key: o.id, label: o.name })), { key: "none", label: `No ${def.label.toLowerCase()}` }]
+    : def.kind === "checkbox" ? [{ key: "yes", label: def.label }, { key: "none", label: `Not ${def.label.toLowerCase()}` }]
     : def.kind === "date" ? BUCKETS.map((b) => (by === "when" || by === "due_on" ? b : b.key === "overdue" ? { ...b, label: "Before today" } : b))
     : null;
   const keyOf = (i: Item): string => {
     if (def.kind === "date") return dateBucket(def.get(i, c) as string | null, c.today);
     if (def.kind === "parent") return i.parent_id && c.byId.has(i.parent_id) ? i.parent_id : "none";
     const v = def.get(i, c);
+    if (def.kind === "checkbox") return v ? "yes" : "none";
+    if (def.kind === "select" && !optionOf(def, v)) return "none";
     return v === null || v === undefined ? "none" : String(v);
   };
   const map = new Map<string, Item[]>();
@@ -275,9 +359,22 @@ export function groupItems(items: Item[], by: FieldKey | null, c: Ctx): Group[] 
 }
 
 // What an item gets when it is dropped into a group (a board column) or added inside it.
+// A custom field's value goes in as { props: { key: value } }: only that key, merged into the item's props by the
+// writer (src/core/edit.ts), so other keys are kept.
 export function patchForGroup(by: FieldKey | null, key: string, c: Ctx): ItemPatch {
-  if (!by || key === "all") return {};
-  switch (FIELDS[by].kind) {
+  const def = fieldOf(c, by);
+  if (!by || !def || key === "all") return {};
+  if (def.custom) {
+    const k = def.custom.key;
+    if (def.kind === "select") return { props: { [k]: key === "none" ? null : key } };
+    if (def.kind === "checkbox") return { props: { [k]: key === "yes" } };
+    if (def.kind === "date") {
+      const day = key === "today" ? c.today : key === "tomorrow" ? addDays(c.today, 1) : key === "none" ? null : undefined;
+      return day === undefined ? {} : { props: { [k]: day } };
+    }
+    return {};
+  }
+  switch (def.kind) {
     case "status": return { status: key };
     case "priority": return { priority: key === "none" ? null : Number(key) };
     case "type": return key === "none" ? {} : { type: key };

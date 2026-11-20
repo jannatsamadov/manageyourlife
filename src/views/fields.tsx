@@ -2,9 +2,9 @@
 // the words in tooltips (P-28).
 import { useMemo, useState } from "react";
 import {
-  CalendarDays, Circle, CircleAlert, CircleCheck, CircleDashed, CircleDot, CircleX, Flag, FolderKanban, Footprints,
+  CalendarDays, Check, Circle, CircleAlert, CircleCheck, CircleDashed, CircleDot, CircleX, Flag, FolderKanban, Footprints,
   HandCoins, Hourglass, Inbox, Landmark, Layers, Lightbulb, type LucideIcon, Milestone, Receipt, Repeat, ShieldAlert,
-  ShoppingCart, SignalHigh, SignalLow, SignalMedium, SignalZero, Split, SquareCheck, Target, Timer, TrendingUp,
+  ShoppingCart, SignalHigh, SignalLow, SignalMedium, SignalZero, Split, Square, SquareCheck, Target, Timer, TrendingUp, Type,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Item, ItemPatch } from "@/core/items";
@@ -12,7 +12,7 @@ import { ITEM_TYPES, PRIORITIES, STATUSES, TYPE_ORDER, type ItemStatus, type Ite
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { addDays, type Ctx, daysBetween, type FieldKey, isOpen, localDay, minutesLabel } from "./query";
+import { addDays, type Ctx, daysBetween, type FieldDef, type FieldKey, fieldOf, isOpen, localDay, minutesLabel, optionOf } from "./query";
 
 // ── looks ──
 export const TYPE_ICONS: Record<ItemType, LucideIcon> = {
@@ -35,6 +35,16 @@ export const PRIORITY_LOOK: Record<string, { icon: LucideIcon; className: string
   4: { icon: SignalLow, className: "text-muted-foreground", label: "Low" },
   none: { icon: SignalZero, className: "text-muted-foreground/40", label: "No priority" },
 };
+
+// Colours of select options (the names are stored with the option).
+export const OPTION_COLORS = ["gray", "red", "orange", "yellow", "green", "blue", "purple", "pink"] as const;
+const DOT: Record<string, string> = {
+  gray: "bg-zinc-400", red: "bg-red-400", orange: "bg-orange-400", yellow: "bg-yellow-400", green: "bg-emerald-400",
+  blue: "bg-sky-400", purple: "bg-violet-400", pink: "bg-pink-400",
+};
+export function OptionDot({ color, className }: { color?: string; className?: string }) {
+  return <span className={cn("inline-block h-2 w-2 shrink-0 rounded-full", DOT[color ?? "gray"] ?? DOT.gray, className)} />;
+}
 
 export function TypeIcon({ type, className }: { type: string; className?: string }) {
   const Icon = TYPE_ICONS[type as ItemType] ?? Circle;
@@ -252,8 +262,86 @@ export function ParentPicker({ item, ctx, onChange, children }: { item: Item; ct
   );
 }
 
+// ── custom fields (values in item.props) ──
+// The patch carries only the changed key; src/core/edit.ts merges it into the item's props.
+export function CustomPicker({ item, def, ctx, onChange, showEmpty }: { item: Item; def: FieldDef; ctx: Ctx; onChange: Change; showEmpty?: boolean }) {
+  const [open, setOpen] = useState(false);
+  const f = def.custom!;
+  const value = def.get(item, ctx);
+  const set = (v: string | number | boolean | null) => { setOpen(false); if (v !== value) onChange({ props: { [f.key]: v } }); };
+  const empty = <span className="text-muted-foreground/40">{showEmpty ? "Empty" : "—"}</span>;
+
+  if (f.kind === "checkbox") {
+    return (
+      <Tip label={def.label}>
+        <button type="button" className={cellButton} onClick={(e) => { e.stopPropagation(); onChange({ props: { [f.key]: !value } }); }}>
+          {value ? <SquareCheck className="h-3.5 w-3.5 text-primary" /> : <Square className="h-3.5 w-3.5 text-muted-foreground/50" />}
+        </button>
+      </Tip>
+    );
+  }
+  if (f.kind === "select") {
+    const o = optionOf(def, value);
+    return (
+      <PickerShell open={open} setOpen={setOpen} label={def.label} trigger={
+        <button type="button" className={cellButton}>{o ? <><OptionDot color={o.color} /><span className="truncate">{o.name}</span></> : empty}</button>
+      }>
+        <div className="max-h-72 overflow-y-auto">
+          {f.options.map((x) => (
+            <button key={x.id} type="button" className={menuRow} onClick={() => set(x.id)}>
+              <OptionDot color={x.color} /><span className="flex-1 truncate">{x.name}</span>{x.id === value && <Check className="h-3.5 w-3.5" />}
+            </button>
+          ))}
+          {f.options.length === 0 && <div className="px-2 py-1.5 text-xs text-muted-foreground">No options yet (Fields → edit)</div>}
+        </div>
+        {o && <button type="button" className={cn(menuRow, "text-muted-foreground")} onClick={() => set(null)}>Clear</button>}
+      </PickerShell>
+    );
+  }
+  if (f.kind === "date") {
+    const day = value as string | null;
+    return (
+      <PickerShell open={open} setOpen={setOpen} label={def.label} trigger={
+        <button type="button" className={cn(cellButton, !day && "text-muted-foreground/40")}>{day ? dayLabel(day, ctx.today) : <CalendarDays className="h-3.5 w-3.5" />}</button>
+      }>
+        <button type="button" className={menuRow} onClick={() => set(ctx.today)}>Today</button>
+        <button type="button" className={menuRow} onClick={() => set(addDays(ctx.today, 1))}>Tomorrow</button>
+        <input type="date" defaultValue={day ?? ""} className="mt-1 w-full rounded border border-border bg-background px-2 py-1 text-sm"
+          onChange={(e) => { const v = e.target.value; if (v && Number(v.slice(0, 4)) >= 1900) set(v); }} />
+        {day && <button type="button" className={cn(menuRow, "text-muted-foreground")} onClick={() => set(null)}>Clear</button>}
+      </PickerShell>
+    );
+  }
+  // text, number, link: a line to type in; Enter saves, an empty line clears.
+  const shown = value === null ? null : String(value);
+  return (
+    <PickerShell open={open} setOpen={setOpen} wide label={def.label} trigger={
+      <button type="button" className={cn(cellButton, "max-w-full")}>
+        {shown === null ? (f.kind === "number" ? empty : <Type className="h-3.5 w-3.5 text-muted-foreground/40" />)
+          : f.kind === "url" ? <span className="truncate text-primary">{shown.replace(/^https?:\/\/(www\.)?/, "")}</span>
+          : <span className="truncate">{shown}</span>}
+      </button>
+    }>
+      <input
+        autoFocus type={f.kind === "number" ? "number" : "text"} defaultValue={shown ?? ""} placeholder={def.label}
+        className="w-full rounded border border-border bg-background px-2 py-1 text-sm"
+        onKeyDown={(e) => {
+          if (e.key !== "Enter") return;
+          const raw = (e.target as HTMLInputElement).value.trim();
+          set(raw === "" ? null : f.kind === "number" ? (Number.isNaN(Number(raw)) ? null : Number(raw)) : raw);
+        }}
+      />
+      {f.kind === "url" && shown && (
+        <a href={shown} target="_blank" rel="noreferrer" className={cn(menuRow, "text-primary")}>Open link</a>
+      )}
+    </PickerShell>
+  );
+}
+
 // ── one field of an item, as a table cell / a line on a card ──
 export function FieldValue({ item, field, ctx, onChange }: { item: Item; field: FieldKey; ctx: Ctx; onChange: Change }) {
+  const def = fieldOf(ctx, field);
+  if (def?.custom) return <CustomPicker item={item} def={def} ctx={ctx} onChange={onChange} />;
   switch (field) {
     case "type": return <TypePicker item={item} onChange={onChange} showLabel />;
     case "status": return <StatusPicker item={item} onChange={onChange} showLabel />;

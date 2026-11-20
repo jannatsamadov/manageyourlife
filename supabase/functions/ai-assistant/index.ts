@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
+import { sortInbox } from "./sort.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -60,7 +61,23 @@ serve(async (req) => {
       });
     }
 
-    const { message, history, model, today: clientToday } = await req.json();
+    const body = await req.json();
+
+    // The Inbox's "AI sort" (sort.ts): proposals only, the app applies what the user picks.
+    if (body?.mode === "sort_inbox") {
+      const ask = (messages: unknown[]) => {
+        const call = (m: string) => fetch(GEMINI_URL, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${GEMINI_API_KEY}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ model: m, messages }),
+        });
+        return call(DEFAULT_MODEL).then((r) => (r.status === 503 ? call(FALLBACK_MODEL) : r));
+      };
+      const out = await sortInbox(supabase, user.id, body, ask);
+      return new Response(JSON.stringify(out.json), { status: out.status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    const { message, history, model, today: clientToday } = body;
     // The user's local date, so "tomorrow" becomes the right deadline.
     const today = /^\d{4}-\d{2}-\d{2}$/.test(clientToday ?? "") ? clientToday : new Date().toISOString().split("T")[0];
 

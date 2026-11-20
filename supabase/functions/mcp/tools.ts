@@ -4,10 +4,8 @@ import type { SupabaseClient } from "npm:@supabase/supabase-js@2.45.4";
 import { CHILD_KIND, ITEM_NODE_COLS, loadTree, nodeOut, present } from "./strategy.ts";
 import { collectIdeas } from "../_shared/ideas.ts";
 import { PRIORITY_NAME, PRIORITY_NUM, type Scope, STRATEGY_TYPES, V1_STATUS, V2_STATUS } from "../_shared/items.ts";
-import {
-  addItem, CAPTURE_SECTIONS, captureItem, editNote, INBOX, inboxNotePath, localTime, moveFile, noteById, readNote, safeName, userTimeZone,
-  VaultError, writeNote,
-} from "../_shared/vault.ts";
+import { editNote, INBOX, moveFile, noteById, readNote, safeName, VaultError, writeNote } from "../_shared/vault.ts";
+import { addCapture } from "../_shared/capture.ts";
 
 export type Ctx = { db: SupabaseClient; userId: string; scope: Scope };
 
@@ -165,6 +163,13 @@ const TASK_INPUT = {
 const tasksOf = ({ db, scope }: Ctx) =>
   db.from("items").select(TASK_COLS).in("workspace_id", scope.workspaces).eq("type", "task").is("deleted_at", null);
 
+// The unsorted Inbox: capture items (Telegram, inbox_add, the app) that are not done, dropped or trashed.
+const capturesOf = ({ db, scope }: Ctx, opts?: { head: boolean }) =>
+  db.from("items").select("id, workspace_id, title, body, url, props, created_at, item_sources(source)", opts?.head ? { count: "exact", head: true } : undefined)
+    .in("workspace_id", scope.workspaces).eq("type", "capture").is("deleted_at", null).not("status", "in", "(done,dropped)");
+// What an Inbox item can become (never a money type: money stays out of MCP).
+const SORT_TYPES = ["task", "idea", "project", "routine", "milestone", "option", "obstacle", "area", "goal", "mission", "step"];
+
 async function ownTask(ctx: Ctx, id: unknown) {
   need(isUuid(id), "task id: uuid");
   const task = check(await tasksOf(ctx).eq("id", id).maybeSingle());
@@ -212,7 +217,7 @@ export const TOOLS: Tool[] = [
   {
     name: "today",
     title: "Today's plan",
-    description: "Tasks planned for a day, overdue tasks and the number of notes waiting in the Inbox folder. Pass the user's local date.",
+    description: "Tasks planned for a day, overdue tasks, the number of unsorted Inbox items and of notes in the Inbox folder. Pass the user's local date.",
     scope: "read",
     inputSchema: { type: "object", properties: { date: { ...DATE, description: "The user's local date; default: today in UTC" } } },
     annotations: READ,
@@ -226,7 +231,11 @@ export const TOOLS: Tool[] = [
       const { count, error } = await db.from("vault_files").select("id", { count: "exact", head: true }).eq("user_id", userId)
         .is("trashed_at", null).like("path", `${INBOX}/%`).ilike("path", "%.md");
       if (error) throw error;
-      return { date: day, planned: await tasksOut(ctx, planned as any[]), overdue: await tasksOut(ctx, overdue as any[]), inbox_notes: count ?? 0 };
+      const inbox = await capturesOf(ctx, { head: true });
+      return {
+        date: day, planned: await tasksOut(ctx, planned as any[]), overdue: await tasksOut(ctx, overdue as any[]),
+        inbox_items: inbox.count ?? 0, inbox_notes: count ?? 0,
+      };
     },
   },
   {
@@ -506,24 +515,33 @@ export const TOOLS: Tool[] = [
     name: "inbox_list",
     title: "List the Inbox",
     description:
-      "The Inbox = the notes in the Inbox folder, waiting to be sorted: the daily capture notes (Inbox/<date>.md — Telegram and inbox_add, " +
-      "sections Ideas / Questions / To-dos / Resources / Notes) and new notes. Newest first, with the start of the text; read one with note_get, " +
-      "sort it by moving it (note_update folder) or making tasks.",
+      "The Inbox = everything captured and not sorted yet: items from Telegram, inbox_add and the app (newest first; kind = the " +
+      "sender's hint idea / question / todo / resource, or none), plus the notes in the Inbox folder (read one with note_get). " +
+      "Sort an item with inbox_sort (make it a task, an idea, a project … under a goal / project, with dates), drop or trash it there.",
     scope: "read",
     inputSchema: { type: "object", properties: { limit: { type: "integer", minimum: 1, maximum: 200, default: 50 } } },
     annotations: READ,
-    run: async ({ limit }, { db, userId }) => {
-      const rows = check(await db.from("vault_files").select("id, path, title, body, modified_at").eq("user_id", userId).is("trashed_at", null)
-        .like("path", `${INBOX}/%`).ilike("path", "%.md").order("modified_at", { ascending: false }).limit(limitOf(limit, 50, 200))) as any[];
-      return { notes: rows.map(({ body, modified_at, ...n }) => ({ ...n, updated_at: modified_at, snippet: (body ?? "").slice(0, 500) })) };
+    run: async ({ limit }, ctx) => {
+      const { db, userId } = ctx;
+      const n = limitOf(limit, 50, 200);
+      const items = check(await capturesOf(ctx).order("created_at", { ascending: false }).limit(n)) as any[];
+      const notes = check(await db.from("vault_files").select("id, path, title, body, modified_at").eq("user_id", userId).is("trashed_at", null)
+        .like("path", `${INBOX}/%`).ilike("path", "%.md").order("modified_at", { ascending: false }).limit(n)) as any[];
+      return {
+        items: items.map((i) => ({
+          id: i.id, title: i.title, text: i.body || undefined, link: i.url ?? undefined, kind: i.props?.kind ?? null,
+          from: i.item_sources?.[0]?.source ?? "app", created_at: i.created_at,
+        })),
+        notes: notes.map(({ body, modified_at, ...note }) => ({ ...note, updated_at: modified_at, snippet: (body ?? "").slice(0, 500) })),
+      };
     },
   },
   {
     name: "inbox_add",
     title: "Add to the Inbox",
     description:
-      "Capture something into the Inbox as is, to be sorted later by the user: one item in today's capture note (Inbox/<date>.md), " +
-      "under the section of its kind (a to-do becomes a \"- [ ]\" line). Pass the user's local date.",
+      "Capture something into the Inbox as is, to be sorted later (by the user or with inbox_sort): one Inbox item; the first line " +
+      "is its title, the rest its text. kind is a hint for sorting.",
     scope: "write",
     inputSchema: {
       type: "object",
@@ -531,21 +549,75 @@ export const TOOLS: Tool[] = [
         content: { type: "string" },
         kind: { type: "string", enum: KINDS },
         url: { type: "string", description: "Link back to the source" },
-        date: { ...DATE, description: "The user's local date; default: today in the user's time zone" },
       },
       required: ["content"],
     },
     annotations: WRITE,
-    run: async ({ content, kind, url, date }, { db, userId }) => {
+    run: async ({ content, kind, url }, { db, userId, scope }) => {
       need(isText(content, 20000), "content: 1–20000 characters");
       need(kind === undefined || KINDS.includes(kind), `kind: one of ${KINDS.join(", ")}`);
       need(url === undefined || (typeof url === "string" && url.length <= 2000), "url: up to 2000 characters");
-      const now = localTime(new Date(), await userTimeZone(db, userId));
-      const path = inboxNotePath(isDate(date) ? date : now.day);
-      const section = CAPTURE_SECTIONS[kind ?? "note"];
-      const item = captureItem({ kind: kind ?? null, time: now.time, text: content, marker: `mcp${Date.now()}`, more: url ? [url] : [] });
-      const saved = await inVault(() => editNote(db, userId, path, (text) => addItem(text, section, item)));
-      return { note_id: saved?.id, path, section };
+      const saved = await addCapture(db, {
+        workspaceId: scope.home, userId, text: content, more: url ? [url] : [], kind: kind ?? null,
+        source: { source: "mcp", external_id: crypto.randomUUID(), url: url ?? null },
+      });
+      return { id: saved!.id, title: saved!.title, in: "Inbox" };
+    },
+  },
+  {
+    name: "inbox_sort",
+    title: "Sort an Inbox item",
+    description:
+      "Sort one Inbox item (from inbox_list): give it its type (task, idea, project …), optionally a parent (a strategy node from " +
+      "strategy_tree, a project, a task …; the type decides which parents fit), a title / text, a planned date, a deadline, a " +
+      "priority, an estimate. status abandoned = not worth doing; trash = true moves it to the Trash. Ask the user when unsure.",
+    scope: "write",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: ID,
+        type: { type: "string", enum: SORT_TYPES },
+        parent_id: { type: ["string", "null"], description: "uuid of the item it belongs to; null = none" },
+        title: { type: "string" },
+        description: { type: "string" },
+        status: { type: "string", enum: STATUSES },
+        date: { ...DATE, description: "Planned day (YYYY-MM-DD)" },
+        deadline: { ...DATE, description: "Due date (YYYY-MM-DD)" },
+        priority: { type: "string", enum: PRIORITIES },
+        estimated_minutes: { type: "integer", minimum: 1 },
+        trash: { type: "boolean" },
+      },
+      required: ["id"],
+    },
+    annotations: { ...WRITE, idempotentHint: true },
+    run: async ({ id, type, parent_id, trash, ...a }, ctx) => {
+      const { db } = ctx;
+      need(isUuid(id), "id: uuid");
+      const item = check(await capturesOf(ctx).eq("id", id).maybeSingle()) as any;
+      need(item, "not an unsorted Inbox item (see inbox_list)");
+      if (trash) {
+        check(await db.from("items").update({ deleted_at: new Date().toISOString() }).eq("id", item.id));
+        return { id, title: item.title, trashed: true };
+      }
+      const row = taskFields(a, false);
+      if (type !== undefined) {
+        need(SORT_TYPES.includes(type), `type: one of ${SORT_TYPES.join(", ")}`);
+        row.type = type;
+      }
+      if (parent_id !== undefined) {
+        need(parent_id === null || isUuid(parent_id), "parent_id: uuid or null");
+        if (parent_id) {
+          const parent = check(await db.from("items").select("id, type, workspace_id").in("workspace_id", ctx.scope.workspaces)
+            .is("deleted_at", null).eq("id", parent_id).maybeSingle()) as any;
+          need(parent && SORT_TYPES.includes(parent.type), "parent not found");
+          need(parent.workspace_id === item.workspace_id, "that parent is in another workspace");
+        }
+        row.parent_id = parent_id;
+      }
+      need(Object.keys(row).length, "nothing to change");
+      const saved = checkWrite(await db.from("items").update(row).eq("id", item.id)
+        .select("id, type, title, parent_id, status, planned_on, due_on").single()) as any;
+      return { ...saved, sorted: saved.type !== "capture" };
     },
   },
   {

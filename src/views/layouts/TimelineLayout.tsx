@@ -1,8 +1,9 @@
 // Timeline (P-69, GitHub's Roadmap): a bar per item from its start (start / planned day) to its end (deadline /
 // planned day) on a day axis; zoom month / quarter / year; today marked. Items without any date are counted, not drawn.
+// A bar is dragged to move its dates, or stretched by its ends; a click opens the item.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
-import type { Item } from "@/core/items";
+import type { Item, ItemPatch } from "@/core/items";
 import { addDays, daysBetween, type Group } from "../query";
 import { dayLabel, Tip } from "../fields";
 import { GroupHeader } from "./GroupHeader";
@@ -20,13 +21,95 @@ export function spanOf(i: Item): { from: string; to: string } | null {
   return s <= e ? { from: s, to: e } : { from: e, to: s };
 }
 
+type Drag = "move" | "start" | "end";
+
+// The dates a drag of `days` gives: moving shifts every date the item has; the start end sets the start (start_on,
+// or the planned day when that is the start of a planned → deadline span); the end sets the deadline (or the planned
+// day when that is the end of a start → planned span). Never past the other end.
+export function shiftPatch(i: Item, mode: Drag, days: number): ItemPatch {
+  if (!days) return {};
+  const s = spanOf(i);
+  if (!s) return {};
+  if (mode === "move") {
+    const out: ItemPatch = {};
+    if (i.start_on) out.start_on = addDays(i.start_on, days);
+    if (i.planned_on) out.planned_on = addDays(i.planned_on, days);
+    if (i.due_on) out.due_on = addDays(i.due_on, days);
+    return out;
+  }
+  if (mode === "start") {
+    const day = addDays(s.from, days);
+    const from = day > s.to ? s.to : day;
+    return !i.start_on && i.planned_on && i.due_on && i.planned_on < i.due_on ? { planned_on: from } : { start_on: from };
+  }
+  const day = addDays(s.to, days);
+  const to = day < s.from ? s.from : day;
+  return !i.due_on && i.start_on && i.planned_on && i.start_on < i.planned_on ? { planned_on: to } : { due_on: to };
+}
+
 const BAR: Record<string, string> = {
   doing: "bg-amber-400/80", waiting: "bg-sky-400/70", someday: "bg-muted-foreground/40",
   done: "bg-primary/35", dropped: "bg-muted-foreground/25", todo: "bg-primary/75",
 };
 
+function Bar({ item, left, width, px, label, onOpen, onChange }: {
+  item: Item; left: number; width: number; px: number; label: string; onOpen: (id: string) => void; onChange: LayoutProps["onChange"];
+}) {
+  const [drag, setDrag] = useState<{ mode: Drag; days: number } | null>(null);
+  const from = useRef<{ x: number; mode: Drag; moved: boolean } | null>(null);
+  const d = drag?.days ?? 0;
+  const l = drag && drag.mode !== "end" ? left + d * px : left;
+  const w = !drag || drag.mode === "move" ? width : Math.max(px, drag.mode === "start" ? width - d * px : width + d * px);
+
+  const down = (e: React.PointerEvent<HTMLElement>, mode: Drag) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    from.current = { x: e.clientX, mode, moved: false };
+  };
+  const move = (e: React.PointerEvent) => {
+    const f = from.current;
+    if (!f) return;
+    const dx = e.clientX - f.x;
+    if (Math.abs(dx) > 3) f.moved = true;
+    if (f.moved) setDrag({ mode: f.mode, days: Math.round(dx / px) });
+  };
+  const up = () => {
+    const f = from.current;
+    from.current = null;
+    setDrag(null);
+    if (!f) return;
+    if (!f.moved) { if (f.mode === "move") onOpen(item.id); return; }
+    const patch = shiftPatch(item, f.mode, d);
+    if (Object.keys(patch).length) onChange(item, patch);
+  };
+  const handlers = { onPointerMove: move, onPointerUp: up, onPointerCancel: () => { from.current = null; setDrag(null); } };
+  const edge = "absolute top-0 h-full w-1.5 cursor-ew-resize rounded opacity-0 group-hover/bar:opacity-100 bg-foreground/30";
+
+  return (
+    <Tip label={drag ? `${d > 0 ? "+" : ""}${d} days` : `${item.title} · ${label}`}>
+      <div
+        role="button" tabIndex={0}
+        onKeyDown={(e) => { if (e.key === "Enter") onOpen(item.id); }}
+        onPointerDown={(e) => down(e, "move")} {...handlers}
+        className={cn("group/bar absolute top-1.5 h-5 cursor-grab touch-none select-none overflow-hidden rounded px-1.5 text-left text-[11px] leading-5 text-background",
+          BAR[item.status] ?? BAR.todo, w < 24 && "px-0", drag && "cursor-grabbing ring-2 ring-primary/60")}
+        style={{ left: l, width: Math.max(w, 6) }}
+      >
+        {w > 60 ? item.title : ""}
+        {w >= 18 && (
+          <>
+            <span className={cn(edge, "left-0")} onPointerDown={(e) => down(e, "start")} {...handlers} />
+            <span className={cn(edge, "right-0")} onPointerDown={(e) => down(e, "end")} {...handlers} />
+          </>
+        )}
+      </div>
+    </Tip>
+  );
+}
+
 export function TimelineLayout(props: LayoutProps) {
-  const { groups, config, ctx, onOpen } = props;
+  const { groups, config, ctx, onOpen, onChange } = props;
   const zoom = config.zoom ?? "quarter";
   const px = PX[zoom];
   const [folded, setFolded] = useState<Set<string>>(new Set());
@@ -112,16 +195,7 @@ export function TimelineLayout(props: LayoutProps) {
                           <TitleCell item={i} {...props} />
                         </div>
                         <div className="relative h-full" style={{ width }}>
-                          <Tip label={`${i.title} · ${label}`}>
-                            <button
-                              type="button"
-                              onClick={() => onOpen(i.id)}
-                              className={cn("absolute top-1.5 h-5 overflow-hidden rounded px-1.5 text-left text-[11px] leading-5 text-background", BAR[i.status] ?? BAR.todo, w < 24 && "px-0")}
-                              style={{ left, width: Math.max(w, 6) }}
-                            >
-                              {w > 60 ? i.title : ""}
-                            </button>
-                          </Tip>
+                          <Bar item={i} left={left} width={w} px={px} label={label} onOpen={onOpen} onChange={onChange} />
                         </div>
                       </div>
                     );

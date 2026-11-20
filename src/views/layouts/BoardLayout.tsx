@@ -3,7 +3,7 @@ import { useState } from "react";
 import { DndContext, DragOverlay, PointerSensor, useDraggable, useDroppable, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { cn } from "@/lib/utils";
 import type { Item } from "@/core/items";
-import { FIELDS, type Group, patchForGroup } from "../query";
+import { fieldOf, type Group, patchForGroup } from "../query";
 import { FieldValue } from "../fields";
 import { GroupIcon, GroupSums } from "./GroupHeader";
 import { AddRow } from "./AddRow";
@@ -13,7 +13,7 @@ import type { LayoutProps } from "./common";
 function Card({ item, props, overlay }: { item: Item; props: LayoutProps; overlay?: boolean }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: item.id, disabled: overlay });
   const by = props.config.board_by ?? "status";
-  const fields = props.config.fields.filter((f) => f !== "title" && f !== by && FIELDS[f]);
+  const fields = props.config.fields.filter((f) => f !== "title" && f !== by && fieldOf(props.ctx, f));
   return (
     <div
       ref={overlay ? undefined : setNodeRef}
