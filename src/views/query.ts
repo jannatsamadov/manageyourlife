@@ -26,7 +26,8 @@ export type ViewConfig = {
 // A custom field (P-70 "Adding columns later"): a row of `fields`; select options keep their id when renamed.
 export type CustomKind = "text" | "number" | "date" | "select" | "checkbox" | "url";
 export type FieldOption = { id: string; name: string; color?: string };
-export type CustomField = { id: string; key: string; name: string; kind: CustomKind; options: FieldOption[]; position: number };
+// item_types: the types it is shown for in the item drawer (null = every type).
+export type CustomField = { id: string; key: string; name: string; kind: CustomKind; options: FieldOption[]; position: number; item_types?: string[] | null };
 export const CUSTOM_KINDS: { id: CustomKind; label: string }[] = [
   { id: "text", label: "Text" }, { id: "number", label: "Number" }, { id: "date", label: "Date" },
   { id: "select", label: "Select" }, { id: "checkbox", label: "Checkbox" }, { id: "url", label: "Link" },

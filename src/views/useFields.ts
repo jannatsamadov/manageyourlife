@@ -8,8 +8,8 @@ import { useWorkspace } from "@/core/items";
 import type { Json } from "@/integrations/supabase/types";
 import type { CustomField, CustomKind, FieldOption } from "./query";
 
-const COLS = "id, key, name, kind, options, position";
-type Row = { id: string; key: string; name: string; kind: string; options: Json; position: number };
+const COLS = "id, key, name, kind, options, position, item_types";
+type Row = { id: string; key: string; name: string; kind: string; options: Json; position: number; item_types: string[] | null };
 const toField = (r: Row): CustomField => ({
   ...r, kind: r.kind as CustomKind, options: Array.isArray(r.options) ? (r.options as unknown as FieldOption[]) : [],
 });

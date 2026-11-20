@@ -49,7 +49,7 @@ const PRIORITIES = ["urgent", "high", "medium", "low"];
 const KINDS = ["idea", "question", "todo", "resource"];
 const TASK_COLS =
   "id, workspace_id, title, body, status, parent_id, planned_on, planned_time, is_event, due_on, due_time, priority, estimate_min, " +
-  "spent_min, url, created_at";
+  "spent_min, url, props, created_at";
 const isTime = (v: unknown) => typeof v === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(v);
 const NODE_STATUSES = ["open", "done", "dropped"];
 const DATE = { type: "string", description: "YYYY-MM-DD" };
@@ -73,14 +73,59 @@ const taskOut = (i: any) => ({
   link: i.url ?? "",
   node_id: i.parent && STRATEGY_TYPES.includes(i.parent.type) ? i.parent.id : null,
   parent_task_id: i.parent?.type === "task" ? i.parent.id : undefined,
+  fields: i.fields,
   created_at: i.created_at,
 });
+
+// ── custom fields (the workspace's `fields`, values in items.props; e.g. Who: Me / With AI / AI) ──
+type Field = { workspace_id: string; key: string; name: string; kind: string; options: { id: string; name: string }[] };
+async function fieldsOf({ db, scope }: Ctx): Promise<Field[]> {
+  return check(await db.from("fields").select("workspace_id, key, name, kind, options").in("workspace_id", scope.workspaces).order("position")) as Field[];
+}
+// An item's custom values by field name, select options by their names: { "Who": "AI" }.
+function fieldValues(fields: Field[], item: any) {
+  const out: Record<string, unknown> = {};
+  for (const f of fields) {
+    if (f.workspace_id !== item.workspace_id) continue;
+    const v = item.props?.[f.key];
+    if (v === null || v === undefined || v === "") continue;
+    out[f.name] = f.kind === "select" ? (f.options.find((o) => o.id === v)?.name ?? v) : v;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+// { "Who": "AI" } (field name or key; an option's name or id; null clears) → props keys and values.
+function fieldInput(fields: Field[], workspaceId: string, input: unknown): Record<string, unknown> {
+  // Some clients send an object as JSON text (an older copy of the schema without this property).
+  if (typeof input === "string") { try { input = JSON.parse(input); } catch { /* checked below */ } }
+  need(input && typeof input === "object" && !Array.isArray(input), "fields: an object like {\"Who\": \"AI\"}");
+  const own = fields.filter((f) => f.workspace_id === workspaceId);
+  const out: Record<string, unknown> = {};
+  for (const [name, raw] of Object.entries(input as Record<string, unknown>)) {
+    const f = own.find((x) => x.name.toLowerCase() === name.toLowerCase() || x.key === name);
+    need(f, `no field "${name}"; fields: ${own.map((x) => x.name).join(", ") || "none"}`);
+    if (raw === null) { out[f!.key] = null; continue; }
+    switch (f!.kind) {
+      case "select": {
+        const o = f!.options.find((x) => x.id === raw || x.name.toLowerCase() === String(raw).toLowerCase());
+        need(o, `${f!.name}: one of ${f!.options.map((x) => x.name).join(", ")}`);
+        out[f!.key] = o!.id;
+        break;
+      }
+      case "checkbox": need(typeof raw === "boolean", `${f!.name}: true or false`); out[f!.key] = raw; break;
+      case "number": need(typeof raw === "number" && Number.isFinite(raw), `${f!.name}: a number`); out[f!.key] = raw; break;
+      case "date": need(isDate(raw), `${f!.name}: YYYY-MM-DD`); out[f!.key] = raw; break;
+      default: need(typeof raw === "string" && raw.length <= 2000, `${f!.name}: text up to 2000 characters`); out[f!.key] = raw;
+    }
+  }
+  return out;
+}
 // The parent of each task (PostgREST does not embed a table in itself without a computed relationship).
-async function tasksOut({ db }: Ctx, rows: any[]) {
+async function tasksOut(ctx: Ctx, rows: any[]) {
   const ids = [...new Set(rows.map((r) => r.parent_id).filter(Boolean))];
-  const parents = ids.length ? check(await db.from("items").select("id, type, title").in("id", ids)) as any[] : [];
+  const parents = ids.length ? check(await ctx.db.from("items").select("id, type, title").in("id", ids)) as any[] : [];
   const byId = new Map(parents.map((p) => [p.id, p]));
-  return rows.map((r) => taskOut({ ...r, parent: r.parent_id ? byId.get(r.parent_id) ?? null : null }));
+  const fields = rows.some((r) => r.props && Object.keys(r.props).length) ? await fieldsOf(ctx) : [];
+  return rows.map((r) => taskOut({ ...r, parent: r.parent_id ? byId.get(r.parent_id) ?? null : null, fields: fieldValues(fields, r) }));
 }
 const taskOutOne = async (ctx: Ctx, row: any) => (await tasksOut(ctx, [row]))[0];
 const nodePublic = (i: any) => {
@@ -157,6 +202,10 @@ const TASK_INPUT = {
   priority: { type: "string", enum: PRIORITIES },
   link: { type: "string", description: "Related URL" },
   node_id: { type: ["string", "null"], description: "Strategy goal / mission / step this task serves (from strategy_tree); null unlinks" },
+  fields: {
+    type: "object",
+    description: "Custom fields by name, e.g. {\"Who\": \"AI\"} — Who: Me (the user does it) / With AI (the user with an AI) / AI (an AI does it). A select takes an option name; null clears.",
+  },
 };
 
 // Items of the caller's workspaces only.
@@ -252,12 +301,17 @@ export const TOOLS: Tool[] = [
         unscheduled: { type: "boolean", description: "Only tasks without a planned day" },
         node_id: { ...ID, description: "Only tasks directly inside this strategy node (or this task: its steps)" },
         search: { type: "string", description: "Text in title or description" },
+        fields: { type: "object", description: "Only tasks with these custom values, e.g. {\"Who\": \"AI\"} for the tasks an AI should do" },
         limit: { type: "integer", minimum: 1, maximum: 200, default: 50 },
       },
     },
     annotations: READ,
     run: async (a, ctx) => {
       let q = tasksOf(ctx);
+      if (a.fields !== undefined) {
+        const values = fieldInput(await fieldsOf(ctx), ctx.scope.home, a.fields);
+        for (const [key, v] of Object.entries(values)) q = v === null ? q.is(`props->>${key}`, null) : q.eq(`props->>${key}`, String(v));
+      }
       if (a.status !== undefined) {
         need(STATUSES.includes(a.status), `status: one of ${STATUSES.join(", ")}`);
         q = q.eq("status", V2_STATUS[a.status]);
@@ -301,13 +355,14 @@ export const TOOLS: Tool[] = [
       const { db, userId, scope } = ctx;
       const row: Record<string, unknown> = { priority: 3, ...taskFields(a, true), type: "task", workspace_id: scope.home, created_by: userId };
       if (row.parent_id) row.workspace_id = (await ownNode(ctx, row.parent_id)).workspace_id;
+      if (a.fields !== undefined) row.props = fieldInput(await fieldsOf(ctx), row.workspace_id as string, a.fields);
       return taskOutOne(ctx, checkWrite(await db.from("items").insert(row).select(TASK_COLS).single()));
     },
   },
   {
     name: "task_update",
     title: "Update a task",
-    description: "Change any fields of a task: title, description, status (idle/active/complete/abandoned), planned date (null = unscheduled, which also drops its time and event mark), start_time, is_event, deadline, deadline_time, estimate, priority, link, strategy node (node_id; null unlinks).",
+    description: "Change any fields of a task: title, description, status (idle/active/complete/abandoned), planned date (null = unscheduled, which also drops its time and event mark), start_time, is_event, deadline, deadline_time, estimate, priority, link, strategy node (node_id; null unlinks), custom fields (fields, e.g. {\"Who\": \"AI\"}).",
     scope: "write",
     inputSchema: { type: "object", properties: { id: ID, ...TASK_INPUT }, required: ["id"] },
     annotations: { ...WRITE, idempotentHint: true },
@@ -315,6 +370,7 @@ export const TOOLS: Tool[] = [
       const { db } = ctx;
       const task = await ownTask(ctx, id);
       const row = taskFields(a, false);
+      if (a.fields !== undefined) row.props = { ...(task.props ?? {}), ...fieldInput(await fieldsOf(ctx), task.workspace_id, a.fields) };
       need(Object.keys(row).length, "nothing to change");
       if (row.parent_id) need((await ownNode(ctx, row.parent_id)).workspace_id === task.workspace_id, "that node is in another workspace");
       return taskOutOne(ctx, checkWrite(await db.from("items").update(row).eq("id", task.id).select(TASK_COLS).single()));
@@ -440,17 +496,19 @@ export const TOOLS: Tool[] = [
     name: "note_create",
     title: "Create a note",
     description:
-      "Create a Markdown note (a file; the title is its file name). Goes to the Inbox folder unless folder is given (\"\" = top level). " +
+      "Create a Markdown note (a file; the title is its file name) in the folder where it belongs — pick an existing folder " +
+      "(see the paths notes_search returns); \"\" = top level. Not the Inbox: that is for the user's own raw captures. " +
       "\"- [ ] item\" lines are to-dos; [[Note name]] links to another note.",
     scope: "write",
     inputSchema: {
       type: "object",
-      properties: { title: { type: "string" }, content: { type: "string" }, folder: { type: "string", description: "Default \"Inbox\"" } },
-      required: ["title"],
+      properties: { title: { type: "string" }, content: { type: "string" }, folder: { type: "string", description: "Folder path, e.g. \"Projects/Dissertation\"; \"\" = top level" } },
+      required: ["title", "folder"],
     },
     annotations: WRITE,
     run: async ({ title, content, folder }, { db, userId }) => {
       need(isText(title, 150), "title: 1–150 characters");
+      need(typeof folder === "string", "folder: the folder the note belongs in (\"\" = top level)");
       need(content === undefined || (typeof content === "string" && content.length <= 200000), "content: text up to 200000 characters");
       const r = await inVault(() => writeNote(db, userId, notePath(folder, title), content ?? "", null));
       need(!("conflict" in r), "a note with this name is already in that folder");
@@ -540,8 +598,9 @@ export const TOOLS: Tool[] = [
     name: "inbox_add",
     title: "Add to the Inbox",
     description:
-      "Capture something into the Inbox as is, to be sorted later (by the user or with inbox_sort): one Inbox item; the first line " +
-      "is its title, the rest its text. kind is a hint for sorting.",
+      "Only when the user asks to drop something into their Inbox as is (the Inbox holds the user's own raw captures). " +
+      "Anything you can place yourself, create in its place instead: task_create, note_create in its folder, strategy_add. " +
+      "One Inbox item; the first line is its title, the rest its text; kind is a hint for sorting.",
     scope: "write",
     inputSchema: {
       type: "object",

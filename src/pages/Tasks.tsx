@@ -25,7 +25,7 @@ import NoteTodos from "./NoteTodos";
 import Ideas from "./Ideas";
 
 const SEEDS: ViewSeed[] = [
-  { name: "Tasks", layout: "table", config: { filter: "type:task is:open", group_by: "when", sort: [{ field: "priority" }], fields: ["priority", "when", "estimate_min", "parent"], new_type: "task" } },
+  { name: "Tasks", layout: "table", config: { filter: "type:task is:open", group_by: "when", sort: [{ field: "priority" }], fields: ["priority", "props.who", "when", "estimate_min", "parent"], new_type: "task" } },
   { name: "Inbox", layout: "table", config: { filter: "type:capture is:open", group_by: null, slice_by: "props.kind", sort: [{ field: "created_at", desc: true }], fields: ["props.kind", "type", "parent", "when", "created_at"], new_type: "capture" } },
   { name: "Board", layout: "board", config: { filter: "type:task,idea -status:dropped", group_by: null, board_by: "status", sort: [{ field: "priority" }], fields: ["priority", "when", "parent"], new_type: "task" } },
   { name: "Ideas", layout: "table", config: { filter: "type:idea", group_by: "parent", sort: [{ field: "created_at", desc: true }], fields: ["status", "parent", "created_at"], new_type: "idea" } },

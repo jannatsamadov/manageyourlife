@@ -164,7 +164,7 @@ function Body({ item }: { item: Item }) {
             onBlur={(e) => { const v = e.target.value.trim() || null; if (v !== item.url) change({ url: v }); }}
           />
         </Row>
-        {customFields(ctx).map((d) => (
+        {customFields(ctx).filter((d) => !d.custom?.item_types?.length || d.custom.item_types.includes(item.type) || d.get(item, ctx) !== null).map((d) => (
           <Row key={d.key} label={d.label}><CustomPicker item={item} def={d} ctx={ctx} onChange={change} showEmpty /></Row>
         ))}
       </div>
