@@ -1,7 +1,7 @@
 // The item drawer (P-70 §10, like GitHub's issue side panel): any item, opened from any page by `?item=<id>` in the
 // URL (so a link opens it too). Properties by type, the path to the root, sub-items, linked notes with their to-dos,
 // where it came from, the timer.
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronRight, FileText, Play, Square, Trash2, Undo2 } from "lucide-react";
@@ -19,11 +19,19 @@ import {
 } from "@/views/fields";
 import { AddRow } from "@/views/layouts/AddRow";
 
+// `fresh`: an item just made (e.g. a click on an empty cell of the Tunnel view) — the drawer opens with its title
+// selected, ready to type over (?new=1).
 export function useItemDrawer() {
   const [params, setParams] = useSearchParams();
-  const open = useCallback((id: string) => setParams((p) => { const n = new URLSearchParams(p); n.set("item", id); return n; }), [setParams]);
-  const close = useCallback(() => setParams((p) => { const n = new URLSearchParams(p); n.delete("item"); return n; }), [setParams]);
-  return { id: params.get("item"), open, close };
+  const open = useCallback((id: string, opts?: { fresh?: boolean }) => setParams((p) => {
+    const n = new URLSearchParams(p);
+    n.set("item", id);
+    if (opts?.fresh) n.set("new", "1");
+    else n.delete("new");
+    return n;
+  }), [setParams]);
+  const close = useCallback(() => setParams((p) => { const n = new URLSearchParams(p); n.delete("item"); n.delete("new"); return n; }), [setParams]);
+  return { id: params.get("item"), fresh: params.get("new") === "1", open, close };
 }
 
 // What "+ Add" makes under an item: the next level of the strategy, else a task where tasks may sit.
@@ -77,6 +85,17 @@ function Body({ item }: { item: Item }) {
   const custom = useFields();
   const ctx = useMemo(() => makeCtx(items.data ?? [], new Date(), custom.fields), [items.data, custom.fields]);
   const change = (patch: Parameters<typeof edit.change>[1]) => edit.change(item, patch);
+  // a fresh item: its title focused and selected (after the sheet has placed its own focus)
+  const titleRef = useRef<HTMLTextAreaElement>(null);
+  const fresh = drawer.fresh;
+  useEffect(() => {
+    if (!fresh) return;
+    const t = window.setTimeout(() => {
+      titleRef.current?.focus();
+      titleRef.current?.select();
+    }, 80);
+    return () => window.clearTimeout(t);
+  }, [fresh, item.id]);
   const running = logs.data?.some((l) => l.item_id === item.id && !l.ended_at);
   const kids = useMemo(() => (items.data ?? []).filter((i) => i.parent_id === item.id && !i.deleted_at).sort((a, b) => a.position - b.position), [items.data, item.id]);
   const sources = useQuery({
@@ -106,12 +125,19 @@ function Body({ item }: { item: Item }) {
       )}
 
       <textarea
+        ref={titleRef}
         key={`t-${item.id}-${item.title}`}
         defaultValue={item.title}
         rows={Math.min(4, Math.max(1, Math.ceil(item.title.length / 45)))}
         className="w-full resize-none bg-transparent text-lg font-semibold outline-none"
         onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); (e.target as HTMLTextAreaElement).blur(); } }}
-        onBlur={(e) => { const t = e.target.value.trim(); if (t && t !== item.title) change({ title: t }); }}
+        onBlur={(e) => {
+          const t = e.target.value.trim();
+          if (t && t !== item.title) {
+            change({ title: t });
+            if (fresh) drawer.open(item.id); // named: no longer fresh
+          }
+        }}
       />
 
       <div className="grid grid-cols-[96px_1fr] gap-x-3 gap-y-0.5">
