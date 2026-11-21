@@ -21,6 +21,7 @@ const LIFT = 0.006; // tiles sit this far off their wall
 const FOCUS_DIST = 1.25;
 const MAX_PHOTOS = 24; // per day
 const WRAP_DAYS = 14; // cruising this far ahead fades back to today (as the Depth view does)
+const BOOST_AFTER = 300, CLICK_WITHIN = 450; // ms: holding longer boosts; let go sooner and it is still a click
 
 export type TunnelTask = {
   id: string;
@@ -320,7 +321,10 @@ export class Passage {
   private ndc = new THREE.Vector2();
   private pointerIn = false;
   private pointerMoved = false;
-  private press: { x: number; y: number; id: number; touch: boolean; moved: boolean; boosted: boolean; timer: number; lastV: number; lastAt: number; last: number } | null = null;
+  private press: {
+    x: number; y: number; id: number; touch: boolean; moved: boolean; boosted: boolean; timer: number;
+    lastV: number; lastAt: number; last: number; at: number; tile: Tile | null;
+  } | null = null;
   private hovered: Tile | null = null;
   private animating = new Set<Tile>();
   private focus: { tile: Tile; t: number; dir: 1 | -1 } | null = null;
@@ -1123,9 +1127,11 @@ export class Passage {
     if (e.button > 0) return;
     this.setPointer(e);
     const touch = e.pointerType !== "mouse";
+    // The tile is the one under the finger when it goes down: the passage keeps moving until it comes up.
     const press = {
       x: e.clientX, y: e.clientY, id: e.pointerId, touch, moved: false, boosted: false, timer: 0,
-      lastV: 0, lastAt: performance.now(), last: touch ? e.clientX : e.clientY,
+      lastV: 0, lastAt: performance.now(), last: touch ? e.clientX : e.clientY, at: performance.now(),
+      tile: this.focus ? null : this.tileAt(),
     };
     press.timer = window.setTimeout(() => {
       if (this.press === press && !press.moved && !this.focus) {
@@ -1133,7 +1139,7 @@ export class Passage {
         this.boosting = true;
         this.canvas.style.cursor = "grabbing";
       }
-    }, 200);
+    }, BOOST_AFTER);
     this.press = press;
   };
 
@@ -1141,7 +1147,7 @@ export class Passage {
     this.setPointer(e);
     const p = this.press;
     if (!p || p.id !== e.pointerId) return;
-    if (!p.moved && Math.hypot(e.clientX - p.x, e.clientY - p.y) > 6 && !this.focus) {
+    if (!p.moved && Math.hypot(e.clientX - p.x, e.clientY - p.y) > (p.touch ? 12 : 6) && !this.focus) {
       p.moved = true;
       clearTimeout(p.timer);
       if (p.boosted) {
@@ -1169,16 +1175,17 @@ export class Passage {
     clearTimeout(p.timer);
     this.press = null;
     this.canvas.style.cursor = "";
+    const held = performance.now() - p.at;
     if (p.boosted) {
       this.boosting = false;
-      return;
+      if (held > CLICK_WITHIN) return; // a real hold: it was a boost, not a click
     }
     if (p.moved) {
       if (performance.now() - p.lastAt < 80) this.glide += clamp(p.lastV * 0.3, -6, 6); // a flick keeps going
       this.anchor = this.pos + this.glide;
       return;
     }
-    this.click();
+    this.click(p.tile);
   };
 
   private onCancel = (e: PointerEvent) => {
@@ -1215,12 +1222,12 @@ export class Passage {
     return hit ? this.tileOf.get(hit.object) ?? null : null;
   }
 
-  private click() {
+  private click(pressed: Tile | null) {
     if (this.focus) {
       this.close();
       return;
     }
-    const t = this.tileAt();
+    const t = pressed && this.tileOf.get(pressed.mesh) === pressed ? pressed : this.tileAt(); // still alive?
     if (!t?.pick) return;
     if (t.pick.kind === "day") this.events.onPick(t.pick);
     else this.open(t);
