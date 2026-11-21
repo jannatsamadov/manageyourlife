@@ -10,6 +10,7 @@ import ErrorBoundary from "@/components/ErrorBoundary";
 
 import SchedulePlanning from "@/pages/SchedulePlanning";
 import SettingsPage from "@/pages/Settings";
+import ProfilePage from "@/pages/Profile";
 import Notes from "@/pages/Notes";
 import Tasks from "@/pages/Tasks";
 import Money from "@/pages/Money";
@@ -79,6 +80,7 @@ const AppRoutes = () => (
                   <Route path="/notes" element={<Notes />} />
                   <Route path="/trash" element={<Trash />} />
                   <Route path="/settings" element={<SettingsPage />} />
+                  <Route path="/profile" element={<ProfilePage />} />
                   <Route path="*" element={<NotFound />} />
                 </Routes>
                 </PageBoundary>

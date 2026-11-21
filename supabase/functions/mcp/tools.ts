@@ -259,6 +259,86 @@ const notePath = (folder: unknown, title: string) => {
   return `${dir ? `${dir}/` : ""}${safeName(title) || "Untitled"}.md`;
 };
 
+// ── any item (P-70 item 11, T-113): the generic tools, on the DB's type registry (item_types). Private types (money)
+//    never go in or out, and neither do the cost columns. Field names are the item's own (v2) ones. ──
+const V2_STATUSES = ["todo", "doing", "waiting", "someday", "done", "dropped"];
+const ITEM_COLS =
+  "id, workspace_id, type, title, body, status, parent_id, position, url, color, planned_on, planned_time, is_event, start_on, " +
+  "due_on, due_time, done_at, priority, estimate_min, spent_min, weight, target_count, progress, props, created_at, updated_at";
+const ORDERS: Record<string, [string, boolean]> = {
+  updated: ["updated_at", false], created: ["created_at", false], planned: ["planned_on", true], due: ["due_on", true],
+  priority: ["priority", true], position: ["position", true],
+};
+const EXCERPT = 280;
+
+// The types an AI may see, from the registry.
+async function publicTypes(db: SupabaseClient) {
+  const rows = check(await db.from("item_types").select("type, private").order("type")) as { type: string; private: boolean }[];
+  return rows.filter((r) => !r.private).map((r) => r.type);
+}
+
+// An item in its own field names; empty values left out (fewer tokens); the text cut in lists.
+function itemOut(i: any, parent: any, fields: Field[], full: boolean) {
+  const out: Record<string, unknown> = { id: i.id, type: i.type, title: i.title, status: i.status };
+  const text: string = i.body ?? "";
+  if (text) out[full ? "description" : "excerpt"] = full || text.length <= EXCERPT ? text : `${text.slice(0, EXCERPT)}…`;
+  if (parent) out.parent = { id: parent.id, type: parent.type, title: parent.title };
+  const rest: Record<string, unknown> = {
+    priority: i.priority ? PRIORITY_NAME[i.priority] : null, planned_on: i.planned_on, planned_time: i.planned_time,
+    is_event: i.is_event || null, start_on: i.start_on, due_on: i.due_on, due_time: i.due_time, estimate_min: i.estimate_min,
+    spent_min: i.spent_min || null, url: i.url, color: i.color, weight: Number(i.weight) !== 1 ? Number(i.weight) : null,
+    target_count: i.target_count, progress: i.progress === null ? null : Number(i.progress), done_at: i.done_at,
+    fields: fieldValues(fields, i),
+  };
+  for (const [k, v] of Object.entries(rest)) if (v !== null && v !== undefined) out[k] = v;
+  out.updated_at = i.updated_at;
+  return out;
+}
+async function itemsOut(ctx: Ctx, rows: any[], types: string[], full = false) {
+  const ids = [...new Set(rows.map((r) => r.parent_id).filter(Boolean))];
+  const parents = ids.length ? check(await ctx.db.from("items").select("id, type, title").in("id", ids).in("type", types)) as any[] : [];
+  const byId = new Map(parents.map((p) => [p.id, p]));
+  const fields = rows.some((r) => r.props && Object.keys(r.props).length) ? await fieldsOf(ctx) : [];
+  return rows.map((r) => itemOut(r, r.parent_id ? byId.get(r.parent_id) : null, fields, full));
+}
+
+async function ownItem(ctx: Ctx, id: unknown, types: string[]) {
+  need(isUuid(id), "id: uuid");
+  const item = check(await ctx.db.from("items").select(ITEM_COLS).in("workspace_id", ctx.scope.workspaces).in("type", types)
+    .is("deleted_at", null).eq("id", id).maybeSingle());
+  need(item, "item not found");
+  return item as any;
+}
+
+// item_update's fields → columns.
+function itemPatch(a: any, types: string[]) {
+  const row: Record<string, unknown> = {};
+  const set = (key: string, ok: (v: any) => boolean, msg: string, map: (v: any) => unknown = (v) => v, col = key) => {
+    if (a[key] === undefined) return;
+    need(ok(a[key]), `${key}: ${msg}`);
+    row[col] = map(a[key]);
+  };
+  set("title", (v) => isText(v, 500), "1–500 characters", (v) => v.trim());
+  set("description", (v) => typeof v === "string" && v.length <= 100000, "text up to 100000 characters", (v) => v, "body");
+  set("type", (v) => types.includes(v), `one of ${types.join(", ")}`);
+  set("status", (v) => V2_STATUSES.includes(v), `one of ${V2_STATUSES.join(", ")}`);
+  set("priority", (v) => v === null || PRIORITIES.includes(v), `one of ${PRIORITIES.join(", ")}, or null`, (v) => (v === null ? null : PRIORITY_NUM[v]));
+  for (const k of ["planned_on", "start_on", "due_on"]) set(k, (v) => v === null || isDate(v), "YYYY-MM-DD or null");
+  for (const k of ["planned_time", "due_time"]) set(k, (v) => v === null || isTime(v), "HH:MM (24 h) or null");
+  set("is_event", (v) => typeof v === "boolean", "true or false");
+  set("estimate_min", (v) => v === null || (Number.isInteger(v) && v > 0 && v <= 100000), "positive whole number or null");
+  set("url", (v) => v === null || (typeof v === "string" && v.length <= 2000), "URL or null", (v) => v?.trim() || null);
+  set("color", (v) => v === null || (typeof v === "string" && /^#[0-9a-fA-F]{6}$/.test(v)), "#rrggbb or null");
+  set("weight", (v) => typeof v === "number" && v > 0 && v <= 100, "a number above 0, up to 100");
+  set("target_count", (v) => v === null || (Number.isInteger(v) && v >= 1 && v <= 1000), "1–1000 or null");
+  set("progress", (v) => v === null || (typeof v === "number" && v >= 0 && v <= 1), "0–1 or null");
+  set("parent_id", (v) => v === null || isUuid(v), "uuid or null (no parent)");
+  return row;
+}
+
+const ITEM_TYPES_TEXT =
+  "area, goal, mission, step (the strategy), project, routine, milestone, option, obstacle, task, idea, capture (the unsorted Inbox)";
+
 const READ = { readOnlyHint: true, openWorldHint: false };
 const WRITE = { readOnlyHint: false, destructiveHint: false, openWorldHint: false };
 
@@ -802,6 +882,140 @@ export const TOOLS: Tool[] = [
       for (let i = 0; i < ids.length; i++) ids.push(...all.filter((n) => n.parent_id === ids[i]).map((n) => n.id));
       checkWrite(await db.from("items").delete().in("id", ids));
       return { id, title: node.title, deleted: true, nodes_removed: ids.length };
+    },
+  },
+  {
+    name: "items_query",
+    title: "Find any items",
+    description:
+      `Every kind of item, not only tasks: ${ITEM_TYPES_TEXT}. Filter by type, status, parent, dates, text, custom fields; ` +
+      "pass id for one item in full with its path and what is inside it. Field names are the items' own (status todo / doing / " +
+      "waiting / someday / done / dropped; planned_on = the day it is planned for; due_on = deadline). Trashed items never show. " +
+      "For tasks the task tools give the same data in their own field names.",
+    scope: "read",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { ...ID, description: "One item in full: its text, its path to the top, the items inside it" },
+        types: { type: "array", items: { type: "string" }, description: `Only these types: ${ITEM_TYPES_TEXT}` },
+        status: { type: "array", items: { type: "string", enum: V2_STATUSES } },
+        open: { type: "boolean", description: "Only items not done and not dropped" },
+        parent_id: { type: "string", description: "Only the items directly inside this item (uuid), or \"none\" for the top level" },
+        search: { type: "string", description: "Text in title or description" },
+        planned_from: DATE, planned_to: DATE, due_from: DATE, due_to: DATE,
+        fields: { type: "object", description: "Only items with these custom values, e.g. {\"Who\": \"AI\"}" },
+        order: { type: "string", enum: Object.keys(ORDERS), default: "updated", description: "updated / created: newest first; the others: soonest / first, empty last" },
+        limit: { type: "integer", minimum: 1, maximum: 200, default: 50 },
+      },
+    },
+    annotations: READ,
+    run: async (a, ctx) => {
+      const { db, scope } = ctx;
+      const types = await publicTypes(db);
+      if (a.id !== undefined) {
+        const item = await ownItem(ctx, a.id, types);
+        const inside = check(await db.from("items").select("id, type, title, status").eq("parent_id", item.id).in("type", types)
+          .is("deleted_at", null).order("position").limit(200)) as any[];
+        const path: { id: string; type: string; title: string }[] = [];
+        for (let up = item.parent_id, n = 0; up && n < 20; n++) {
+          const p = check(await db.from("items").select("id, type, title, parent_id").eq("id", up).in("type", types).maybeSingle()) as any;
+          if (!p) break;
+          path.unshift({ id: p.id, type: p.type, title: p.title });
+          up = p.parent_id;
+        }
+        return { ...(await itemsOut(ctx, [item], types, true))[0], path, inside };
+      }
+      let wanted = types;
+      if (a.types !== undefined) {
+        need(Array.isArray(a.types) && a.types.length && a.types.every((t: unknown) => types.includes(t as string)), `types: some of ${types.join(", ")}`);
+        wanted = a.types;
+      }
+      let q = db.from("items").select(ITEM_COLS).in("workspace_id", scope.workspaces).in("type", wanted).is("deleted_at", null);
+      if (a.status !== undefined) {
+        need(Array.isArray(a.status) && a.status.length && a.status.every((s: unknown) => V2_STATUSES.includes(s as string)), `status: some of ${V2_STATUSES.join(", ")}`);
+        q = q.in("status", a.status);
+      }
+      if (a.open) q = q.not("status", "in", "(done,dropped)");
+      if (a.parent_id !== undefined) {
+        need(a.parent_id === "none" || isUuid(a.parent_id), "parent_id: uuid or \"none\"");
+        q = a.parent_id === "none" ? q.is("parent_id", null) : q.eq("parent_id", a.parent_id);
+      }
+      for (const [k, col, op] of [["planned_from", "planned_on", "gte"], ["planned_to", "planned_on", "lte"], ["due_from", "due_on", "gte"], ["due_to", "due_on", "lte"]] as const) {
+        if (a[k] === undefined) continue;
+        need(isDate(a[k]), `${k}: YYYY-MM-DD`);
+        q = op === "gte" ? q.gte(col, a[k]) : q.lte(col, a[k]);
+      }
+      if (a.fields !== undefined) {
+        const values = fieldInput(await fieldsOf(ctx), scope.home, a.fields);
+        for (const [key, v] of Object.entries(values)) q = v === null ? q.is(`props->>${key}`, null) : q.eq(`props->>${key}`, String(v));
+      }
+      const term = searchTerm(a.search);
+      if (term) q = q.or(`title.ilike.*${term}*,body.ilike.*${term}*`);
+      need(a.order === undefined || a.order in ORDERS, `order: one of ${Object.keys(ORDERS).join(", ")}`);
+      const [col, ascending] = ORDERS[a.order ?? "updated"];
+      const rows = check(await q.order(col, { ascending, nullsFirst: false }).order("id").limit(limitOf(a.limit, 50, 200))) as any[];
+      return { items: await itemsOut(ctx, rows, types), count: rows.length };
+    },
+  },
+  {
+    name: "item_update",
+    title: "Update any item",
+    description:
+      `Change any item found with items_query (${ITEM_TYPES_TEXT}): its fields in items_query's names, its type, its parent ` +
+      "(the database refuses a parent its type cannot sit in, and says which fit), custom fields; trash = true moves it to the " +
+      "Trash (only when nothing is inside it). Prefer status dropped over the Trash to keep the history. A task's date and time " +
+      "changes also go to Google Calendar / Tasks.",
+    scope: "write",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: ID,
+        title: { type: "string" },
+        description: { type: "string" },
+        type: { type: "string", description: ITEM_TYPES_TEXT },
+        status: { type: "string", enum: V2_STATUSES },
+        parent_id: { type: ["string", "null"], description: "uuid of the item it sits in; null = top level" },
+        priority: { type: ["string", "null"], enum: [...PRIORITIES, null] },
+        planned_on: { type: ["string", "null"], description: "YYYY-MM-DD: the day it is planned for; null = unscheduled" },
+        planned_time: { type: ["string", "null"], description: "HH:MM (24 h, local): an event's start or a time block; needs planned_on" },
+        is_event: { type: "boolean", description: "Happens at a fixed time (needs planned_on + planned_time)" },
+        start_on: { type: ["string", "null"], description: "YYYY-MM-DD: when a span starts (projects, goals)" },
+        due_on: { type: ["string", "null"], description: "YYYY-MM-DD: deadline / due date" },
+        due_time: { type: ["string", "null"], description: "HH:MM (24 h) of the deadline; needs due_on" },
+        estimate_min: { type: ["integer", "null"], minimum: 1 },
+        url: { type: ["string", "null"] },
+        color: { type: ["string", "null"], description: "#rrggbb" },
+        weight: { type: "number", description: "Share in the parent's progress (default 1)" },
+        target_count: { type: ["integer", "null"], description: "\"At least N\" done items inside" },
+        progress: { type: ["number", "null"], description: "0–1 by hand, for an item with nothing inside" },
+        fields: { type: "object", description: "Custom fields by name, e.g. {\"Who\": \"AI\"}; null clears one" },
+        trash: { type: "boolean" },
+      },
+      required: ["id"],
+    },
+    annotations: { ...WRITE, idempotentHint: true },
+    run: async ({ id, trash, fields, ...a }, ctx) => {
+      const { db, scope } = ctx;
+      const types = await publicTypes(db);
+      const item = await ownItem(ctx, id, types);
+      if (trash) {
+        const { count, error } = await db.from("items").select("id", { count: "exact", head: true }).eq("parent_id", item.id).is("deleted_at", null);
+        if (error) throw error;
+        need(!count,"it has items inside: move or trash them first (or set status dropped)");
+        check(await db.from("items").update({ deleted_at: new Date().toISOString() }).eq("id", item.id));
+        return { id: item.id, title: item.title, trashed: true };
+      }
+      const row = itemPatch(a, types);
+      if (fields !== undefined) row.props = { ...(item.props ?? {}), ...fieldInput(await fieldsOf(ctx), item.workspace_id, fields) };
+      need(Object.keys(row).length, "nothing to change");
+      if (row.parent_id) {
+        const parent = check(await db.from("items").select("id, workspace_id").in("workspace_id", scope.workspaces).in("type", types)
+          .is("deleted_at", null).eq("id", row.parent_id).maybeSingle()) as any;
+        need(parent, "parent not found");
+        need(parent.workspace_id === item.workspace_id, "that parent is in another workspace");
+      }
+      const saved = checkWrite(await db.from("items").update(row).eq("id", item.id).select(ITEM_COLS).single());
+      return (await itemsOut(ctx, [saved], types, true))[0];
     },
   },
 ];

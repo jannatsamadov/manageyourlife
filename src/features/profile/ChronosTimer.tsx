@@ -1,5 +1,5 @@
+// The 120-year countdown from the birth date (owner's old Strategy page; kept for the Profile, P-70 item 10).
 import { useState, useEffect } from "react";
-import { getSettings } from "@/lib/settings";
 
 const MAX_YEARS = 120;
 
@@ -26,27 +26,16 @@ function calcRemaining(birthdate: string) {
   return { years, days, hours, minutes, seconds, pct };
 }
 
-export default function ChronosTimer() {
-  const [remaining, setRemaining] = useState<ReturnType<typeof calcRemaining>>(null);
+export default function ChronosTimer({ birthDate }: { birthDate: string }) {
+  const [remaining, setRemaining] = useState(() => calcRemaining(birthDate));
 
   useEffect(() => {
-    const birthdate = getSettings().birthdate;
-    if (!birthdate) return;
-    
-    setRemaining(calcRemaining(birthdate));
-    const interval = setInterval(() => setRemaining(calcRemaining(birthdate)), 1000);
+    setRemaining(calcRemaining(birthDate));
+    const interval = setInterval(() => setRemaining(calcRemaining(birthDate)), 1000);
     return () => clearInterval(interval);
-  }, []);
+  }, [birthDate]);
 
-  if (!remaining) {
-    return (
-      <div className="glass-card p-5 border-border/30 text-center">
-        <p className="text-sm text-muted-foreground">
-          Chronos Timer deaktivdir. Settings → doğum tarixinizi daxil edin.
-        </p>
-      </div>
-    );
-  }
+  if (!remaining) return null;
 
   const digits = [
     { label: "YRS", value: remaining.years },

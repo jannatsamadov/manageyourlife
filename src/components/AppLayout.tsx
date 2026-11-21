@@ -1,5 +1,5 @@
 import { NavLink, useLocation } from "react-router-dom";
-import { Calendar, Settings, LogOut, StickyNote, Trash2, Orbit, ListChecks, Wallet } from "lucide-react";
+import { Calendar, Settings, LogOut, StickyNote, Trash2, Orbit, ListChecks, Wallet, UserRound } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/context/AuthContext";
 import ChatPanel from "@/components/ChatPanel";
@@ -53,7 +53,26 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             ))}
           </nav>
 
-          <div className="border-t border-border p-2 lg:p-4">
+          <div className="space-y-1 border-t border-border p-2 lg:p-4">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <NavLink
+                  to="/profile"
+                  className={cn(
+                    "flex items-center gap-3 rounded-lg px-2.5 lg:px-3 py-2.5 text-sm font-medium transition-colors justify-center lg:justify-start",
+                    location.pathname === "/profile"
+                      ? "bg-primary/10 text-primary"
+                      : "text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                  )}
+                >
+                  <UserRound className="h-4 w-4 shrink-0" />
+                  <span className="hidden lg:block">Profile</span>
+                </NavLink>
+              </TooltipTrigger>
+              <TooltipContent side="right" className="lg:hidden">
+                Profile
+              </TooltipContent>
+            </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
                 <button

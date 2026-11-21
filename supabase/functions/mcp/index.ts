@@ -12,7 +12,7 @@ import { scopeOf } from "../_shared/items.ts";
 
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void } | undefined;
 // Task changes also go to Google Calendar / Google Tasks when the user connected Google (T-69).
-const GOOGLE_SYNCED = new Set(["task_create", "task_update", "task_trash"]);
+const GOOGLE_SYNCED = new Set(["task_create", "task_update", "task_trash", "item_update"]); // only tasks are synced
 
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, {
   auth: { persistSession: false },
@@ -122,7 +122,8 @@ async function handle(msg: any, auth: Auth) {
           "straight to its place (task_create, note_create with a folder, strategy_add), not to the Inbox. Tasks have a Who field " +
           "(Me / With AI / AI): `tasks_list` with fields {\"Who\": \"AI\"} lists the work meant for an AI. " +
           "The strategy is a tree: areas of life → goals → missions → steps (steps nest); daily tasks can serve a goal, mission or step (node_id). " +
-          "Read `strategy_tree` before changing it.",
+          "Read `strategy_tree` before changing it. Projects, ideas, routines, milestones and every other kind of item: " +
+          "`items_query` finds them, `item_update` changes them.",
       });
     }
     case "ping":

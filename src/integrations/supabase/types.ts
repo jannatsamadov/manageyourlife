@@ -631,10 +631,10 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "money_payments_item_fkey"
-            columns: ["item_id", "user_id"]
+            columns: ["item_id"]
             isOneToOne: false
-            referencedRelation: "money_items"
-            referencedColumns: ["id", "user_id"]
+            referencedRelation: "items"
+            referencedColumns: ["id"]
           },
         ]
       }
@@ -763,6 +763,27 @@ export type Database = {
           link?: string
           name?: string
           priority?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      profiles: {
+        Row: {
+          birth_date: string | null
+          created_at: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          birth_date?: string | null
+          created_at?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Update: {
+          birth_date?: string | null
+          created_at?: string
+          updated_at?: string
           user_id?: string
         }
         Relationships: []
@@ -1352,6 +1373,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      add_default_fields: { Args: { ws: string }; Returns: undefined }
       create_api_token: {
         Args: { p_expires_at?: string; p_name: string; p_scopes: string[] }
         Returns: string
@@ -1376,7 +1398,6 @@ export type Database = {
         Args: { p_chat_id: number; p_code: string; p_username: string }
         Returns: string
       }
-      v2_copy_from_v1: { Args: never; Returns: Json }
     }
     Enums: {
       [_ in never]: never

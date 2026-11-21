@@ -14,7 +14,6 @@ export interface Settings {
   compactView: boolean;
   showProgressBars: boolean;
   blinkEffect: boolean;
-  birthdate: string;
 }
 
 const defaults: Settings = {
@@ -22,7 +21,6 @@ const defaults: Settings = {
   compactView: false,
   showProgressBars: true,
   blinkEffect: true,
-  birthdate: "",
 };
 
 export function getSettings(): Settings {
@@ -35,16 +33,38 @@ export function getSettings(): Settings {
       compactView: parsed.compactView ?? defaults.compactView,
       showProgressBars: parsed.showProgressBars ?? defaults.showProgressBars,
       blinkEffect: parsed.blinkEffect ?? defaults.blinkEffect,
-      birthdate: parsed.birthdate ?? defaults.birthdate,
     };
   } catch {
     return { ...defaults };
   }
 }
 
+const stored = (): Record<string, unknown> => {
+  try {
+    const v = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}");
+    return v && typeof v === "object" ? v : {};
+  } catch {
+    return {};
+  }
+};
+
 export function saveSettings(settings: Partial<Settings>): Settings {
-  const current = getSettings();
-  const next = { ...current, ...settings };
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+  const next = { ...getSettings(), ...settings };
+  // keys this version no longer knows stay (the old birth date until the profile has taken it)
+  localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...stored(), ...next }));
   return next;
+}
+
+// The birth date lived here before the profile (T-113, table `profiles`): read once, dropped when the profile has it.
+export function oldBirthdate() {
+  const v = stored().birthdate;
+  return typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null;
+}
+export function dropOldBirthdate() {
+  try {
+    const { birthdate: _, ...rest } = stored();
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(rest));
+  } catch {
+    /* storage blocked */
+  }
 }
