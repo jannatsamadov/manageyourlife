@@ -8,6 +8,7 @@
 // 2026-11-21: "boş glass view … rəng olmasa"): the walls have no colour, only the hairline grid on the card behind.
 import * as THREE from "three";
 import { HOUR_FROM, HOURS, SPANS, Scale, type Span } from "./scale";
+import { type MixPart, type TunnelMark, NO_GOAL, drawPattern, inkOn, levelOf, mixOf } from "./marks";
 
 // The reference's defaults (pro.reactbits.dev → Passage Gallery).
 const GAP = 0.1, RADIUS = 0.06, ACCENT_FILL = 0.06, LINE_OPACITY = 0.12, FOG = 1, SPEED = 0.6, BOOST = 10, BLUR = 1,
@@ -29,6 +30,7 @@ export type TunnelTask = {
   minutes: number | null;
   color: string | null;
   goal: string | null;
+  mark: TunnelMark | null; // its area's colour and its goal's texture (marks.ts)
   done: boolean;
   event: boolean;
 };
@@ -886,22 +888,42 @@ export class Passage {
     return c;
   }
 
-  // A year's day: its activity (GitHub-like levels) behind its number and the first titles.
-  private drawYearDay(d: TunnelDay, level: number, w: number, h: number) {
+  // A year's day (#196): what it went to — a slice per goal, as wide as its planned minutes, in its area's colour
+  // and its goal's texture, filled from the bottom as far as it was done (the rest faint); how strong = how full the
+  // day was (GitHub-like levels). Its number and first titles over it.
+  private drawYearDay(d: TunnelDay, parts: MixPart[], level: number, w: number, h: number) {
     const c = this.canvasFor(w, h, 200);
     const g = c.getContext("2d")!;
     const W = c.width, H = c.height;
-    const fill = level ? rgba(this.c.primary, [0, 0.3, 0.5, 0.72, 0.95][level]) : rgba(this.c.fg, 0.07);
-    g.fillStyle = fill;
-    g.fillRect(0, 0, W, H);
     const u = Math.min(W, H) / 100;
-    const ink = level >= 3 && luma(this.c.primary) > 0.6 ? "#14161b" : this.c.fg;
-    g.fillStyle = d.today ? (level >= 3 ? "#ffffff" : this.c.primary) : ink;
+    g.fillStyle = rgba(this.c.fg, 0.07);
+    g.fillRect(0, 0, W, H);
+    const total = parts.reduce((s, p) => s + p.planned, 0);
+    const strong = [0.35, 0.5, 0.66, 0.82, 0.95][level];
+    let x = 0;
+    for (const p of parts) {
+      const pw = (p.planned / total) * W;
+      const col = hex(p.mark?.color, NO_GOAL);
+      const top = H - (p.done / p.planned) * H; // the done part runs from here down
+      const pattern = p.mark?.pattern ?? 0;
+      g.fillStyle = rgba(col, 0.2);
+      g.fillRect(x, 0, pw, top);
+      g.fillStyle = rgba(col, strong);
+      g.fillRect(x, top, pw, H - top);
+      drawPattern(g, pattern, x, 0, pw, top, inkOn(col, 0.45), 15 * u);
+      drawPattern(g, pattern, x, top, pw, H - top, inkOn(col), 15 * u);
+      x += pw;
+    }
+    // the text keeps a halo of the background, to read over the colours
+    g.shadowColor = rgba(this.c.bg, 0.85);
+    g.shadowBlur = 6 * u;
+    g.fillStyle = d.today ? this.c.primary : this.c.fg;
     g.textBaseline = "top";
     g.globalAlpha = 0.95;
     g.font = `700 ${22 * u}px ${this.c.font}`;
     g.fillText(d.dayNum === 1 ? `1 ${d.month}` : String(d.dayNum), 8 * u, 7 * u);
-    g.globalAlpha = 0.85;
+    g.fillStyle = this.c.fg;
+    g.globalAlpha = 0.9;
     g.font = `500 ${12 * u}px ${this.c.font}`;
     d.tasks.slice(0, 3).forEach((t, i) => g.fillText(ellipsis(g, t.title, W - 16 * u), 8 * u, 38 * u + i * 16 * u));
     return c;
@@ -1170,12 +1192,14 @@ export class Passage {
     for (const d of data.days) {
       const r = Math.round(s.rowOf(d.day) - base);
       const lane = s.laneOf(d.day);
+      // by the minutes per goal; in the gallery (no tasks given) by the count, as GitHub does
+      const parts = mixOf(d.tasks);
       const value = d.done + 0.5 * (d.count - d.done);
-      const level = value <= 0 ? 0 : value < 1 ? 1 : value < 2.5 ? 2 : value < 4 ? 3 : 4;
+      const level = d.tasks.length ? levelOf(parts) : value <= 0 ? 0 : value < 1 ? 1 : value < 2.5 ? 2 : value < 4 ? 3 : 4;
       const sp = place("F", lane, r);
       const pick: TunnelPick = { kind: "day", day: d.day };
       if (d.tasks.length || d.today || d.dayNum === 1) {
-        add(this.makeTile(sp, { map: this.texture(this.drawYearDay(d, level, sp.w, sp.h), true), label: true, pick }));
+        add(this.makeTile(sp, { map: this.texture(this.drawYearDay(d, parts, level, sp.w, sp.h), true), label: true, pick }));
       } else {
         const col = level ? this.c.primary : this.c.fg;
         add(this.makeTile(sp, { colA: col, colB: col, opacity: level ? [0, 0.3, 0.5, 0.72, 0.95][level] : 0.07, pick }));
@@ -1559,7 +1583,7 @@ export class Passage {
     this.hovered = t;
     if (t) this.animating.add(t);
     this.canvas.style.cursor = t?.pick ? "pointer" : "";
-    this.events.onHover(t?.pick && (t.pick.kind === "task" || t.pick.kind === "long") ? t.pick : null);
+    this.events.onHover(t?.pick && t.pick.kind !== "media" ? t.pick : null); // a day too: what it went to (#196)
   }
 
   // ── the loop ───────────────────────────────────────────────────────────────────────────────────────────────────

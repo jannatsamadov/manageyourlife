@@ -25,6 +25,7 @@ import { ensureMemory, loadMemories } from "@/lib/memories";
 import { vault } from "@/lib/vault";
 import { cn } from "@/lib/utils";
 import { SPANS, type Scale, type Span } from "./tunnel/scale";
+import { marksOf, mixOf, swatchOf } from "./tunnel/marks";
 import { Passage, type TunnelBox, type TunnelDay, type TunnelLong, type TunnelMedia, type TunnelPick, type TunnelPlace, type TunnelTask, type TunnelTheme } from "./tunnel/passage";
 
 const DAY = 86400000;
@@ -111,7 +112,7 @@ export default function TunnelCalendar({ tasks, byId, onOpenDay, onAddTask, onDe
   const [span, setSpanState] = useState<Span>(() => (SPANS as string[]).includes(remember.get("tunnel.span") ?? "") ? (remember.get("tunnel.span") as Span) : "day");
   const [gallery, setGallery] = useState(() => remember.get("tunnel.mode") === "gallery");
   const [focus, setFocus] = useState<TunnelPick | null>(null);
-  const [hover, setHover] = useState<TunnelTask | null>(null);
+  const [hover, setHover] = useState<{ kind: "task"; task: TunnelTask } | { kind: "day"; day: number } | null>(null);
   const [place, setPlace] = useState<TunnelPlace>({ day: today, minutes: 6 * 60, band: false });
   const [range, setRange] = useState<[number, number]>([today - 1, today + 2]);
   const [paused, setPaused] = useState(() => remember.get("tunnel.autoplay") === "off");
@@ -130,6 +131,8 @@ export default function TunnelCalendar({ tasks, byId, onOpenDay, onAddTask, onDe
     return m;
   }, [tasks]);
 
+  // the area's colour and the goal's texture of every strategy node (#196)
+  const marks = useMemo(() => marksOf(byId), [byId]);
   const toTask = (t: Task): TunnelTask => {
     const node = t.nodeId ? byId.get(t.nodeId) : undefined;
     return {
@@ -139,6 +142,7 @@ export default function TunnelCalendar({ tasks, byId, onOpenDay, onAddTask, onDe
       minutes: t.estimatedTime,
       color: node?.color ?? null,
       goal: node?.node.title ?? null,
+      mark: (t.nodeId && marks.get(t.nodeId)) || null,
       done: t.status === "complete",
       event: !!t.isEvent,
     };
@@ -264,7 +268,13 @@ export default function TunnelCalendar({ tasks, byId, onOpenDay, onAddTask, onDe
         {
           getBox: (scale, b) => getBoxRef.current(scale, b),
           onFocus: setFocus,
-          onHover: (pick) => setHover(pick && (pick.kind === "task" || pick.kind === "long") ? pick.task : null),
+          onHover: (pick) =>
+            setHover(
+              !pick ? null
+              : pick.kind === "task" || pick.kind === "long" ? { kind: "task", task: pick.task }
+              : pick.kind === "day" ? { kind: "day", day: pick.day }
+              : null,
+            ),
           onMove: setPlace,
           onRange: (a, b) => setRange((r) => (r[0] === a && r[1] === b ? r : [a, b])),
           onPick: (pick) => {
@@ -408,6 +418,8 @@ export default function TunnelCalendar({ tasks, byId, onOpenDay, onAddTask, onDe
     span === "day" ? `${dayText(place.day)} · ${hhmm(Math.floor((place.minutes ?? 0) / 60) * 60)}`
     : span === "year" ? `${dayText(place.day, false)} · Week ${isoWeek(place.day - ((place.day + 3) % 7))}`
     : dayText(place.day);
+  // the day under the pointer: what it went to, per goal (#196)
+  const dayParts = hover?.kind === "day" && !gallery ? mixOf((byDay.get(hover.day) ?? []).map(toTask)) : [];
 
   return (
     <div className="glass-card relative h-[calc(100vh-12rem)] min-h-[420px] overflow-hidden">
@@ -444,12 +456,27 @@ export default function TunnelCalendar({ tasks, byId, onOpenDay, onAddTask, onDe
 
       {/* the task under the pointer, readable */}
       <div ref={hoverRef} className="pointer-events-none absolute left-0 top-0 z-10">
-        {hover && !focus && (
+        {hover?.kind === "task" && !focus && (
           <div className="max-w-[260px] rounded-md border border-border bg-popover/90 px-2.5 py-1.5 text-xs text-popover-foreground shadow-md backdrop-blur">
-            <div className="font-medium leading-snug">{hover.title}</div>
-            {(hover.time || hover.goal) && (
-              <div className="mt-0.5 text-muted-foreground">{[hover.time?.slice(0, 5), hover.goal].filter(Boolean).join(" · ")}</div>
+            <div className="font-medium leading-snug">{hover.task.title}</div>
+            {(hover.task.time || hover.task.goal) && (
+              <div className="mt-0.5 text-muted-foreground">{[hover.task.time?.slice(0, 5), hover.task.goal].filter(Boolean).join(" · ")}</div>
             )}
+          </div>
+        )}
+        {hover?.kind === "day" && !focus && dayParts.length > 0 && (
+          <div className="w-[250px] rounded-md border border-border bg-popover/90 px-2.5 py-2 text-xs text-popover-foreground shadow-md backdrop-blur">
+            <div className="mb-1 flex items-baseline justify-between gap-2">
+              <span className="font-medium">{dayText(hover.day)}</span>
+              <span className="text-[10px] text-muted-foreground">done / planned</span>
+            </div>
+            {dayParts.map((p) => (
+              <div key={p.mark?.id ?? "none"} className="flex items-center gap-2 py-0.5">
+                <span className="h-3.5 w-3.5 shrink-0 rounded-[3px] bg-cover" style={{ backgroundImage: `url(${swatchOf(p.mark)})` }} />
+                <span className="min-w-0 flex-1 truncate">{p.mark?.label ?? "No goal"}</span>
+                <span className="shrink-0 tabular-nums text-muted-foreground">{length(p.done)} / {length(p.planned)}</span>
+              </div>
+            ))}
           </div>
         )}
       </div>
