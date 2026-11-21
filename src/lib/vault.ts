@@ -67,6 +67,7 @@ export async function searchText(q: string) {
 
 export const isNote = (path: string) => /\.md$/i.test(path);
 export const isImage = (path: string) => /\.(png|jpe?g|gif|webp|svg|bmp|avif)$/i.test(path);
+export const isVideo = (path: string) => /\.(mp4|webm|mov|m4v)$/i.test(path);
 export const fileName = (path: string) => path.split("/").pop()!;
 export const folderOf = (path: string) => path.split("/").slice(0, -1).join("/");
 export const joinPath = (folder: string, name: string) => (folder ? `${folder}/${name}` : name);

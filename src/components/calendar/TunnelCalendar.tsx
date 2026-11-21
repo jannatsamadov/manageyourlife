@@ -1,12 +1,13 @@
-// Tunnel view (P-62 / T-94, 2026-11-21): the days as a passage you glide through. The owner's reference is React
-// Bits Pro "Passage Gallery" ("same quality, about one-to-one"); its behaviour is matched, the code is our own —
-// the engine is tunnel/passage.ts. A box = a day (06:00 near → 24:00 far), the night a dark band between two days;
-// tasks at their hour, the day's memory photos (Memories/<date>.md + the photos sent to the bot, as in the Depth
-// view), accent tiles in the goal colours. Click a task → it flies out → Open = the item drawer.
+// Tunnel view (P-62: T-94 2026-11-21, scope B #191): the days as a passage you glide through. The owner's reference is
+// React Bits Pro "Passage Gallery" ("same quality, about one-to-one"); its behaviour is matched, the code is our own —
+// the engine is tunnel/passage.ts, the spans tunnel/scale.ts. A box is a day, a week, a month or a year (zoom with the
+// buttons, ctrl + wheel / a pinch, or a click on a day); tasks, memory photos and videos (Memories/<date>.md + what was
+// sent to the bot, as in the Depth view), long tasks as rails, accent tiles in the goal colours. Gallery mode: only
+// the photos and videos. Click a task → it flies out → Open = the item drawer; click an empty cell → a task there.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { BookHeart, ChevronDown, ChevronUp, Crosshair, PanelRightOpen, Pause, Play, X } from "lucide-react";
+import { BookHeart, ChevronDown, ChevronUp, Crosshair, Images, PanelRightOpen, Pause, Play, X } from "lucide-react";
 import type { Task } from "@/core/tasks";
 import type { TreeNode } from "@/lib/strategy";
 import { useAuth } from "@/context/AuthContext";
@@ -17,12 +18,16 @@ import { useItemDrawer } from "@/features/items/ItemDrawer";
 import { ensureMemory, loadMemories } from "@/lib/memories";
 import { vault } from "@/lib/vault";
 import { cn } from "@/lib/utils";
-import { Passage, rowAt, timeAt, type TunnelDay, type TunnelPick, type TunnelTask, type TunnelTheme } from "./tunnel/passage";
+import { SPANS, type Scale, type Span } from "./tunnel/scale";
+import { Passage, type TunnelBox, type TunnelDay, type TunnelLong, type TunnelMedia, type TunnelPick, type TunnelPlace, type TunnelTask, type TunnelTheme } from "./tunnel/passage";
 
 const DAY = 86400000;
 const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-const START = -2; // the camera starts just before today's entrance, the day ahead
+const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+const SPAN_LABEL: Record<Span, string> = { day: "Day", week: "Week", month: "Month", year: "Year" };
+// Photos and videos shown per day ([tasks mode, gallery mode]); in the year per week.
+const MEDIA_CAP: Record<Span, [number, number]> = { day: [24, 40], week: [3, 8], month: [1, 3], year: [1, 4] };
 
 const dayOf = (iso: string) => Math.floor(Date.parse(`${iso.slice(0, 10)}T00:00:00Z`) / DAY);
 const isoOf = (n: number) => new Date(n * DAY).toISOString().slice(0, 10);
@@ -34,12 +39,18 @@ const remember = {
   get: (k: string) => { try { return localStorage.getItem(k); } catch { return null; } },
   set: (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* storage blocked */ } },
 };
-const nowRow = () => {
+const nowMinutes = () => {
   const n = new Date();
-  return rowAt(0, n.getHours() * 60 + n.getMinutes());
+  return n.getHours() * 60 + n.getMinutes();
 };
 const hhmm = (min: number) => `${String(Math.floor(min / 60) % 24).padStart(2, "0")}:${String(Math.floor(min % 60)).padStart(2, "0")}`;
 const length = (min: number) => (min >= 60 ? `${Math.floor(min / 60)}h${min % 60 ? ` ${min % 60}m` : ""}` : `${min}m`);
+// ISO week number of a Monday
+const isoWeek = (monday: number) => {
+  const thursday = monday + 3;
+  const y = new Date(thursday * DAY).getUTCFullYear();
+  return Math.floor((thursday - Math.floor(Date.UTC(y, 0, 1) / DAY)) / 7) + 1;
+};
 
 // The app's colours, read from its CSS variables (shadcn: "H S% L%").
 function readTheme(): TunnelTheme {
@@ -73,10 +84,11 @@ function Icon({ label, onClick, active, children }: { label: string; onClick: ()
   );
 }
 
-export default function TunnelCalendar({ tasks, byId, onOpenDay }: {
+export default function TunnelCalendar({ tasks, byId, onOpenDay, onAddTask }: {
   tasks: Task[];
   byId: Map<string, TreeNode>;
   onOpenDay: (day: string) => void;
+  onAddTask: (t: { title: string; date: string; time: string | null }) => Promise<unknown>;
 }) {
   const { user } = useAuth();
   const qc = useQueryClient();
@@ -87,11 +99,15 @@ export default function TunnelCalendar({ tasks, byId, onOpenDay }: {
   const hostRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<Passage | null>(null);
   const hoverRef = useRef<HTMLDivElement>(null);
+  const [span, setSpanState] = useState<Span>(() => (SPANS as string[]).includes(remember.get("tunnel.span") ?? "") ? (remember.get("tunnel.span") as Span) : "day");
+  const [gallery, setGallery] = useState(() => remember.get("tunnel.mode") === "gallery");
   const [focus, setFocus] = useState<TunnelPick | null>(null);
   const [hover, setHover] = useState<TunnelTask | null>(null);
-  const [row, setRow] = useState(START + 2);
-  const [range, setRange] = useState<[number, number]>([-1, 1]);
+  const [place, setPlace] = useState<TunnelPlace>({ day: today, minutes: 6 * 60, band: false });
+  const [range, setRange] = useState<[number, number]>([today - 1, today + 2]);
   const [paused, setPaused] = useState(() => remember.get("tunnel.autoplay") === "off");
+  const [ask, setAsk] = useState<{ day: number; minutes: number | null; x: number; y: number } | null>(null);
+  const [draft, setDraft] = useState("");
 
   const byDay = useMemo(() => {
     const m = new Map<number, Task[]>();
@@ -104,13 +120,62 @@ export default function TunnelCalendar({ tasks, byId, onOpenDay }: {
     return m;
   }, [tasks]);
 
-  // Memories (shared with the Depth view) and the links of the photos of the days in the passage (an hour each).
+  const toTask = (t: Task): TunnelTask => {
+    const node = t.nodeId ? byId.get(t.nodeId) : undefined;
+    return {
+      id: t.id,
+      title: t.title,
+      time: t.time || null,
+      minutes: t.estimatedTime,
+      color: node?.color ?? null,
+      goal: node?.node.title ?? null,
+      done: t.status === "complete",
+      event: !!t.isEvent,
+    };
+  };
+
+  // Long tasks (planned day → a later deadline) as rails, each in its own ceiling lane while it runs.
+  const longs = useMemo(() => {
+    const list = tasks
+      .filter((t) => t.date && t.deadline && t.status !== "abandoned" && dayOf(t.deadline) > dayOf(t.date))
+      .map((t) => ({ t, from: dayOf(t.date), to: dayOf(t.deadline) }))
+      .sort((a, b) => a.from - b.from || b.to - a.to);
+    const ends: number[] = [];
+    return list.map(({ t, from, to }): TunnelLong => {
+      let lane = ends.findIndex((e) => e < from);
+      if (lane < 0) lane = ends.push(to) - 1;
+      else ends[lane] = to;
+      return { task: toTask(t), from, to, lane };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tasks, byId]);
+
+  // Memories (shared with the Depth view): the photos and videos of a day, capped for the span.
   const memories = useQuery({ queryKey: ["memories", user?.id], queryFn: loadMemories, enabled: !!user, staleTime: 60_000 });
+  const mediaOf = (d: number): Omit<TunnelMedia, "url">[] => {
+    const m = memories.data?.get(isoOf(d));
+    if (!m) return [];
+    return [...m.images.map((path) => ({ path, video: false })), ...m.videos.map((path) => ({ path, video: true }))];
+  };
+  const capped = (d: number, perRow: Map<number, number> | null, scale: Scale | null, sp: Span = span) => {
+    const cap = MEDIA_CAP[sp][gallery ? 1 : 0];
+    const all = mediaOf(d);
+    if (!perRow || !scale) return all.slice(0, cap);
+    const row = scale.rowOf(d);
+    const used = perRow.get(row) ?? 0;
+    const take = all.slice(0, Math.max(0, cap - used));
+    perRow.set(row, used + take.length);
+    return take;
+  };
+  // the links of the ones in the passage (signed, an hour each)
   const pictures = useMemo(() => {
     const out: string[] = [];
-    for (let k = range[0] - 1; k <= range[1] + 2; k++) out.push(...(memories.data?.get(isoOf(today + k))?.images.slice(0, 24) ?? []));
+    const perRow = span === "year" ? new Map<number, number>() : null;
+    const scale = engineRef.current && span === "year" ? scaleRef.current : null;
+    for (let d = range[0]; d < range[1] && out.length < 300; d++) out.push(...capped(d, perRow, scale).map((m) => m.path));
     return out;
-  }, [range, memories.data, today]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [range, memories.data, span, gallery]);
   const urls = useQuery({
     queryKey: ["vault-urls", user?.id, pictures],
     enabled: !!user && pictures.length > 0,
@@ -118,41 +183,64 @@ export default function TunnelCalendar({ tasks, byId, onOpenDay }: {
     queryFn: async () => (await vault<{ urls: Record<string, string> }>("urls", { paths: pictures })).urls,
   });
 
-  // What a day holds, for the engine (read through a ref so the engine always sees the latest data).
-  const getDay = (k: number): TunnelDay => {
-    const d = today + k;
-    const date = new Date(d * DAY);
-    const list = byDay.get(d) ?? [];
-    const items: TunnelTask[] = list.map((t) => {
-      const node = t.nodeId ? byId.get(t.nodeId) : undefined;
-      return {
-        id: t.id,
-        title: t.title,
-        time: t.time || null,
-        minutes: t.estimatedTime,
-        color: node?.color ?? null,
-        goal: node?.node.title ?? null,
-        done: t.status === "complete",
-        event: !!t.isEvent,
-      };
-    });
-    const images = memories.data?.get(isoOf(d))?.images ?? [];
+  // What a box holds, for the engine (read through a ref so the engine always sees the latest data).
+  const scaleRef = useRef<Scale | null>(null);
+  const getBox = (scale: Scale, b: number): TunnelBox => {
+    scaleRef.current = scale;
+    const [from, to] = scale.dayRange(b);
+    const perRow = scale.span === "year" ? new Map<number, number>() : null;
+    const days: TunnelDay[] = [];
+    const colors = new Set<string>();
+    for (let d = from; d < to; d++) {
+      const date = new Date(d * DAY);
+      const list = byDay.get(d) ?? [];
+      const items = gallery ? [] : list.map(toTask);
+      items.forEach((t) => t.color && colors.size < 6 && colors.add(t.color));
+      days.push({
+        day: d,
+        dayNum: date.getUTCDate(),
+        weekday: WEEKDAYS[date.getUTCDay()],
+        month: MONTHS[date.getUTCMonth()],
+        today: d === today,
+        tasks: items,
+        media: capped(d, perRow, scale, scale.span).map((m) => ({ ...m, url: urls.data?.[m.path] ?? null })),
+        count: list.length,
+        done: list.filter((t) => t.status === "complete").length,
+      });
+    }
+    const first = new Date(from * DAY);
+    const last = new Date((to - 1) * DAY);
+    const [title, sub] =
+      scale.span === "week" ? [`${first.getUTCDate()}–${last.getUTCDate()} ${MONTHS[last.getUTCMonth()]}`, `Week ${isoWeek(from)}`]
+      : scale.span === "month" ? [MONTH_NAMES[first.getUTCMonth()], String(first.getUTCFullYear())]
+      : scale.span === "year" ? [String(first.getUTCFullYear()), ""]
+      : ["", ""];
     return {
-      tasks: items,
-      photos: images.map((path) => ({ path, url: urls.data?.[path] ?? null })),
-      dayNum: date.getUTCDate(),
-      weekday: WEEKDAYS[date.getUTCDay()],
-      month: MONTHS[date.getUTCMonth()],
-      today: k === 0,
-      colors: [...new Set(items.map((t) => t.color).filter((c): c is string => !!c))],
+      title,
+      sub,
+      days,
+      long: gallery ? [] : longs.filter((l) => l.from < to && l.to >= from),
+      colors: [...colors],
     };
   };
-  const getDayRef = useRef(getDay);
-  getDayRef.current = getDay;
+  const getBoxRef = useRef(getBox);
+  getBoxRef.current = getBox;
   const onOpenDayRef = useRef(onOpenDay);
   onOpenDayRef.current = onOpenDay;
-  const pausedRef = useRef(paused);
-  pausedRef.current = paused;
+  const drawerRef = useRef(drawer);
+  drawerRef.current = drawer;
+  const startRef = useRef({ span, gallery, paused });
+
+  const zoomTo = (next: Span, day: number) => {
+    const engine = engineRef.current;
+    if (!engine || next === engine.span) return;
+    setSpanState(next);
+    remember.set("tunnel.span", next);
+    setAsk(null);
+    engine.setSpan(next, day, next === "day" && day === today ? nowMinutes() : null);
+  };
+  const zoomRef = useRef(zoomTo);
+  zoomRef.current = zoomTo;
 
   useEffect(() => {
     const host = hostRef.current;
@@ -162,25 +250,44 @@ export default function TunnelCalendar({ tasks, byId, onOpenDay }: {
     // the canvas draws text in the app's font: wait for it
     (document.fonts?.ready ?? Promise.resolve()).then(() => {
       if (cancelled) return;
+      const start = startRef.current;
       const engine = new Passage(
         host,
         {
-          getDay: (k) => getDayRef.current(k),
+          getBox: (scale, b) => getBoxRef.current(scale, b),
           onFocus: setFocus,
-          onHover: (pick) => setHover(pick?.kind === "task" ? pick.task : null),
-          onMove: setRow,
+          onHover: (pick) => setHover(pick && (pick.kind === "task" || pick.kind === "long") ? pick.task : null),
+          onMove: setPlace,
           onRange: (a, b) => setRange((r) => (r[0] === a && r[1] === b ? r : [a, b])),
-          onPick: (pick) => onOpenDayRef.current(isoOf(today + pick.k)),
+          onPick: (pick) => {
+            if (pick.kind === "long") drawerRef.current.open(pick.task.id);
+            else if (pick.kind === "day") {
+              // a day: open it in the day span; elsewhere zoom in, the day in front
+              const s = engineRef.current?.span ?? "day";
+              if (s === "day") onOpenDayRef.current(isoOf(pick.day));
+              else zoomRef.current(SPANS[SPANS.indexOf(s) - 1], pick.day);
+            }
+          },
+          onEmpty: (cell) => {
+            setDraft("");
+            setAsk(cell);
+            engineRef.current?.setHeld(true);
+          },
+          onZoom: (dir, day) => {
+            const s = engineRef.current?.span ?? "day";
+            const next = SPANS[SPANS.indexOf(s) + dir];
+            if (next) zoomRef.current(next, day);
+          },
         },
-        { theme: readTheme(), reduced, start: START, now: nowRow() },
+        { theme: readTheme(), reduced, span: start.span, today, nowMinutes: nowMinutes(), gallery: start.gallery },
       );
-      engine.setPaused(pausedRef.current);
+      engine.setPaused(start.paused);
       engineRef.current = engine;
     });
     // the theme can change while the view is open
     const mo = new MutationObserver(() => engineRef.current?.setTheme(readTheme()));
     mo.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "style", "data-theme"] });
-    const tick = window.setInterval(() => engineRef.current?.setNow(nowRow()), 60_000);
+    const tick = window.setInterval(() => engineRef.current?.setNow(dayOf(localDay(new Date())), nowMinutes()), 60_000);
     return () => {
       cancelled = true;
       mo.disconnect();
@@ -188,30 +295,56 @@ export default function TunnelCalendar({ tasks, byId, onOpenDay }: {
       engineRef.current?.dispose();
       engineRef.current = null;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [today]);
 
   useEffect(() => {
     engineRef.current?.refresh();
-  }, [byDay, byId, memories.data, urls.data]);
+  }, [byDay, byId, longs, memories.data, urls.data]);
 
   useEffect(() => {
     engineRef.current?.setPaused(paused);
     remember.set("tunnel.autoplay", paused ? "off" : "on");
   }, [paused]);
 
+  useEffect(() => {
+    engineRef.current?.setGallery(gallery);
+    remember.set("tunnel.mode", gallery ? "gallery" : "tasks");
+  }, [gallery]);
+
+  const closeAsk = () => {
+    setAsk(null);
+    setDraft("");
+    engineRef.current?.setHeld(false);
+    hostRef.current?.focus();
+  };
+  const submitAsk = async () => {
+    const title = draft.trim();
+    const cell = ask;
+    closeAsk();
+    if (!title || !cell) return;
+    try {
+      await onAddTask({ title, date: isoOf(cell.day), time: cell.minutes === null ? null : hhmm(cell.minutes) });
+    } catch (e) {
+      toast({ title: "Not saved", description: (e as Error).message, variant: "destructive" });
+    }
+  };
+
   const onKeyDown = (e: React.KeyboardEvent) => {
     const engine = engineRef.current;
-    if (!engine) return;
+    if (!engine || ask) return;
     const keys: Record<string, () => void> = {
       ArrowUp: () => engine.travel(1),
       ArrowRight: () => engine.travel(1),
       ArrowDown: () => engine.travel(-1),
       ArrowLeft: () => engine.travel(-1),
-      PageUp: () => engine.jumpDays(1),
-      PageDown: () => engine.jumpDays(-1),
+      PageUp: () => engine.jumpBoxes(1),
+      PageDown: () => engine.jumpBoxes(-1),
       Home: () => engine.goHome(),
       Escape: () => engine.close(),
       " ": () => setPaused((p) => !p),
+      "+": () => SPANS[SPANS.indexOf(span) - 1] && zoomTo(SPANS[SPANS.indexOf(span) - 1], place.day),
+      "-": () => SPANS[SPANS.indexOf(span) + 1] && zoomTo(SPANS[SPANS.indexOf(span) + 1], place.day),
     };
     const run = keys[e.key];
     if (run) {
@@ -228,9 +361,9 @@ export default function TunnelCalendar({ tasks, byId, onOpenDay }: {
     el.style.transform = `translate(${e.clientX - r.left + 14}px, ${e.clientY - r.top + 16}px)`;
   };
 
-  const openMemory = async (k: number) => {
+  const openMemory = async (day: number) => {
     try {
-      const path = await ensureMemory(isoOf(today + k), fmt(today + k));
+      const path = await ensureMemory(isoOf(day), fmt(day));
       qc.invalidateQueries({ queryKey: ["memories", user?.id] });
       navigate(`/notes?open=${encodeURIComponent(path)}`);
     } catch (e) {
@@ -238,11 +371,18 @@ export default function TunnelCalendar({ tasks, byId, onOpenDay }: {
     }
   };
 
-  // where the camera is: the day and the hour just ahead
-  const here = timeAt(row);
-  const hereDay = new Date((today + here.k) * DAY);
+  // where the camera is: the day (and the hour in the day span) just ahead
   const thisYear = new Date(today * DAY).getUTCFullYear();
-  const place = `${WEEKDAYS[hereDay.getUTCDay()].slice(0, 3)} ${hereDay.getUTCDate()} ${MONTHS[hereDay.getUTCMonth()]}${hereDay.getUTCFullYear() !== thisYear ? ` ${hereDay.getUTCFullYear()}` : ""} · ${hhmm(Math.floor(here.minutes / 60) * 60)}`;
+  const dayText = (n: number, weekday = true) => {
+    const d = new Date(n * DAY);
+    return `${weekday ? `${WEEKDAYS[d.getUTCDay()].slice(0, 3)} ` : ""}${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}${d.getUTCFullYear() !== thisYear ? ` ${d.getUTCFullYear()}` : ""}`;
+  };
+  const where =
+    span === "day" ? `${dayText(place.day)} · ${hhmm(Math.floor((place.minutes ?? 0) / 60) * 60)}`
+    : span === "year" ? `${dayText(place.day, false)} · Week ${isoWeek(place.day - ((place.day + 3) % 7))}`
+    : dayText(place.day);
+  const askLeft = ask ? Math.min(Math.max(ask.x - 120, 8), (hostRef.current?.clientWidth ?? 400) - 248) : 0;
+  const askTop = ask ? Math.min(Math.max(ask.y - 22, 8), (hostRef.current?.clientHeight ?? 400) - 72) : 0;
 
   return (
     <div className="glass-card relative h-[calc(100vh-12rem)] min-h-[420px] overflow-hidden">
@@ -251,27 +391,40 @@ export default function TunnelCalendar({ tasks, byId, onOpenDay }: {
         className="absolute inset-0 outline-none"
         role="application"
         aria-roledescription="tunnel"
-        aria-label="Days as a passage. Wheel or drag to travel, hold to speed up, click a tile to open it, Escape to put it back."
+        aria-label="Days as a passage. Wheel or drag to travel, hold to speed up, ctrl and wheel to zoom, click a tile to open it, Escape to put it back."
         tabIndex={0}
         onKeyDown={onKeyDown}
         onPointerMove={onPointerMove}
       />
 
-      <div className="pointer-events-none absolute left-4 top-3 z-10 text-sm font-semibold tabular-nums text-foreground drop-shadow">{place}</div>
-      <div className="absolute right-3 top-2 z-10 flex items-center gap-0.5">
+      <div className="pointer-events-none absolute left-4 top-3 z-10 text-sm font-semibold tabular-nums text-foreground drop-shadow">{where}</div>
+      <div className="absolute right-3 top-2 z-10 flex items-center gap-1">
+        <div className="mr-1 flex overflow-hidden rounded-md border border-border/60 bg-background/40 backdrop-blur">
+          {SPANS.map((s) => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => zoomTo(s, place.day)}
+              className={cn("px-2 py-1 text-xs font-medium transition-colors", span === s ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground")}
+            >
+              {SPAN_LABEL[s]}
+            </button>
+          ))}
+        </div>
+        <Icon label="Gallery" onClick={() => setGallery((g) => !g)} active={gallery}><Images className="h-4 w-4" /></Icon>
         <Icon label={paused ? "Play" : "Pause"} onClick={() => setPaused((p) => !p)} active={!paused}>
           {paused ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}
         </Icon>
         <Icon label="Today" onClick={() => engineRef.current?.goHome()}><Crosshair className="h-4 w-4" /></Icon>
       </div>
       <div className="absolute bottom-4 right-3 z-10 flex flex-col gap-1">
-        <Icon label="Next day" onClick={() => engineRef.current?.jumpDays(1)}><ChevronUp className="h-4 w-4" /></Icon>
-        <Icon label="Previous day" onClick={() => engineRef.current?.jumpDays(-1)}><ChevronDown className="h-4 w-4" /></Icon>
+        <Icon label="Next" onClick={() => engineRef.current?.jumpBoxes(1)}><ChevronUp className="h-4 w-4" /></Icon>
+        <Icon label="Previous" onClick={() => engineRef.current?.jumpBoxes(-1)}><ChevronDown className="h-4 w-4" /></Icon>
       </div>
 
       {/* the task under the pointer, readable */}
       <div ref={hoverRef} className="pointer-events-none absolute left-0 top-0 z-10">
-        {hover && !focus && (
+        {hover && !focus && !ask && (
           <div className="max-w-[260px] rounded-md border border-border bg-popover/90 px-2.5 py-1.5 text-xs text-popover-foreground shadow-md backdrop-blur">
             <div className="font-medium leading-snug">{hover.title}</div>
             {(hover.time || hover.goal) && (
@@ -281,8 +434,33 @@ export default function TunnelCalendar({ tasks, byId, onOpenDay }: {
         )}
       </div>
 
+      {/* a new task in the empty cell that was clicked */}
+      {ask && (
+        <form
+          className="absolute z-20 w-60 rounded-lg border border-border bg-popover/95 p-2 shadow-lg backdrop-blur animate-in fade-in zoom-in-95 duration-150"
+          style={{ left: askLeft, top: askTop }}
+          onSubmit={(e) => {
+            e.preventDefault();
+            submitAsk();
+          }}
+        >
+          <div className="mb-1 px-1 text-xs text-muted-foreground tabular-nums">
+            {dayText(ask.day)}{ask.minutes !== null && ` · ${hhmm(ask.minutes)}`}
+          </div>
+          <input
+            autoFocus
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => e.key === "Escape" && (e.preventDefault(), closeAsk())}
+            onBlur={() => !draft.trim() && closeAsk()}
+            placeholder="New task"
+            className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm outline-none focus:ring-1 focus:ring-ring"
+          />
+        </form>
+      )}
+
       {/* the opened tile's caption */}
-      {focus && focus.kind !== "day" && (
+      {focus && (focus.kind === "task" || focus.kind === "media") && (
         <div className="pointer-events-none absolute inset-x-0 bottom-5 z-10 flex justify-center px-4">
           <div className="pointer-events-auto flex max-w-[min(100%,560px)] items-center gap-3 rounded-full border border-border bg-background/85 py-1.5 pl-4 pr-1.5 shadow-lg backdrop-blur animate-in fade-in slide-in-from-bottom-2 duration-500">
             {focus.kind === "task" ? (
@@ -291,7 +469,7 @@ export default function TunnelCalendar({ tasks, byId, onOpenDay }: {
                 <div className="min-w-0">
                   <div className={cn("truncate text-sm font-medium", focus.task.done && "line-through opacity-70")}>{focus.task.title}</div>
                   <div className="truncate text-xs text-muted-foreground">
-                    {[fmt(today + focus.k), focus.task.time?.slice(0, 5), focus.task.minutes ? length(focus.task.minutes) : null, focus.task.goal].filter(Boolean).join(" · ")}
+                    {[fmt(focus.day), focus.task.time?.slice(0, 5), focus.task.minutes ? length(focus.task.minutes) : null, focus.task.goal].filter(Boolean).join(" · ")}
                   </div>
                 </div>
                 <Icon label="Open" onClick={() => drawer.open(focus.task.id)}><PanelRightOpen className="h-4 w-4" /></Icon>
@@ -299,10 +477,10 @@ export default function TunnelCalendar({ tasks, byId, onOpenDay }: {
             ) : (
               <>
                 <div className="min-w-0 text-sm">
-                  <span className="font-medium">{fmt(today + focus.k)}</span>
+                  <span className="font-medium">{fmt(focus.day)}</span>
                   <span className="ml-2 tabular-nums text-muted-foreground">{focus.index + 1} / {focus.count}</span>
                 </div>
-                <Icon label="Memory" onClick={() => openMemory(focus.k)}><BookHeart className="h-4 w-4" /></Icon>
+                <Icon label="Memory" onClick={() => openMemory(focus.day)}><BookHeart className="h-4 w-4" /></Icon>
               </>
             )}
             <Icon label="Close" onClick={() => engineRef.current?.close()}><X className="h-4 w-4" /></Icon>

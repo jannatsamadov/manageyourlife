@@ -835,7 +835,15 @@ export default function SchedulePlanning() {
 
             {view === "tunnel" &&
             <Suspense fallback={<div className="glass-card h-[calc(100vh-12rem)] min-h-[420px]" />}>
-                <TunnelCalendar tasks={visibleTasks} byId={forest.byId} onOpenDay={setSelectedDay} />
+                <TunnelCalendar
+                  tasks={visibleTasks}
+                  byId={forest.byId}
+                  onOpenDay={setSelectedDay}
+                  onAddTask={(t) => addTask({
+                    title: t.title, description: "", estimatedTime: null, status: "idle", startTime: null, endTime: null,
+                    date: t.date, deadline: "", position: 0, link: "", priority: "medium", isEvent: false, time: t.time, deadlineTime: null,
+                  })}
+                />
               </Suspense>
             }
           </div>

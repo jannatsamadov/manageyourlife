@@ -1,27 +1,26 @@
-// Tunnel view engine (P-62 / T-94, 2026-11-21). A passage of tiles you glide through; the owner's reference is React
-// Bits Pro "Passage Gallery" (paid — its behaviour is matched here, the code is our own). Time runs along the passage:
-// a box = a day, from 06:00 near to 24:00 far, one row of cells per hour, and a dark band between two days (the
-// night). The tiles on the walls, floor and ceiling are the day's tasks at their hour, its memory photos and accent
-// tiles in the goal colours. The camera cruises; hold to boost, wheel / drag to travel, the view turns toward the
-// pointer, the tile under it lifts, a click flies a tile out to full view (click again or Escape puts it back).
+// Tunnel view engine (P-62: T-94 2026-11-21, scope B #191). A passage of tiles you glide through; the owner's
+// reference is React Bits Pro "Passage Gallery" (paid — its behaviour is matched here, the code is our own). Time runs
+// along the passage (scale.ts): a box is a day, a week, a month or a year, a dark band between two boxes. The tiles on
+// the walls, floor and ceiling are the tasks, the memory photos and videos, long tasks as rails on the ceiling and
+// accent tiles in the goal colours. The camera cruises; hold to boost, wheel / drag to travel, ctrl + wheel (a pinch)
+// to zoom between the spans, the view turns toward the pointer, the tile under it lifts, a click flies a tile out to
+// full view (click again or Escape puts it back), a click on an empty cell asks for a task there. "Glass" (owner,
+// 2026-11-21: "boş glass view … rəng olmasa"): the walls have no colour, only the hairline grid on the card behind.
 import * as THREE from "three";
-
-export const HOUR_FROM = 6; // the box starts at 06:00 …
-export const HOURS = 18; // … and runs to 24:00, a row per hour
-export const NIGHT_ROWS = 4; // the dark band between two days
-export const PERIOD = HOURS + NIGHT_ROWS;
+import { HOUR_FROM, HOURS, SPANS, Scale, type Span } from "./scale";
 
 // The reference's defaults (pro.reactbits.dev → Passage Gallery).
-const LANES = 5, GAP = 0.1, RADIUS = 0.06, ACCENT_FILL = 0.06, LINE_OPACITY = 0.12, FOG = 1, SPEED = 0.6, BOOST = 10,
-  BLUR = 1, LOOK = 1, FOV = 72, HOVER = 1, MAX_DPR = 2;
+const GAP = 0.1, RADIUS = 0.06, ACCENT_FILL = 0.06, LINE_OPACITY = 0.12, FOG = 1, SPEED = 0.6, BOOST = 10, BLUR = 1,
+  LOOK = 1, FOV = 72, HOVER = 1, MAX_DPR = 2;
 const AHEAD = 34, BEHIND = 3; // rows kept alive in front of / behind the camera
 const SHELL = AHEAD + BEHIND + 12; // the walls' length, moved along with the camera
 const FOG_NEAR = 3, FOG_FAR = 30 / FOG;
 const LIFT = 0.006; // tiles sit this far off their wall
 const FOCUS_DIST = 1.25;
-const MAX_PHOTOS = 24; // per day
-const WRAP_DAYS = 14; // cruising this far ahead fades back to today (as the Depth view does)
+const WRAP_BOXES = 14; // cruising this many days (weeks …) beyond where the owner went fades back to today
 const BOOST_AFTER = 300, CLICK_WITHIN = 450; // ms: holding longer boosts; let go sooner and it is still a click
+const MAX_BANDS = 8;
+const PLAYING = 3; // videos playing at once
 
 export type TunnelTask = {
   id: string;
@@ -33,53 +32,40 @@ export type TunnelTask = {
   done: boolean;
   event: boolean;
 };
-export type TunnelPhoto = { path: string; url: string | null };
+export type TunnelMedia = { path: string; url: string | null; video: boolean };
 export type TunnelDay = {
-  tasks: TunnelTask[];
-  photos: TunnelPhoto[];
+  day: number; // epoch day
   dayNum: number;
   weekday: string;
   month: string;
   today: boolean;
-  colors: string[];
+  tasks: TunnelTask[];
+  media: TunnelMedia[];
+  count: number; // tasks planned that day (for the year's activity tiles)
+  done: number;
 };
+export type TunnelLong = { task: TunnelTask; from: number; to: number; lane: number }; // planned day → deadline
+export type TunnelBox = { title: string; sub: string; days: TunnelDay[]; long: TunnelLong[]; colors: string[] };
 export type TunnelPick =
-  | { kind: "task"; k: number; task: TunnelTask }
-  | { kind: "photo"; k: number; photo: TunnelPhoto; index: number; count: number }
-  | { kind: "day"; k: number };
+  | { kind: "task"; day: number; task: TunnelTask }
+  | { kind: "long"; task: TunnelTask }
+  | { kind: "media"; day: number; media: TunnelMedia; index: number; count: number }
+  | { kind: "day"; day: number };
+export type TunnelPlace = { day: number; minutes: number | null; band: boolean };
 export type TunnelTheme = { bg: string; fg: string; primary: string; font: string };
 export type PassageEvents = {
-  getDay: (k: number) => TunnelDay; // k = days from today
+  getBox: (scale: Scale, b: number) => TunnelBox;
   onFocus: (pick: TunnelPick | null) => void;
   onHover: (pick: TunnelPick | null) => void;
-  onMove: (row: number) => void;
-  onRange: (from: number, to: number) => void;
-  onPick: (pick: TunnelPick) => void; // a day's label clicked
-};
-
-// ── time ↔ rows ──────────────────────────────────────────────────────────────────────────────────────────────────
-// Row 0 = today 06:00. Minutes before 06:00 belong to the night band in front of the day.
-export function rowAt(k: number, minutes: number) {
-  if (minutes >= HOUR_FROM * 60) return k * PERIOD + Math.min(minutes - HOUR_FROM * 60, HOURS * 60) / 60;
-  return (k - 1) * PERIOD + HOURS + (minutes / (HOUR_FROM * 60)) * NIGHT_ROWS;
-}
-export function timeAt(row: number) {
-  const k = Math.floor(row / PERIOD);
-  const phase = row - k * PERIOD;
-  if (phase < HOURS) return { k, minutes: HOUR_FROM * 60 + phase * 60 };
-  return { k: k + 1, minutes: ((phase - HOURS) / NIGHT_ROWS) * HOUR_FROM * 60 };
-}
-const nightOf = (row: number) => {
-  const p = ((row % PERIOD) + PERIOD) % PERIOD;
-  return smooth(HOURS - 0.15, HOURS + 1.1, p) * (1 - smooth(PERIOD - 1.1, PERIOD - 0.05, p));
+  onMove: (place: TunnelPlace) => void;
+  onRange: (fromDay: number, toDay: number) => void;
+  onPick: (pick: TunnelPick) => void; // a day's label, a long task's rail
+  onEmpty: (cell: { day: number; minutes: number | null; x: number; y: number }) => void;
+  onZoom: (dir: 1 | -1, day: number) => void; // ctrl + wheel: 1 = out (day → week …), -1 = in
 };
 
 // ── small helpers ────────────────────────────────────────────────────────────────────────────────────────────────
 const clamp = (v: number, a: number, b: number) => Math.min(Math.max(v, a), b);
-function smooth(a: number, b: number, v: number) {
-  const x = clamp((v - a) / (b - a), 0, 1);
-  return x * x * (3 - 2 * x);
-}
 const damp = (cur: number, target: number, lambda: number, dt: number) => cur + (target - cur) * (1 - Math.exp(-lambda * dt));
 const easeInOut = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
 function rng(seed: number) {
@@ -107,13 +93,14 @@ function hex(css: string | null | undefined, fallback: string) {
   if (out === "#010203" && css.toLowerCase() !== "#010203") return fallback;
   return out.startsWith("#") ? out : `#${new THREE.Color(out).getHexString()}`;
 }
-const mix = (a: string, b: string, t: number) => {
-  const ca = new THREE.Color(a), cb = new THREE.Color(b);
-  return `#${ca.lerp(cb, t).getHexString()}`;
-};
+const mix = (a: string, b: string, t: number) => `#${new THREE.Color(a).lerp(new THREE.Color(b), t).getHexString()}`;
 const luma = (h: string) => {
   const n = parseInt(h.slice(1), 16);
   return (0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255;
+};
+const rgba = (h: string, a: number) => {
+  const n = parseInt(h.slice(1), 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
 };
 
 // ── shaders ──────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -129,7 +116,8 @@ void main() {
 }`;
 const SHELL_FRAG = /* glsl */ `
 uniform vec3 uWall; uniform vec3 uNight; uniform vec3 uLine; uniform vec3 uNightLine;
-uniform float uLineOpacity; uniform float uPeriod; uniform float uDayRows;
+uniform float uLineOpacity; uniform float uNightAlpha; uniform float uGlass;
+uniform vec2 uBands[${MAX_BANDS}]; uniform int uBandCount;
 uniform float uAxis; uniform float uAcrossOrigin; uniform float uAcrossCell;
 uniform vec3 uFogColor; uniform float uFogNear; uniform float uFogFar; uniform float uDim; uniform vec3 uDimTo;
 varying vec3 vWorld;
@@ -140,17 +128,33 @@ float gridLine(float g) {
 }
 void main() {
   float row = -vWorld.z;
-  float p = mod(row, uPeriod);
-  float night = smoothstep(uDayRows - 0.15, uDayRows + 1.1, p) * (1.0 - smoothstep(uPeriod - 1.1, uPeriod - 0.05, p));
+  float night = 0.0;
+  for (int i = 0; i < ${MAX_BANDS}; i++) {
+    if (i >= uBandCount) break;
+    vec2 b = uBands[i];
+    float w = min(1.0, (b.y - b.x) * 0.35);
+    night = max(night, smoothstep(b.x - 0.1, b.x + w, row) * (1.0 - smoothstep(b.y - w, b.y + 0.05, row)));
+  }
   float across = ((uAxis < 0.5 ? vWorld.x : vWorld.y) - uAcrossOrigin) / uAcrossCell;
   float fog = smoothstep(uFogNear, uFogFar, vDepth);
   float line = max(gridLine(row), gridLine(across)) * (1.0 - smoothstep(uFogNear, uFogFar * 0.85, vDepth));
-  vec3 col = mix(uWall, uNight, night);
-  col = mix(col, mix(uLine, uNightLine, night), line * uLineOpacity);
-  col = mix(col, uFogColor, fog);
-  col = mix(col, uDimTo, uDim);
-  gl_FragColor = vec4(col, 1.0);
+  vec3 lineCol = mix(uLine, uNightLine, night);
+  vec4 acc; // premultiplied
+  if (uGlass > 0.5) {
+    // glass: no colour of its own — the night band a dark veil, the grid hairlines, both fading into the distance
+    float la = clamp(line * uLineOpacity * 1.6, 0.0, 1.0);
+    float na = night * uNightAlpha;
+    acc = vec4(lineCol, 1.0) * la + vec4(uNight, 1.0) * na * (1.0 - la);
+    acc *= 1.0 - fog;
+  } else {
+    vec3 col = mix(uWall, uNight, night);
+    col = mix(col, lineCol, line * uLineOpacity);
+    acc = vec4(mix(col, uFogColor, fog), 1.0);
+  }
+  acc = mix(acc, vec4(uDimTo, 1.0), uDim);
+  gl_FragColor = vec4(acc.a > 0.0 ? acc.rgb / acc.a : vec3(0.0), acc.a);
   #include <colorspace_fragment>
+  gl_FragColor.rgb *= gl_FragColor.a;
 }`;
 const TILE_VERT = /* glsl */ `
 varying vec2 vUv;
@@ -162,10 +166,10 @@ void main() {
   gl_Position = projectionMatrix * mv;
 }`;
 const TILE_FRAG = /* glsl */ `
-uniform sampler2D uMap; uniform float uHasMap; uniform float uLabel;
+uniform sampler2D uMap; uniform float uHasMap; uniform float uLabel; uniform float uOpacity;
 uniform vec3 uColA; uniform vec3 uColB; uniform vec2 uSize; uniform float uRadius;
 uniform float uHover; uniform float uFocused; uniform vec2 uUvScale; uniform vec2 uUvOffset;
-uniform vec3 uFogColor; uniform float uFogNear; uniform float uFogFar; uniform float uDim; uniform vec3 uDimTo;
+uniform vec3 uFogColor; uniform float uFogNear; uniform float uFogFar; uniform float uDim; uniform vec3 uDimTo; uniform float uGlass;
 varying vec2 vUv;
 varying float vDepth;
 float sdRound(vec2 p, vec2 b, float r) {
@@ -185,9 +189,10 @@ void main() {
   } else {
     col = mix(uColA, uColB, clamp((vUv.x + 1.0 - vUv.y) * 0.5, 0.0, 1.0));
   }
+  a *= mix(uOpacity, 1.0, uFocused);
   col = mix(col, vec3(1.0), uHover * 0.12);
   float fog = smoothstep(uFogNear, uFogFar, vDepth) * (1.0 - uFocused);
-  if (uLabel > 0.5) a *= 1.0 - fog; else col = mix(col, uFogColor, fog);
+  if (uLabel > 0.5 || uGlass > 0.5) a *= 1.0 - fog; else col = mix(col, uFogColor, fog);
   col = mix(col, uDimTo, uDim * (1.0 - uFocused));
   gl_FragColor = vec4(col, a);
   #include <colorspace_fragment>
@@ -215,9 +220,10 @@ void main() {
 
 // ── tiles ────────────────────────────────────────────────────────────────────────────────────────────────────────
 type Surface = "F" | "C" | "L" | "R"; // floor, ceiling, left wall, right wall
+const SURFACES: Surface[] = ["F", "C", "L", "R"]; // the shell's order too
 type Spot = { pos: THREE.Vector3; quat: THREE.Quaternion; normal: THREE.Vector3; w: number; h: number };
 type TileUniforms = {
-  uMap: { value: THREE.Texture | null }; uHasMap: { value: number }; uLabel: { value: number };
+  uMap: { value: THREE.Texture | null }; uHasMap: { value: number }; uLabel: { value: number }; uOpacity: { value: number };
   uColA: { value: THREE.Color }; uColB: { value: THREE.Color }; uSize: { value: THREE.Vector2 }; uRadius: { value: number };
   uHover: { value: number }; uFocused: { value: number }; uUvScale: { value: THREE.Vector2 }; uUvOffset: { value: THREE.Vector2 };
 };
@@ -228,14 +234,34 @@ type Tile = {
   pick: TunnelPick | null;
   hover: number;
   hoverable: boolean;
-  imageAspect: number | null; // photos: the picture's own shape
+  imageAspect: number | null; // photos / videos: the picture's own shape
   own: THREE.Texture | null; // a texture this tile made (task cards, labels) — disposed with it
   redraw?: (scale: number) => HTMLCanvasElement; // task cards: drawn again sharper when opened
-  photo?: string;
+  media?: string;
   hiRes?: THREE.Texture | null;
 };
-type DayBlock = { k: number; sig: string; tiles: Tile[]; stale: boolean };
-type PhotoTex = { tex: THREE.Texture | null; aspect: number; uses: number; state: "loading" | "ready" | "failed"; waiters: Set<Tile>; used: number };
+type Box = { b: number; sig: string; tiles: Tile[]; stale: boolean };
+type MediaTex = {
+  tex: THREE.Texture | null; aspect: number; uses: number; state: "loading" | "ready" | "failed";
+  waiters: Set<Tile>; used: number; video: HTMLVideoElement | null; rows: Set<Tile>;
+};
+
+// A box's cells: which are taken (rows are the box's own, 0 … rows-1).
+class Grid {
+  private used = new Set<string>();
+  constructor(readonly rows: number, readonly lanes: number, readonly wallRows: number) {}
+  width(s: Surface) {
+    return s === "F" || s === "C" ? this.lanes : this.wallRows;
+  }
+  free(s: Surface, a: number, r: number, len = 1, span = 1) {
+    if (r < 0 || r + len > this.rows || a < 0 || a + span > this.width(s)) return false;
+    for (let i = 0; i < len; i++) for (let j = 0; j < span; j++) if (this.used.has(`${s}${a + j}:${r + i}`)) return false;
+    return true;
+  }
+  take(s: Surface, a: number, r: number, len = 1, span = 1) {
+    for (let i = 0; i < len; i++) for (let j = 0; j < span; j++) this.used.add(`${s}${a + j}:${r + i}`);
+  }
+}
 
 const PHOTO_PX = 768, PHOTO_FOCUS_PX = 2048, CARD_PX = 440, CARD_FOCUS_SCALE = 3;
 
@@ -273,18 +299,20 @@ export class Passage {
     uFogFar: { value: FOG_FAR },
     uDim: { value: 0 },
     uDimTo: { value: new THREE.Color() },
+    uGlass: { value: 1 },
   };
   private shellUniforms = {
     uWall: { value: new THREE.Color() }, uNight: { value: new THREE.Color() },
     uLine: { value: new THREE.Color() }, uNightLine: { value: new THREE.Color() },
-    uLineOpacity: { value: LINE_OPACITY }, uPeriod: { value: PERIOD }, uDayRows: { value: HOURS },
+    uLineOpacity: { value: LINE_OPACITY }, uNightAlpha: { value: 0.5 },
+    uBands: { value: Array.from({ length: MAX_BANDS }, () => new THREE.Vector2(-1e6, -1e6)) }, uBandCount: { value: 0 },
   };
   private shell: THREE.Mesh[] = [];
   private ring: Tile[] = [];
-  private days = new Map<number, DayBlock>();
+  private boxes = new Map<number, Box>();
   private picks: THREE.Object3D[] = [];
   private tileOf = new Map<THREE.Object3D, Tile>();
-  private photos = new Map<string, PhotoTex>();
+  private media = new Map<string, MediaTex>();
   private raycaster = new THREE.Raycaster();
   private rt: THREE.WebGLRenderTarget;
   private blurScene = new THREE.Scene();
@@ -293,11 +321,17 @@ export class Passage {
   private ro: ResizeObserver;
   private io: IntersectionObserver;
 
-  // the passage's shape: LANES across the floor, the height follows the screen's shape
-  private W = LANES;
+  private scale: Scale;
+  private today: number;
+  private nowMinutes: number;
+  private gallery = false;
+
+  // the passage's shape: `lanes` across the floor, the height follows the screen's shape
+  private W = 5;
   private H = 3;
   private wallRows = 3;
   private ch = 1;
+  private eye: number[] = [];
 
   // theme (hex)
   private c = { wall: "#111", night: "#000", line: "#fff", nightLine: "#fff", fg: "#fff", primary: "#10b981", accent2: "#7dd3fc", bg: "#111", font: "system-ui, sans-serif", dark: true };
@@ -309,13 +343,15 @@ export class Passage {
   private dragMove = 0;
   private speedSeen = 0;
   private paused = false;
+  private held = false; // a question is open over the tunnel (a new task): no cruising
   private boosting = false;
   private lookX = 0;
   private lookY = 0;
   private home = -2;
-  private anchor = -2; // where the owner last moved to; cruising WRAP_DAYS beyond it fades back home
-  private nowRow = 0;
+  private anchor = -2; // where the owner last moved to; cruising WRAP_BOXES beyond it fades back home
   private wrapping = false;
+  private zoomAcc = 0;
+  private zoomAt = 0;
 
   // pointer
   private ndc = new THREE.Vector2();
@@ -333,23 +369,24 @@ export class Passage {
   private lastT = 0;
   private dirty = true;
   private visible = true;
-  private lastMove = NaN;
+  private lastMove = "";
   private lastRange = "";
+  private videoCheck = 0;
   private disposed = false;
 
-  constructor(host: HTMLElement, events: PassageEvents, opts: { theme: TunnelTheme; reduced: boolean; start: number; now: number }) {
+  constructor(host: HTMLElement, events: PassageEvents, opts: { theme: TunnelTheme; reduced: boolean; span: Span; today: number; nowMinutes: number; gallery: boolean }) {
     this.host = host;
     this.events = events;
     this.reduced = opts.reduced;
-    this.pos = opts.start;
-    this.home = opts.start;
-    this.anchor = opts.start;
-    this.nowRow = opts.now;
+    this.today = opts.today;
+    this.nowMinutes = opts.nowMinutes;
+    this.gallery = opts.gallery;
+    this.scale = new Scale(opts.span, opts.today);
 
     this.canvas = document.createElement("canvas");
-    this.canvas.style.cssText = "display:block;width:100%;height:100%;touch-action:none;outline:none;transition:opacity .45s ease";
+    this.canvas.style.cssText = "display:block;width:100%;height:100%;touch-action:none;outline:none;transition:opacity .3s ease";
     host.appendChild(this.canvas);
-    this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, powerPreference: "high-performance" });
+    this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, alpha: true, powerPreference: "high-performance" });
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, MAX_DPR));
 
@@ -360,6 +397,7 @@ export class Passage {
       fragmentShader: BLUR_FRAG,
       depthTest: false,
       depthWrite: false,
+      blending: THREE.NoBlending,
     });
     const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.blurMat);
     quad.frustumCulled = false;
@@ -369,6 +407,7 @@ export class Passage {
     this.measure();
     this.buildShell();
     this.buildRing();
+    this.placeAtToday();
 
     this.canvas.addEventListener("pointerdown", this.onDown);
     this.canvas.addEventListener("pointermove", this.onMovePointer);
@@ -388,6 +427,9 @@ export class Passage {
   }
 
   // ── public ─────────────────────────────────────────────────────────────────────────────────────────────────────
+  get span() {
+    return this.scale.span;
+  }
   travel(rows: number) {
     if (this.focus) this.close();
     this.glide += rows;
@@ -397,15 +439,15 @@ export class Passage {
   goTo(row: number) {
     if (this.focus) this.close();
     this.anchor = row;
-    if (Math.abs(row - this.pos) > PERIOD * 2.5) this.jump(row);
+    if (Math.abs(row - this.pos) > 50) this.jump(row);
     else {
       this.glide = row - this.pos;
       this.dirty = true;
     }
   }
-  jumpDays(n: number) {
-    const cur = Math.floor((this.pos + 2.5) / PERIOD);
-    this.goTo((cur + n) * PERIOD - 2);
+  jumpBoxes(n: number) {
+    const cur = this.scale.boxAt(this.pos + 2.5);
+    this.goTo(this.scale.start(cur + n) - 2);
   }
   goHome() {
     this.goTo(this.home);
@@ -414,8 +456,17 @@ export class Passage {
     this.paused = p;
     this.dirty = true;
   }
-  setNow(row: number) {
-    this.nowRow = row;
+  setHeld(h: boolean) {
+    this.held = h;
+    this.dirty = true;
+  }
+  setNow(today: number, minutes: number) {
+    this.nowMinutes = minutes;
+    if (today !== this.today) {
+      this.today = today;
+      this.scale = new Scale(this.scale.span, today);
+      this.rebuildAll();
+    }
     this.placeRing();
     this.dirty = true;
   }
@@ -427,13 +478,46 @@ export class Passage {
     }
     this.rebuildAll();
   }
-  // The data behind the days changed: rebuild the days whose content differs.
+  setGallery(g: boolean) {
+    if (g === this.gallery) return;
+    this.gallery = g;
+    this.rebuildAll();
+  }
+  // Zoom to another span with `day` in front: fly a little (in or back), fade, build the passage again.
+  setSpan(span: Span, day: number, minutes: number | null = null) {
+    if (span === this.scale.span) return;
+    if (this.focus) {
+      this.finishClose();
+      this.events.onFocus(null);
+    }
+    const inward = SPANS.indexOf(span) < SPANS.indexOf(this.scale.span);
+    this.glide = inward ? 3 : -3;
+    this.wrapping = true;
+    this.canvas.style.opacity = "0";
+    window.setTimeout(() => {
+      if (this.disposed) return;
+      this.scale = new Scale(span, this.today);
+      this.measure();
+      this.buildShell();
+      this.placeAtToday();
+      const row = span === "day" ? this.scale.rowOf(day, minutes ?? HOUR_FROM * 60) : this.scale.rowOf(day);
+      this.pos = row - 2;
+      this.anchor = this.pos;
+      this.glide = 0;
+      this.vel = 0;
+      this.rebuildAll();
+      this.placeRing();
+      this.canvas.style.opacity = "1";
+      window.setTimeout(() => (this.wrapping = false), 300);
+    }, this.reduced ? 0 : 300);
+  }
+  // The data behind the boxes changed: rebuild the boxes whose content differs.
   refresh() {
-    for (const [k, block] of this.days) {
-      const data = this.events.getDay(k);
-      if (this.sig(data) === block.sig) continue;
-      if (this.focus && block.tiles.includes(this.focus.tile)) block.stale = true;
-      else this.rebuildDay(k, data);
+    for (const [b, box] of this.boxes) {
+      const data = this.events.getBox(this.scale, b);
+      if (this.sig(data) === box.sig) continue;
+      if (this.focus && box.tiles.includes(this.focus.tile)) box.stale = true;
+      else this.rebuildBox(b, data);
     }
     this.dirty = true;
   }
@@ -456,9 +540,9 @@ export class Passage {
     this.canvas.removeEventListener("pointerleave", this.onLeave);
     this.canvas.removeEventListener("wheel", this.onWheel);
     if (this.press) clearTimeout(this.press.timer);
-    for (const k of [...this.days.keys()]) this.dropDay(k);
+    for (const b of [...this.boxes.keys()]) this.dropBox(b);
     for (const t of this.ring) this.freeTile(t);
-    for (const p of this.photos.values()) p.tex?.dispose();
+    for (const m of this.media.values()) this.freeMedia(m);
     for (const m of this.shell) (m.material as THREE.Material).dispose();
     this.shell.forEach((m) => m.geometry.dispose());
     this.plane.dispose();
@@ -481,9 +565,8 @@ export class Passage {
       accent2: mix(primary, "#ffffff", 0.45),
       dark,
       font: theme.font || "system-ui, sans-serif",
-      // a dark theme lifts the day's walls a little so the night between days reads as darker
-      wall: dark ? mix(bg, fg, 0.06) : bg,
-      night: dark ? mix(bg, "#000000", 0.75) : "#0e1424",
+      wall: dark ? mix(bg, fg, 0.06) : bg, // only when not glass
+      night: dark ? "#000000" : "#0e1424",
       line: fg,
       nightLine: dark ? fg : "#ffffff",
     };
@@ -492,8 +575,13 @@ export class Passage {
     s.uNight.value.set(this.c.night);
     s.uLine.value.set(this.c.line);
     s.uNightLine.value.set(this.c.nightLine);
+    s.uNightAlpha.value = dark ? 0.5 : 0.55;
     this.shared.uDimTo.value.set(dark ? "#000000" : "#ffffff");
     this.dirty = true;
+  }
+
+  private get glass() {
+    return this.shared.uGlass.value > 0.5;
   }
 
   private measure() {
@@ -504,9 +592,13 @@ export class Passage {
     const dpr = this.renderer.getPixelRatio();
     this.rt.setSize(Math.round(w * dpr), Math.round(h * dpr));
     // The cross-section has the screen's shape; the walls get as many rows as fit.
-    this.H = clamp((LANES * h) / w, 1.4, 12);
+    const lanes = this.scale.lanes;
+    this.W = lanes;
+    this.H = clamp((lanes * h) / w, 1.4, 12);
     this.wallRows = Math.max(1, Math.round(this.H));
     this.ch = this.H / this.wallRows;
+    const n = this.wallRows;
+    this.eye = Array.from({ length: n }, (_, i) => i).sort((a, b) => Math.abs(a + 0.5 - n / 2) - Math.abs(b + 0.5 - n / 2) || a - b);
   }
 
   private resize() {
@@ -520,6 +612,14 @@ export class Passage {
     this.dirty = true;
   }
 
+  private placeAtToday() {
+    const s = this.scale;
+    const start = s.span === "day" ? s.start(0) : s.rowOf(this.today);
+    this.home = start - 2;
+    this.pos = this.home;
+    this.anchor = this.home;
+  }
+
   private buildShell() {
     for (const m of this.shell) {
       this.scene.remove(m);
@@ -528,21 +628,25 @@ export class Passage {
     }
     this.shell = [];
     const { W, H } = this;
+    const cw = W / this.scale.lanes;
     const make = (geo: THREE.PlaneGeometry, axis: number, origin: number, cell: number) => {
       const mat = new THREE.ShaderMaterial({
         uniforms: { ...this.shellUniforms, ...this.shared, uAxis: { value: axis }, uAcrossOrigin: { value: origin }, uAcrossCell: { value: cell } },
         vertexShader: SHELL_VERT,
         fragmentShader: SHELL_FRAG,
+        transparent: true,
+        premultipliedAlpha: true,
       });
       const m = new THREE.Mesh(geo, mat);
+      m.renderOrder = -1; // under every tile
       this.scene.add(m);
       this.shell.push(m);
       return m;
     };
-    const floor = make(new THREE.PlaneGeometry(W, SHELL), 0, -W / 2, W / LANES);
+    const floor = make(new THREE.PlaneGeometry(W, SHELL), 0, -W / 2, cw);
     floor.rotation.x = -Math.PI / 2;
     floor.position.y = -H / 2;
-    const ceiling = make(new THREE.PlaneGeometry(W, SHELL), 0, -W / 2, W / LANES);
+    const ceiling = make(new THREE.PlaneGeometry(W, SHELL), 0, -W / 2, cw);
     ceiling.rotation.x = Math.PI / 2;
     ceiling.position.y = H / 2;
     const left = make(new THREE.PlaneGeometry(SHELL, H), 1, -H / 2, this.ch);
@@ -556,7 +660,7 @@ export class Passage {
   // ── tiles ──────────────────────────────────────────────────────────────────────────────────────────────────────
   private spot(s: Surface, across: number, row: number, len: number, span = 1): Spot {
     const { W, H, ch } = this;
-    const cw = W / LANES;
+    const cw = W / this.scale.lanes;
     const z = -(row + len / 2);
     const pos = new THREE.Vector3(), quat = new THREE.Quaternion(), normal = new THREE.Vector3();
     let w = 1, h = 1;
@@ -578,9 +682,9 @@ export class Passage {
     return { pos, quat, normal, w, h };
   }
 
-  private makeTile(spot: Spot, o: { map?: THREE.Texture | null; label?: boolean; colA?: string; colB?: string; pick?: TunnelPick | null; hoverable?: boolean }) {
+  private makeTile(spot: Spot, o: { map?: THREE.Texture | null; label?: boolean; colA?: string; colB?: string; opacity?: number; pick?: TunnelPick | null; hoverable?: boolean }) {
     const u: TileUniforms = {
-      uMap: { value: o.map ?? null }, uHasMap: { value: o.map ? 1 : 0 }, uLabel: { value: o.label ? 1 : 0 },
+      uMap: { value: o.map ?? null }, uHasMap: { value: o.map ? 1 : 0 }, uLabel: { value: o.label ? 1 : 0 }, uOpacity: { value: o.opacity ?? 1 },
       uColA: { value: new THREE.Color(o.colA ?? this.c.primary) }, uColB: { value: new THREE.Color(o.colB ?? o.colA ?? this.c.primary) },
       uSize: { value: new THREE.Vector2(spot.w, spot.h) }, uRadius: { value: (RADIUS * Math.min(spot.w, spot.h)) / 2 },
       uHover: { value: 0 }, uFocused: { value: 0 }, uUvScale: { value: new THREE.Vector2(1, 1) }, uUvOffset: { value: new THREE.Vector2() },
@@ -640,11 +744,12 @@ export class Passage {
       if (i >= 0) this.picks.splice(i, 1);
       this.tileOf.delete(t.mesh);
     }
-    if (t.photo) {
-      const p = this.photos.get(t.photo);
-      if (p) {
-        p.uses--;
-        p.waiters.delete(t);
+    if (t.media) {
+      const m = this.media.get(t.media);
+      if (m) {
+        m.uses--;
+        m.waiters.delete(t);
+        m.rows.delete(t);
       }
     }
     this.animating.delete(t);
@@ -655,7 +760,6 @@ export class Passage {
     const tex = new THREE.CanvasTexture(canvas);
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
-    tex.minFilter = THREE.LinearMipmapLinearFilter;
     tex.premultiplyAlpha = label;
     return tex;
   }
@@ -710,12 +814,11 @@ export class Passage {
       g.stroke();
     }
 
-    // the title, as big as fits
+    // the title, as big as fits; at the smallest size the rest is cut with "…"
     g.globalAlpha = t.done ? 0.75 : 1;
     const top = pad + (meta ? 17 * u : 0);
     const bottom = H - pad - (t.goal ? 14 * u : 0);
     const maxW = W - pad * 2;
-    // the biggest size at which the whole title fits; at the smallest one the rest is cut with "…"
     let size = 19 * u, lines: string[] = [];
     for (; size >= 10 * u; size -= u) {
       g.font = `650 ${size}px ${font}`;
@@ -738,91 +841,140 @@ export class Passage {
     return c;
   }
 
-  private drawDayLabel(d: TunnelDay, w: number, h: number) {
-    const c = this.canvasFor(w, h, 900);
+  // A label on the floor: a big number (or word) and two small lines beside it.
+  private drawLabel(big: string, line1: string, line2: string, w: number, h: number, today: boolean, px = 900) {
+    const c = this.canvasFor(w, h, px);
     const g = c.getContext("2d")!;
     const W = c.width, H = c.height;
-    const ink = d.today ? this.c.primary : this.c.fg;
     const font = this.c.font;
-    g.fillStyle = ink;
+    g.fillStyle = today ? this.c.primary : this.c.fg;
     g.textBaseline = "alphabetic";
-    const big = H * 0.62;
-    g.font = `700 ${big}px ${font}`;
-    const num = String(d.dayNum);
-    const numW = g.measureText(num).width;
-    g.font = `600 ${H * 0.2}px ${font}`;
-    const sub1 = d.today ? "Today" : d.weekday;
-    const sub2 = d.month;
-    const subW = Math.max(g.measureText(sub1).width, g.measureText(sub2).width);
-    const gap = H * 0.12;
-    const x0 = (W - numW - gap - subW) / 2;
+    let bigSize = H * 0.62;
+    g.font = `700 ${bigSize}px ${font}`;
+    let bigW = g.measureText(big).width;
+    const small = H * 0.2;
+    g.font = `600 ${small}px ${font}`;
+    const subW = Math.max(g.measureText(line1).width, g.measureText(line2).width);
+    const gap = line1 || line2 ? H * 0.12 : 0;
+    const room = W * 0.94 - subW - gap;
+    if (bigW > room) {
+      bigSize *= room / bigW;
+      bigW = room;
+    }
+    const x0 = (W - bigW - gap - subW) / 2;
     const base = H * 0.76;
     g.globalAlpha = 0.92;
-    g.font = `700 ${big}px ${font}`;
-    g.fillText(num, x0, base);
-    g.font = `600 ${H * 0.2}px ${font}`;
+    g.font = `700 ${bigSize}px ${font}`;
+    g.fillText(big, x0, base);
+    g.font = `600 ${small}px ${font}`;
     g.globalAlpha = 0.8;
-    g.fillText(sub1, x0 + numW + gap, base - H * 0.27);
+    if (line1) g.fillText(line1, x0 + bigW + gap, base - H * 0.27);
     g.globalAlpha = 0.55;
-    g.fillText(sub2, x0 + numW + gap, base);
+    if (line2) g.fillText(line2, x0 + bigW + gap, base);
     return c;
   }
 
-  private drawHour(hour: number, w: number, h: number) {
+  private drawText(text: string, w: number, h: number, alpha = 0.5, size = 0.24) {
     const c = this.canvasFor(w, h, 256);
     const g = c.getContext("2d")!;
     g.fillStyle = this.c.fg;
-    g.globalAlpha = 0.5;
+    g.globalAlpha = alpha;
     g.textAlign = "center";
     g.textBaseline = "middle";
-    g.font = `600 ${c.height * 0.24}px ${this.c.font}`;
-    g.fillText(`${String(hour).padStart(2, "0")}:00`, c.width / 2, c.height / 2);
+    g.font = `600 ${Math.min(c.height, c.width) * size}px ${this.c.font}`;
+    g.fillText(text, c.width / 2, c.height / 2);
     return c;
   }
 
-  private drawPhotoWaiting(w: number, h: number) {
+  // A year's day: its activity (GitHub-like levels) behind its number and the first titles.
+  private drawYearDay(d: TunnelDay, level: number, w: number, h: number) {
+    const c = this.canvasFor(w, h, 200);
+    const g = c.getContext("2d")!;
+    const W = c.width, H = c.height;
+    const fill = level ? rgba(this.c.primary, [0, 0.3, 0.5, 0.72, 0.95][level]) : rgba(this.c.fg, 0.07);
+    g.fillStyle = fill;
+    g.fillRect(0, 0, W, H);
+    const u = Math.min(W, H) / 100;
+    const ink = level >= 3 && luma(this.c.primary) > 0.6 ? "#14161b" : this.c.fg;
+    g.fillStyle = d.today ? (level >= 3 ? "#ffffff" : this.c.primary) : ink;
+    g.textBaseline = "top";
+    g.globalAlpha = 0.95;
+    g.font = `700 ${22 * u}px ${this.c.font}`;
+    g.fillText(d.dayNum === 1 ? `1 ${d.month}` : String(d.dayNum), 8 * u, 7 * u);
+    g.globalAlpha = 0.85;
+    g.font = `500 ${12 * u}px ${this.c.font}`;
+    d.tasks.slice(0, 3).forEach((t, i) => g.fillText(ellipsis(g, t.title, W - 16 * u), 8 * u, 38 * u + i * 16 * u));
+    return c;
+  }
+
+  private drawMediaWaiting(w: number, h: number, video: boolean) {
     const c = this.canvasFor(w, h, 192);
     const g = c.getContext("2d")!;
     const W = c.width, H = c.height;
-    g.fillStyle = mix(this.c.wall, this.c.fg, 0.1);
+    g.fillStyle = rgba(this.c.fg, 0.09);
     g.fillRect(0, 0, W, H);
-    g.strokeStyle = this.c.fg;
-    g.fillStyle = this.c.fg;
-    g.globalAlpha = 0.3;
-    g.lineWidth = Math.min(W, H) * 0.025;
+    g.fillStyle = rgba(this.c.fg, 0.32);
     const s = Math.min(W, H) * 0.32, x = W / 2 - s / 2, y = H / 2 - s / 2;
     g.beginPath();
-    g.moveTo(x, y + s);
-    g.lineTo(x + s * 0.4, y + s * 0.45);
-    g.lineTo(x + s * 0.62, y + s * 0.7);
-    g.lineTo(x + s * 0.78, y + s * 0.55);
-    g.lineTo(x + s, y + s);
-    g.closePath();
-    g.fill();
-    g.beginPath();
-    g.arc(x + s * 0.78, y + s * 0.18, s * 0.11, 0, Math.PI * 2);
+    if (video) {
+      g.moveTo(x + s * 0.2, y);
+      g.lineTo(x + s, y + s / 2);
+      g.lineTo(x + s * 0.2, y + s);
+    } else {
+      g.moveTo(x, y + s);
+      g.lineTo(x + s * 0.4, y + s * 0.45);
+      g.lineTo(x + s * 0.62, y + s * 0.7);
+      g.lineTo(x + s * 0.78, y + s * 0.55);
+      g.lineTo(x + s, y + s);
+      g.closePath();
+      g.fill();
+      g.beginPath();
+      g.arc(x + s * 0.78, y + s * 0.18, s * 0.11, 0, Math.PI * 2);
+    }
     g.fill();
     return c;
   }
 
-  // ── days ───────────────────────────────────────────────────────────────────────────────────────────────────────
-  private sig(d: TunnelDay) {
-    return JSON.stringify([d.tasks, d.photos.map((p) => [p.path, !!p.url]), d.dayNum, d.today, d.colors, this.wallRows, this.H]);
+  // ── boxes ──────────────────────────────────────────────────────────────────────────────────────────────────────
+  private sig(d: TunnelBox) {
+    return JSON.stringify([
+      d.title, d.sub, d.colors, d.long,
+      d.days.map((x) => [x.day, x.today, x.tasks, x.media.map((m) => [m.path, !!m.url]), x.count, x.done]),
+      this.wallRows, this.H, this.gallery,
+    ]);
   }
 
-  private syncDays() {
-    const from = Math.floor((this.pos - BEHIND) / PERIOD);
-    const to = Math.floor((this.pos + AHEAD) / PERIOD);
-    for (const k of [...this.days.keys()]) if (k < from || k > to) {
-      if (this.focus && this.days.get(k)!.tiles.includes(this.focus.tile)) continue;
-      this.dropDay(k);
+  private syncBoxes() {
+    const s = this.scale;
+    const from = s.boxAt(this.pos - BEHIND);
+    const to = s.boxAt(this.pos + AHEAD);
+    for (const b of [...this.boxes.keys()]) if (b < from || b > to) {
+      if (this.focus && this.boxes.get(b)!.tiles.includes(this.focus.tile)) continue;
+      this.dropBox(b);
     }
-    for (let k = from; k <= to; k++) if (!this.days.has(k)) this.buildDay(k, this.events.getDay(k));
-    const key = `${from}:${to}`;
+    for (let b = from; b <= to; b++) if (!this.boxes.has(b)) this.buildBox(b, this.events.getBox(s, b));
+    const key = `${s.span}:${from}:${to}`;
     if (key !== this.lastRange) {
       this.lastRange = key;
-      this.events.onRange(from, to);
+      // the night bands in sight: after every box, and the one before the first
+      const bands = this.shellUniforms.uBands.value;
+      let n = 0;
+      for (let b = from - 1; b <= to && n < MAX_BANDS; b++, n++) bands[n].set(s.start(b) + s.rows(b), s.start(b + 1));
+      this.shellUniforms.uBandCount.value = n;
+      this.events.onRange(s.dayRange(from)[0], s.dayRange(to)[1]);
     }
+  }
+
+  private nightAt(row: number) {
+    const bands = this.shellUniforms.uBands.value;
+    let night = 0;
+    for (let i = 0; i < this.shellUniforms.uBandCount.value; i++) {
+      const b = bands[i];
+      const w = Math.min(1, (b.y - b.x) * 0.35);
+      const up = clamp((row - (b.x - 0.1)) / (w + 0.1), 0, 1), down = clamp((b.y + 0.05 - row) / (w + 0.05), 0, 1);
+      night = Math.max(night, Math.min(up, down));
+    }
+    return night;
   }
 
   private rebuildAll() {
@@ -830,193 +982,331 @@ export class Passage {
       this.finishClose();
       this.events.onFocus(null);
     }
-    for (const k of [...this.days.keys()]) this.dropDay(k);
-    this.syncDays();
+    for (const b of [...this.boxes.keys()]) this.dropBox(b);
+    this.lastRange = "";
+    this.syncBoxes();
     this.dirty = true;
   }
 
-  private rebuildDay(k: number, data: TunnelDay) {
-    this.dropDay(k);
-    this.buildDay(k, data);
+  private rebuildBox(b: number, data: TunnelBox) {
+    this.dropBox(b);
+    this.buildBox(b, data);
   }
 
-  private dropDay(k: number) {
-    const block = this.days.get(k);
-    if (!block) return;
-    block.tiles.forEach((t) => this.freeTile(t));
-    this.days.delete(k);
-    this.prunePhotos();
+  private dropBox(b: number) {
+    const box = this.boxes.get(b);
+    if (!box) return;
+    box.tiles.forEach((t) => this.freeTile(t));
+    this.boxes.delete(b);
+    this.pruneMedia();
   }
 
-  private buildDay(k: number, d: TunnelDay) {
-    const block: DayBlock = { k, sig: this.sig(d), tiles: [], stale: false };
-    this.days.set(k, block);
-    const base = k * PERIOD;
-    const n = this.wallRows;
-    const rand = rng(k * 7919 + 104729);
-    const used = new Set<string>();
-    const key = (s: Surface, a: number, r: number) => `${s}${a}:${r}`;
-    const width = (s: Surface) => (s === "F" || s === "C" ? LANES : n);
-    const free = (s: Surface, a: number, r: number, len = 1, span = 1) => {
-      if (r < 0 || r + len > HOURS || a < 0 || a + span > width(s)) return false;
-      for (let i = 0; i < len; i++) for (let j = 0; j < span; j++) if (used.has(key(s, a + j, r + i))) return false;
-      return true;
+  private buildBox(b: number, data: TunnelBox) {
+    const s = this.scale;
+    const box: Box = { b, sig: this.sig(data), tiles: [], stale: false };
+    this.boxes.set(b, box);
+    const base = s.start(b);
+    const g = new Grid(s.rows(b), s.lanes, this.wallRows);
+    const rand = rng(b * 7919 + SPANS.indexOf(s.span) * 104729 + 17);
+    const add = (t: Tile) => box.tiles.push(t);
+    const place = (sf: Surface, a: number, r: number, len = 1, span = 1) => {
+      g.take(sf, a, r, len, span);
+      return this.spot(sf, a, base + r, len, span);
     };
-    const take = (s: Surface, a: number, r: number, len = 1, span = 1) => {
-      for (let i = 0; i < len; i++) for (let j = 0; j < span; j++) used.add(key(s, a + j, r + i));
-      return this.spot(s, a, base + r, len, span);
-    };
-    // the wall rows nearest the eye first
-    const eye = Array.from({ length: n }, (_, i) => i).sort((a, b) => Math.abs(a + 0.5 - n / 2) - Math.abs(b + 0.5 - n / 2) || a - b);
+    const labelSpan = Math.min(3, s.lanes);
+    const labelLane = Math.floor((s.lanes - labelSpan) / 2);
 
-    // the day's label on the floor at its entrance, the hours along the left edge of the floor
-    const span = Math.min(3, LANES);
-    const lane = Math.floor((LANES - span) / 2);
-    const ls = take("F", lane, 0, 1, span);
-    const labelTex = this.texture(this.drawDayLabel(d, ls.w, ls.h), true);
-    block.tiles.push(this.makeTile(ls, { map: labelTex, label: true, pick: { kind: "day", k } }));
-    for (let hour = 9; hour < HOUR_FROM + HOURS; hour += 3) {
-      const hs = take("F", 0, hour - HOUR_FROM);
-      block.tiles.push(this.makeTile(hs, { map: this.texture(this.drawHour(hour, hs.w, hs.h), true), label: true, hoverable: false }));
+    // a week's, month's or year's name on the floor of the dark band in front of it
+    if (s.span !== "day") {
+      const sp = this.spot("F", labelLane, base - 1, 1, labelSpan);
+      add(this.makeTile(sp, { map: this.texture(this.drawLabel(data.title, data.sub, "", sp.w, sp.h, false), true), label: true, hoverable: false }));
     }
 
-    // tasks: a timed one at its hour (as long as its estimate, up to 3 h), the rest from the morning on — on the
-    // walls at eye level, both sides in turn
-    const addTask = (t: TunnelTask, s: Surface, a: number, r: number, len: number) => {
-      const sp = take(s, a, r, len);
-      const canvas = this.drawTask(t, sp.w, sp.h, CARD_PX * Math.min(2, Math.max(sp.w, sp.h) / Math.min(sp.w, sp.h)) ** 0.5);
-      const tile = this.makeTile(sp, { map: this.texture(canvas), pick: { kind: "task", k, task: t } });
-      tile.redraw = (scale) => this.drawTask(t, sp.w, sp.h, CARD_PX * scale);
-      block.tiles.push(tile);
-    };
-    const onWalls = (row: number, len: number, i: number, order: number[]) => {
-      const sides: Surface[] = i % 2 ? ["R", "L"] : ["L", "R"];
-      for (const dr of order) {
-        const r = row + dr;
-        for (const s of sides) for (const a of eye) if (free(s, a, r, len)) return { s, a, r };
-      }
-      return null;
-    };
-    const anywhere = (row: number) => {
-      for (let dr = 0; dr < HOURS; dr++) for (const r of [row + dr, row - dr]) for (const s of ["F", "C"] as Surface[])
-        for (let a = 0; a < LANES; a++) if (free(s, a, r)) return { s, a, r };
-      return null;
-    };
-    const near = [0, 1, -1, 2, -2, 3, 4, 5, 6, 7, 8];
-    const timed = d.tasks.filter((t) => t.time).sort((a, b) => a.time!.localeCompare(b.time!));
-    const untimed = d.tasks.filter((t) => !t.time);
-    timed.forEach((t, i) => {
-      const row = clamp(Math.floor((minutesOf(t.time!) - HOUR_FROM * 60) / 60), 0, HOURS - 1);
-      const len = clamp(Math.round((t.minutes ?? 60) / 60), 1, Math.min(3, HOURS - row));
-      const at = onWalls(row, len, i, [0]) ?? onWalls(row, 1, i, near);
-      if (at) addTask(t, at.s, at.a, at.r, free(at.s, at.a, at.r, len) ? len : 1);
-      else {
-        const any = anywhere(row);
-        if (any) addTask(t, any.s, any.a, any.r, 1);
-      }
-    });
-    const forward = Array.from({ length: HOURS }, (_, i) => i);
-    untimed.forEach((t, i) => {
-      const at = onWalls(0, 1, i + timed.length, forward) ?? anywhere(0);
-      if (at) addTask(t, at.s, at.a, at.r, 1);
-    });
+    // long tasks (planned day → deadline) as rails on the ceiling, one lane each
+    this.addRails(data, b, g, add);
 
-    // memory photos spread over the day, on every side
-    const photos = d.photos.slice(0, MAX_PHOTOS);
-    photos.forEach((p, i) => {
-      const target = clamp(Math.floor(((i + 0.5) * HOURS) / photos.length + (rand() - 0.5) * 2), 0, HOURS - 1);
-      const sides = (["C", "L", "R", "F"] as Surface[]).sort(() => rand() - 0.5);
-      let at: { s: Surface; a: number; r: number } | null = null;
-      for (let dr = 0; dr < HOURS && !at; dr++) {
-        for (const r of dr ? [target + dr, target - dr] : [target]) {
-          for (const s of sides) {
-            const cells = Array.from({ length: width(s) }, (_, j) => j).sort(() => rand() - 0.5);
-            const a = cells.find((j) => free(s, j, r));
+    if (s.span === "day") this.layoutDay(data.days[0], b, g, place, add, rand);
+    else if (s.span === "year") this.layoutYear(data, b, g, place, add, rand);
+    else this.layoutDays(data, b, g, place, add, rand);
+
+    // accent tiles in the box's goal colours (the theme's when it has none)
+    const palette = data.colors.length ? data.colors.map((c) => hex(c, this.c.primary)) : [this.c.primary, this.c.accent2];
+    const cells = g.rows * (s.lanes * 2 + this.wallRows * 2);
+    const count = Math.round(cells * ACCENT_FILL * (s.span === "year" ? 0.5 : 1));
+    for (let i = 0, tries = 0; i < count && tries < count * 20; tries++) {
+      const sf = SURFACES[Math.floor(rand() * 4)];
+      const a = Math.floor(rand() * g.width(sf));
+      const r = Math.floor(rand() * g.rows);
+      if (!g.free(sf, a, r)) continue;
+      const colA = palette[Math.floor(rand() * palette.length)];
+      const colB = mix(colA, rand() > 0.5 ? "#ffffff" : palette[(palette.indexOf(colA) + 1) % palette.length], 0.5);
+      add(this.makeTile(place(sf, a, r), { colA, colB, opacity: this.glass ? 0.82 : 1 }));
+      i++;
+    }
+  }
+
+  private addRails(data: TunnelBox, b: number, g: Grid, add: (t: Tile) => void) {
+    const s = this.scale;
+    const boxStart = s.start(b), next = s.start(b + 1);
+    for (const l of data.long) {
+      const from = s.rowOf(l.from, s.span === "day" ? HOUR_FROM * 60 : null);
+      const to = s.span === "year" ? s.rowOf(l.to) + 1 : s.rowOf(l.to + 1, s.span === "day" ? HOUR_FROM * 60 : null);
+      const a = Math.max(from, boxStart), z = Math.min(to, next);
+      if (z - a < 0.2) continue;
+      const lane = l.lane % s.lanes;
+      const sp = this.spot("C", lane, a, z - a);
+      sp.w = Math.min(sp.w, 0.28 * (this.W / s.lanes)); // a rail, not a tile
+      for (let r = Math.floor(a - boxStart); r < Math.ceil(z - boxStart); r++) if (r >= 0 && r < g.rows) g.take("C", lane, r);
+      const col = hex(l.task.color, this.c.primary);
+      const t = this.makeTile(sp, { colA: col, colB: mix(col, "#ffffff", 0.35), opacity: 0.9, pick: { kind: "long", task: l.task } });
+      t.u.uRadius.value = sp.w / 2;
+      add(t);
+    }
+  }
+
+  // tasks on the walls at eye level, both sides in turn
+  private onWalls(g: Grid, row: number, len: number, i: number, order: number[]) {
+    const sides: Surface[] = i % 2 ? ["R", "L"] : ["L", "R"];
+    for (const dr of order) {
+      const r = row + dr;
+      for (const sf of sides) for (const a of this.eye) if (g.free(sf, a, r, len)) return { sf, a, r };
+    }
+    return null;
+  }
+  // anywhere in this row (walls first, then the ceiling, then the floor)
+  private inRow(g: Grid, r: number, i: number) {
+    const w = this.onWalls(g, r, 1, i, [0]);
+    if (w) return w;
+    for (const sf of ["C", "F"] as Surface[]) for (let a = 0; a < g.lanes; a++) if (g.free(sf, a, r)) return { sf, a, r };
+    return null;
+  }
+
+  private addTask(t: TunnelTask, day: number, at: { sf: Surface; a: number; r: number }, len: number, place: (sf: Surface, a: number, r: number, len?: number) => Spot, add: (t: Tile) => void) {
+    const sp = place(at.sf, at.a, at.r, len);
+    const px = CARD_PX * Math.sqrt(Math.min(2, Math.max(sp.w, sp.h) / Math.min(sp.w, sp.h)));
+    const tile = this.makeTile(sp, { map: this.texture(this.drawTask(t, sp.w, sp.h, px)), pick: { kind: "task", day, task: t } });
+    tile.redraw = (scale) => this.drawTask(t, sp.w, sp.h, CARD_PX * scale);
+    add(tile);
+  }
+
+  // Media spread over rows: each one near its row, any side.
+  private addMedia(list: { m: TunnelMedia; day: number; row: number }[], g: Grid, place: (sf: Surface, a: number, r: number) => Spot, add: (t: Tile) => void, rand: () => number, spread: number) {
+    list.forEach(({ m, day, row }, i) => {
+      const sides = [...SURFACES].sort(() => rand() - 0.5);
+      let at: { sf: Surface; a: number; r: number } | null = null;
+      for (let dr = 0; dr <= spread && !at; dr++) {
+        for (const r of dr ? [row + dr, row - dr] : [row]) {
+          for (const sf of sides) {
+            const cells = Array.from({ length: g.width(sf) }, (_, j) => j).sort(() => rand() - 0.5);
+            const a = cells.find((j) => g.free(sf, j, r));
             if (a !== undefined) {
-              at = { s, a, r };
+              at = { sf, a, r };
               break;
             }
           }
           if (at) break;
         }
       }
-      if (!at) return;
-      const sp = take(at.s, at.a, at.r);
-      block.tiles.push(this.photoTile(sp, p, { kind: "photo", k, photo: p, index: i, count: photos.length }));
+      if (at) add(this.mediaTile(place(at.sf, at.a, at.r), m, { kind: "media", day, media: m, index: i, count: list.length }));
     });
-
-    // accent tiles in the day's goal colours (the theme's when the day has none)
-    const palette = d.colors.length ? d.colors.map((c) => hex(c, this.c.primary)) : [this.c.primary, this.c.accent2];
-    const cells = HOURS * (LANES * 2 + n * 2);
-    const count = Math.round(cells * ACCENT_FILL);
-    for (let i = 0, tries = 0; i < count && tries < count * 20; tries++) {
-      const s = (["F", "C", "L", "R"] as Surface[])[Math.floor(rand() * 4)];
-      const a = Math.floor(rand() * width(s));
-      const r = Math.floor(rand() * HOURS);
-      if (!free(s, a, r)) continue;
-      const colA = palette[Math.floor(rand() * palette.length)];
-      const colB = mix(colA, rand() > 0.5 ? "#ffffff" : palette[(palette.indexOf(colA) + 1) % palette.length], 0.5);
-      block.tiles.push(this.makeTile(take(s, a, r), { colA, colB }));
-      i++;
-    }
   }
 
-  private photoTile(sp: Spot, p: TunnelPhoto, pick: TunnelPick) {
-    const waiting = this.texture(this.drawPhotoWaiting(sp.w, sp.h));
-    const tile = this.makeTile(sp, { map: waiting, pick });
-    tile.photo = p.path;
-    let entry = this.photos.get(p.path);
-    if (!entry && p.url) {
-      const e: PhotoTex = { tex: null, aspect: 1, uses: 0, state: "loading", waiters: new Set(), used: performance.now() };
+  // day: 06:00 near → 24:00 far; the date at the entrance, the hours along the floor's left edge
+  private layoutDay(d: TunnelDay, b: number, g: Grid, place: (sf: Surface, a: number, r: number, len?: number, span?: number) => Spot, add: (t: Tile) => void, rand: () => number) {
+    const s = this.scale;
+    const span = Math.min(3, s.lanes), lane = Math.floor((s.lanes - span) / 2);
+    const ls = place("F", lane, 0, 1, span);
+    add(this.makeTile(ls, { map: this.texture(this.drawLabel(String(d.dayNum), d.today ? "Today" : d.weekday, d.month, ls.w, ls.h, d.today), true), label: true, pick: { kind: "day", day: d.day } }));
+    for (let hour = 9; hour < HOUR_FROM + HOURS; hour += 3) {
+      const hs = place("F", 0, hour - HOUR_FROM);
+      add(this.makeTile(hs, { map: this.texture(this.drawText(`${String(hour).padStart(2, "0")}:00`, hs.w, hs.h), true), label: true, hoverable: false }));
+    }
+    // a timed task at its hour (as long as its estimate, up to 3 h), the rest from the morning on
+    const near = [0, 1, -1, 2, -2, 3, 4, 5, 6, 7, 8];
+    const timed = d.tasks.filter((t) => t.time).sort((a, b2) => a.time!.localeCompare(b2.time!));
+    timed.forEach((t, i) => {
+      const row = clamp(Math.floor((minutesOf(t.time!) - HOUR_FROM * 60) / 60), 0, HOURS - 1);
+      const len = clamp(Math.round((t.minutes ?? 60) / 60), 1, Math.min(3, HOURS - row));
+      const at = this.onWalls(g, row, len, i, [0]) ?? this.onWalls(g, row, 1, i, near) ?? this.inRow(g, row, i);
+      if (at) this.addTask(t, d.day, at, g.free(at.sf, at.a, at.r, len) ? len : 1, place, add);
+    });
+    const forward = Array.from({ length: HOURS }, (_, i) => i);
+    d.tasks.filter((t) => !t.time).forEach((t, i) => {
+      const at = this.onWalls(g, 0, 1, i + timed.length, forward);
+      if (at) this.addTask(t, d.day, at, 1, place, add);
+    });
+    // the memory photos / videos spread over the day
+    const n = d.media.length;
+    this.addMedia(
+      d.media.map((m, i) => ({ m, day: d.day, row: clamp(Math.floor(((i + 0.5) * HOURS) / n + (rand() - 0.5) * 2), 0, HOURS - 1) })),
+      g, place, add, rand, HOURS,
+    );
+  }
+
+  // week / month: a row a day — its label on the floor, its tasks on the walls, its photos around
+  private layoutDays(data: TunnelBox, b: number, g: Grid, place: (sf: Surface, a: number, r: number, len?: number, span?: number) => Spot, add: (t: Tile) => void, rand: () => number) {
+    const s = this.scale;
+    const week = s.span === "week";
+    const [from] = s.dayRange(b);
+    const media: { m: TunnelMedia; day: number; row: number }[] = [];
+    for (const d of data.days) {
+      const r = d.day - from;
+      const count = d.count ? ` · ${d.count}` : "";
+      if (week) {
+        const span = Math.min(3, s.lanes), lane = Math.floor((s.lanes - span) / 2);
+        const ls = place("F", lane, r, 1, span);
+        add(this.makeTile(ls, { map: this.texture(this.drawLabel(String(d.dayNum), d.today ? "Today" : d.weekday, `${d.month}${count}`, ls.w, ls.h, d.today), true), label: true, pick: { kind: "day", day: d.day } }));
+      } else {
+        const lane = Math.floor(s.lanes / 2);
+        const ls = place("F", lane, r);
+        add(this.makeTile(ls, { map: this.texture(this.drawLabel(String(d.dayNum), d.weekday.slice(0, 3), count.slice(3), ls.w, ls.h, d.today, 420), true), label: true, pick: { kind: "day", day: d.day } }));
+      }
+      const cap = week ? Infinity : 4;
+      d.tasks.slice(0, cap).forEach((t, i) => {
+        const at = this.inRow(g, r, i);
+        if (at) this.addTask(t, d.day, at, 1, place, add);
+      });
+      for (const m of d.media) media.push({ m, day: d.day, row: r });
+    }
+    this.addMedia(media, g, place, add, rand, 0);
+  }
+
+  // year: a row a week, the 7 days across the floor — the activity of the year
+  private layoutYear(data: TunnelBox, b: number, g: Grid, place: (sf: Surface, a: number, r: number, len?: number, span?: number) => Spot, add: (t: Tile) => void, rand: () => number) {
+    const s = this.scale;
+    const base = s.start(b);
+    const media: { m: TunnelMedia; day: number; row: number }[] = [];
+    for (const d of data.days) {
+      const r = Math.round(s.rowOf(d.day) - base);
+      const lane = s.laneOf(d.day);
+      const value = d.done + 0.5 * (d.count - d.done);
+      const level = value <= 0 ? 0 : value < 1 ? 1 : value < 2.5 ? 2 : value < 4 ? 3 : 4;
+      const sp = place("F", lane, r);
+      const pick: TunnelPick = { kind: "day", day: d.day };
+      if (d.tasks.length || d.today || d.dayNum === 1) {
+        add(this.makeTile(sp, { map: this.texture(this.drawYearDay(d, level, sp.w, sp.h), true), label: true, pick }));
+      } else {
+        const col = level ? this.c.primary : this.c.fg;
+        add(this.makeTile(sp, { colA: col, colB: col, opacity: level ? [0, 0.3, 0.5, 0.72, 0.95][level] : 0.07, pick }));
+      }
+      // the month's name on the left wall where it starts
+      if (d.dayNum === 1) {
+        const a = this.eye[0];
+        if (g.free("L", a, r)) {
+          const ms = place("L", a, r);
+          add(this.makeTile(ms, { map: this.texture(this.drawText(d.month, ms.w, ms.h, 0.75, 0.34), true), label: true, hoverable: false }));
+        }
+      }
+      for (const m of d.media) media.push({ m, day: d.day, row: r });
+    }
+    this.addMedia(media, g, place, add, rand, 1);
+  }
+
+  // ── media (photos, videos) ─────────────────────────────────────────────────────────────────────────────────────
+  private mediaTile(sp: Spot, m: TunnelMedia, pick: TunnelPick) {
+    const waiting = this.texture(this.drawMediaWaiting(sp.w, sp.h, m.video), true);
+    const tile = this.makeTile(sp, { map: waiting, label: true, pick });
+    tile.media = m.path;
+    let entry = this.media.get(m.path);
+    if (!entry && m.url) {
+      const e: MediaTex = { tex: null, aspect: 1, uses: 0, state: "loading", waiters: new Set(), used: performance.now(), video: null, rows: new Set() };
       entry = e;
-      this.photos.set(p.path, e);
-      loadImage(p.url)
-        .then((img) => {
-          if (this.disposed) return;
-          e.tex = this.texture(scaled(img, PHOTO_PX));
-          e.aspect = img.naturalWidth / img.naturalHeight || 1;
-          e.state = "ready";
-          e.waiters.forEach((t) => this.showPhoto(t, e));
-          e.waiters.clear();
-          this.dirty = true;
-        })
-        .catch(() => {
-          e.state = "failed"; // the bucket must allow this site (CORS) — the tile keeps its stand-in
-          e.waiters.clear();
-        });
+      this.media.set(m.path, e);
+      const ready = (tex: THREE.Texture, aspect: number) => {
+        if (this.disposed) return tex.dispose();
+        e.tex = tex;
+        e.aspect = aspect || 1;
+        e.state = "ready";
+        e.waiters.forEach((t) => this.showMedia(t, e));
+        e.waiters.clear();
+        this.dirty = true;
+      };
+      const failed = () => {
+        e.state = "failed"; // the bucket must allow this site (CORS, #193) — the tile keeps its stand-in
+        e.waiters.clear();
+      };
+      if (m.video) {
+        const v = document.createElement("video");
+        v.crossOrigin = "anonymous";
+        v.muted = true;
+        v.loop = true;
+        v.playsInline = true;
+        v.preload = "auto";
+        v.addEventListener("loadeddata", () => {
+          const tex = new THREE.VideoTexture(v);
+          tex.colorSpace = THREE.SRGBColorSpace;
+          ready(tex, v.videoWidth / v.videoHeight);
+        }, { once: true });
+        v.addEventListener("error", failed, { once: true });
+        v.src = m.url;
+        e.video = v;
+      } else {
+        loadImage(m.url).then((img) => ready(this.texture(scaled(img, PHOTO_PX)), img.naturalWidth / img.naturalHeight)).catch(failed);
+      }
     }
     if (entry) {
       entry.uses++;
       entry.used = performance.now();
-      if (entry.state === "ready") this.showPhoto(tile, entry);
+      if (entry.video) entry.rows.add(tile);
+      if (entry.state === "ready") this.showMedia(tile, entry);
       else if (entry.state === "loading") entry.waiters.add(tile);
     }
     return tile;
   }
 
-  private showPhoto(t: Tile, e: PhotoTex) {
+  private showMedia(t: Tile, e: MediaTex) {
     if (!e.tex) return;
     t.own?.dispose();
     t.own = null;
     t.u.uMap.value = e.tex;
+    t.u.uLabel.value = 0;
     t.imageAspect = e.aspect;
     this.setSize(t, t.mesh.scale.x, t.mesh.scale.y);
   }
 
-  // Keep up to 60 unused photo textures for the way back; free the oldest beyond that.
-  private prunePhotos() {
-    const idle = [...this.photos.entries()].filter(([, p]) => p.uses <= 0 && p.state !== "loading").sort((a, b) => a[1].used - b[1].used);
-    for (const [path, p] of idle.slice(0, Math.max(0, idle.length - 60))) {
-      p.tex?.dispose();
-      this.photos.delete(path);
+  private freeMedia(m: MediaTex) {
+    m.tex?.dispose();
+    if (m.video) {
+      m.video.pause();
+      m.video.removeAttribute("src");
+      m.video.load();
     }
   }
 
-  // the "now" ring around the passage
+  // Keep up to 60 unused media for the way back; free the oldest beyond that.
+  private pruneMedia() {
+    const idle = [...this.media.entries()].filter(([, m]) => m.uses <= 0 && m.state !== "loading").sort((a, b) => a[1].used - b[1].used);
+    for (const [path, m] of idle.slice(0, Math.max(0, idle.length - 60))) {
+      this.freeMedia(m);
+      this.media.delete(path);
+    }
+  }
+
+  // The nearest few videos ahead play (muted, looping); the rest wait.
+  private playVideos() {
+    const want: { m: MediaTex; d: number }[] = [];
+    for (const m of this.media.values()) {
+      if (!m.video || m.state !== "ready") continue;
+      let d = Infinity;
+      for (const t of m.rows) {
+        if (this.focus?.tile === t) d = -100;
+        else d = Math.min(d, Math.abs(-t.home.pos.z - this.pos - 4));
+      }
+      want.push({ m, d });
+    }
+    want.sort((a, b) => a.d - b.d);
+    want.forEach(({ m, d }, i) => {
+      const play = i < PLAYING && d < 12;
+      if (play && m.video!.paused) m.video!.play().catch(() => undefined);
+      else if (!play && !m.video!.paused) m.video!.pause();
+    });
+    return want.some(({ m }) => !m.video!.paused);
+  }
+
+  // the "now" ring around the passage (the time in the day span, today's row in the others)
   private buildRing() {
     for (let i = 0; i < 4; i++) {
       const t = this.makeTile({ pos: new THREE.Vector3(), quat: new THREE.Quaternion(), normal: new THREE.Vector3(), w: 1, h: 1 }, { colA: this.c.primary, hoverable: false });
-      t.u.uRadius.value = 0;
       this.ring.push(t);
     }
     this.placeRing();
@@ -1024,15 +1314,16 @@ export class Passage {
 
   private placeRing() {
     const { W, H } = this;
-    const z = -this.nowRow;
+    const s = this.scale;
+    const z = -(s.span === "day" ? s.rowOf(this.today, this.nowMinutes) : s.rowOf(this.today));
     const th = 0.035;
     const faces: [Surface, number, number][] = [["F", W, th], ["C", W, th], ["L", th, H], ["R", th, H]];
-    faces.forEach(([s, w, h], i) => {
+    faces.forEach(([sf, w, h], i) => {
       const t = this.ring[i];
       if (!t) return;
-      const sp = this.spot(s, 0, 0, 1);
+      const sp = this.spot(sf, 0, 0, 1);
       sp.pos.z = z;
-      if (s === "F" || s === "C") sp.pos.x = 0;
+      if (sf === "F" || sf === "C") sp.pos.x = 0;
       else sp.pos.y = 0;
       sp.pos.addScaledVector(sp.normal, LIFT);
       t.home = { ...sp, w, h };
@@ -1053,11 +1344,12 @@ export class Passage {
     this.animating.delete(t);
     this.boosting = false;
     this.glide = 0;
+    const pick = t.pick;
     if (t.redraw) {
       t.hiRes = this.texture(t.redraw(CARD_FOCUS_SCALE));
       t.u.uMap.value = t.hiRes;
-    } else if (t.pick.kind === "photo" && t.pick.photo.url && this.photos.get(t.photo!)?.state === "ready") {
-      loadImage(t.pick.photo.url)
+    } else if (pick.kind === "media" && !pick.media.video && pick.media.url && this.media.get(t.media!)?.state === "ready") {
+      loadImage(pick.media.url)
         .then((img) => {
           if (this.focus?.tile !== t || this.disposed) return;
           t.hiRes = this.texture(scaled(img, PHOTO_FOCUS_PX));
@@ -1066,7 +1358,7 @@ export class Passage {
         })
         .catch(() => undefined);
     }
-    this.events.onFocus(t.pick);
+    this.events.onFocus(pick);
     this.events.onHover(null);
     this.dirty = true;
   }
@@ -1082,12 +1374,12 @@ export class Passage {
     if (t.hiRes) {
       t.hiRes.dispose();
       t.hiRes = null;
-      t.u.uMap.value = t.photo ? this.photos.get(t.photo)?.tex ?? t.own : t.own;
+      t.u.uMap.value = t.media ? this.media.get(t.media)?.tex ?? t.own : t.own;
     }
     this.shared.uDim.value = 0;
     this.placeHome(t);
-    const stale = [...this.days.values()].filter((b) => b.stale).map((b) => b.k);
-    for (const k of stale) this.rebuildDay(k, this.events.getDay(k));
+    const stale = [...this.boxes.values()].filter((b) => b.stale).map((b) => b.b);
+    for (const b of stale) this.rebuildBox(b, this.events.getBox(this.scale, b));
   }
 
   private stepFocus(dt: number) {
@@ -1185,7 +1477,7 @@ export class Passage {
       this.anchor = this.pos + this.glide;
       return;
     }
-    this.click(p.tile);
+    this.click(p.tile, p.x, p.y);
   };
 
   private onCancel = (e: PointerEvent) => {
@@ -1207,6 +1499,19 @@ export class Passage {
     e.preventDefault();
     const raw = Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
     const px = e.deltaMode === 1 ? raw * 32 : e.deltaMode === 2 ? raw * 400 : raw;
+    if (e.ctrlKey) {
+      // ctrl + wheel (a trackpad pinch): out to the wider span, in to the narrower one
+      const now = performance.now();
+      if (now - this.zoomAt < 700) return;
+      this.zoomAcc += px;
+      if (Math.abs(this.zoomAcc) > 60) {
+        const dir = this.zoomAcc > 0 ? 1 : -1;
+        this.zoomAcc = 0;
+        this.zoomAt = now;
+        this.events.onZoom(dir, this.scale.at(this.pos + 2).day);
+      }
+      return;
+    }
     this.travel(clamp(px / 100, -4, 4));
   };
 
@@ -1222,15 +1527,39 @@ export class Passage {
     return hit ? this.tileOf.get(hit.object) ?? null : null;
   }
 
-  private click(pressed: Tile | null) {
+  // The cell of the wall under the pointer → the day (and, in the day span, the hour) it stands for.
+  private cellAt(): { day: number; minutes: number | null } | null {
+    this.raycaster.setFromCamera(this.ndc, this.camera);
+    const hit = this.raycaster.intersectObjects(this.shell, false)[0];
+    if (!hit) return null;
+    const s = this.scale;
+    const sf = SURFACES[this.shell.indexOf(hit.object as THREE.Mesh)];
+    const row = Math.floor(-hit.point.z);
+    const b = s.boxAt(row);
+    const local = row - s.start(b);
+    const lane = sf === "F" ? Math.floor((hit.point.x + this.W / 2) / (this.W / s.lanes)) : null;
+    if (s.span === "year" && lane === null) return null;
+    const day = s.dayOfCell(b, local, lane);
+    if (day === null) return null;
+    return { day, minutes: s.span === "day" ? (HOUR_FROM + local) * 60 : null };
+  }
+
+  private click(pressed: Tile | null, x: number, y: number) {
     if (this.focus) {
       this.close();
       return;
     }
     const t = pressed && this.tileOf.get(pressed.mesh) === pressed ? pressed : this.tileAt(); // still alive?
-    if (!t?.pick) return;
-    if (t.pick.kind === "day") this.events.onPick(t.pick);
-    else this.open(t);
+    if (t?.pick) {
+      if (t.pick.kind === "day" || t.pick.kind === "long") this.events.onPick(t.pick);
+      else this.open(t);
+      return;
+    }
+    // an empty cell (or an accent tile): a new task there
+    const cell = this.cellAt();
+    if (!cell) return;
+    const r = this.host.getBoundingClientRect();
+    this.events.onEmpty({ ...cell, x: x - r.left, y: y - r.top });
   }
 
   private setHovered(t: Tile | null) {
@@ -1239,7 +1568,7 @@ export class Passage {
     this.hovered = t;
     if (t) this.animating.add(t);
     this.canvas.style.cursor = t?.pick ? "pointer" : "";
-    this.events.onHover(t?.pick && t.pick.kind === "task" ? t.pick : null);
+    this.events.onHover(t?.pick && (t.pick.kind === "task" || t.pick.kind === "long") ? t.pick : null);
   }
 
   // ── the loop ───────────────────────────────────────────────────────────────────────────────────────────────────
@@ -1257,11 +1586,11 @@ export class Passage {
 
   private step(dt: number) {
     let busy = false;
-    const focusOpen = !!this.focus;
+    const still = !!this.focus || this.held;
 
-    // speed: cruise (not when paused, opened or for reduced motion), ×BOOST while held
-    const cruise = this.paused || this.reduced || focusOpen ? 0 : SPEED;
-    const target = this.boosting && !focusOpen ? SPEED * BOOST : cruise;
+    // speed: cruise (not when paused, opened, asked or for reduced motion), ×BOOST while held
+    const cruise = this.paused || this.reduced || still ? 0 : SPEED;
+    const target = this.boosting && !still ? SPEED * BOOST : cruise;
     this.vel = damp(this.vel, target, this.boosting ? 2.2 : 3, dt);
     if (Math.abs(this.vel - target) < 1e-4) this.vel = target;
     let move = this.vel * dt + this.dragMove;
@@ -1281,8 +1610,8 @@ export class Passage {
     if (move !== 0 || this.speedSeen > 1e-3) busy = true;
 
     // look toward the pointer (turn + shift), back to straight when it leaves
-    const lx = this.pointerIn && !focusOpen && !this.reduced ? this.ndc.x : 0;
-    const ly = this.pointerIn && !focusOpen && !this.reduced ? this.ndc.y : 0;
+    const lx = this.pointerIn && !still && !this.reduced ? this.ndc.x : 0;
+    const ly = this.pointerIn && !still && !this.reduced ? this.ndc.y : 0;
     this.lookX = damp(this.lookX, lx, 3.5, dt);
     this.lookY = damp(this.lookY, ly, 3.5, dt);
     if (Math.abs(this.lookX - lx) + Math.abs(this.lookY - ly) > 1e-4) busy = true;
@@ -1291,17 +1620,19 @@ export class Passage {
     cam.rotation.set(this.lookY * 0.09 * LOOK, -this.lookX * 0.13 * LOOK, 0);
     cam.updateMatrixWorld();
 
-    // the walls come along; the fog takes the night's colour inside the dark band
+    // the walls come along; without glass the fog takes the night's colour inside a dark band
     for (const m of this.shell) m.position.z = -this.pos - (SHELL / 2 - BEHIND - 6);
-    const night = nightOf(this.pos + 4);
-    const fog = new THREE.Color(this.c.wall).lerp(new THREE.Color(this.c.night), night * 0.9);
-    this.shared.uFogColor.value.copy(fog);
-    this.renderer.setClearColor(fog);
-
-    this.syncDays();
+    this.syncBoxes();
+    if (this.glass) this.renderer.setClearColor(0x000000, 0);
+    else {
+      const fog = new THREE.Color(this.c.wall).lerp(new THREE.Color(this.c.night), this.nightAt(this.pos + 4) * 0.9);
+      this.shared.uFogColor.value.copy(fog);
+      this.renderer.setClearColor(fog, 1);
+    }
 
     // cruising far ahead fades back to today
-    if (!this.paused && !this.wrapping && !focusOpen && !this.press && this.pos > Math.max(this.home, this.anchor) + WRAP_DAYS * PERIOD) {
+    const far = WRAP_BOXES * (this.scale.span === "day" ? HOURS + 4 : 1) * (this.scale.span === "year" ? 0.5 : 1);
+    if (!this.paused && !this.wrapping && !still && !this.press && this.pos > Math.max(this.home, this.anchor) + far) {
       this.anchor = this.home;
       this.jump(this.home);
     }
@@ -1309,7 +1640,7 @@ export class Passage {
     if (this.stepFocus(dt)) busy = true;
 
     // hover: the tile under the pointer brightens and lifts
-    if (this.pointerIn && !focusOpen && !this.press?.moved && (this.pointerMoved || busy)) {
+    if (this.pointerIn && !still && !this.press?.moved && (this.pointerMoved || busy)) {
       this.pointerMoved = false;
       const t = this.tileAt();
       this.setHovered(t && t.hoverable ? t : null);
@@ -1326,13 +1657,23 @@ export class Passage {
       busy = true;
     }
 
-    const at = Math.floor(this.pos + 2);
-    if (at !== this.lastMove) {
-      this.lastMove = at;
-      this.events.onMove(this.pos + 2);
+    // videos: the nearest few play
+    this.videoCheck -= dt;
+    if (this.videoCheck <= 0) {
+      this.videoCheck = 0.25;
+      this.videosOn = this.playVideos();
+    }
+    if (this.videosOn) busy = true;
+
+    const place = this.scale.at(this.pos + 2);
+    const key = `${place.day}:${place.minutes === null ? "" : Math.floor(place.minutes / 60)}:${place.band}`;
+    if (key !== this.lastMove) {
+      this.lastMove = key;
+      this.events.onMove(place);
     }
     return busy;
   }
+  private videosOn = false;
 
   private jump(row: number) {
     if (this.wrapping) return;
@@ -1343,18 +1684,19 @@ export class Passage {
       this.pos = row;
       this.glide = 0;
       this.vel = 0;
-      this.syncDays();
+      this.syncBoxes();
       this.dirty = true;
       this.canvas.style.opacity = "1";
-      window.setTimeout(() => (this.wrapping = false), 450);
-    }, 450);
+      window.setTimeout(() => (this.wrapping = false), 300);
+    }, 300);
   }
 
   private render() {
     const r = this.renderer;
     const strength = this.reduced ? 0 : BLUR * clamp((this.speedSeen - SPEED * 1.6) / (SPEED * BOOST * 0.7), 0, 1);
-    if (strength > 0.01) {
+    if (strength > 0.01 && !this.wrapping) {
       r.setRenderTarget(this.rt);
+      r.clear();
       r.render(this.scene, this.camera);
       r.setRenderTarget(null);
       // blur away from the vanishing point
