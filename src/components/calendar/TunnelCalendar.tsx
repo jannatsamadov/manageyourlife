@@ -167,6 +167,7 @@ export default function TunnelCalendar({ tasks, byId, onOpenDay, onAddTask }: {
     perRow.set(row, used + take.length);
     return take;
   };
+  const scaleRef = useRef<Scale | null>(null); // the engine's current span (set by getBox)
   // the links of the ones in the passage (signed, an hour each)
   const pictures = useMemo(() => {
     const out: string[] = [];
@@ -184,7 +185,6 @@ export default function TunnelCalendar({ tasks, byId, onOpenDay, onAddTask }: {
   });
 
   // What a box holds, for the engine (read through a ref so the engine always sees the latest data).
-  const scaleRef = useRef<Scale | null>(null);
   const getBox = (scale: Scale, b: number): TunnelBox => {
     scaleRef.current = scale;
     const [from, to] = scale.dayRange(b);
