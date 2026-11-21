@@ -9,7 +9,7 @@ export type TunnelMark = {
   color: string; // "#rrggbb"
   pattern: number; // 0 = plain (the area itself), 1…PATTERNS = a goal's texture
   label: string; // "Area · Goal"
-  order: number; // areas, then their goals, in the tree's order — a goal lands at the same place in every day
+  order: number; // a day's slices go in this order (areas, then their goals, as in the tree): the same order every day, not the same place
 };
 export type MixPart = { mark: TunnelMark | null; planned: number; done: number }; // minutes
 
