@@ -1,6 +1,6 @@
 // Tunnel view engine (P-62: T-94 2026-11-21, scope B #191). A passage of tiles you glide through; the owner's
 // reference is React Bits Pro "Passage Gallery" (paid — its behaviour is matched here, the code is our own). Time runs
-// along the passage (scale.ts): a box is a day, a week, a month or a year, a dark band between two boxes. The tiles on
+// along the passage (scale.ts): a box is a day, a month or a year, a dark band between two boxes. The tiles on
 // the walls, floor and ceiling are the tasks, the memory photos and videos, long tasks as rails on the ceiling and
 // accent tiles in the goal colours. The camera cruises; hold to boost, wheel / drag to travel, ctrl + wheel (a pinch)
 // to zoom between the spans, the view turns toward the pointer, the tile under it lifts, a click flies a tile out to
@@ -17,7 +17,7 @@ const SHELL = AHEAD + BEHIND + 12; // the walls' length, moved along with the ca
 const FOG_NEAR = 3, FOG_FAR = 30 / FOG;
 const LIFT = 0.006; // tiles sit this far off their wall
 const FOCUS_DIST = 1.25;
-const WRAP_BOXES = 14; // cruising this many days (weeks …) beyond where the owner went fades back to today
+const WRAP_BOXES = 14; // cruising this many days (half as many weeks in a year) beyond where the owner went fades back to today
 const BOOST_AFTER = 300, CLICK_WITHIN = 450; // ms: holding longer boosts; let go sooner and it is still a click
 const MAX_BANDS = 8;
 const PLAYING = 3; // videos playing at once
@@ -61,7 +61,7 @@ export type PassageEvents = {
   onRange: (fromDay: number, toDay: number) => void;
   onPick: (pick: TunnelPick) => void; // a day's label, a long task's rail
   onEmpty: (cell: { day: number; minutes: number | null; x: number; y: number }) => void;
-  onZoom: (dir: 1 | -1, day: number) => void; // ctrl + wheel: 1 = out (day → week …), -1 = in
+  onZoom: (dir: 1 | -1, day: number) => void; // ctrl + wheel: 1 = out (day → month → year), -1 = in
 };
 
 // ── small helpers ────────────────────────────────────────────────────────────────────────────────────────────────
@@ -1016,7 +1016,7 @@ export class Passage {
     const labelSpan = Math.min(3, s.lanes);
     const labelLane = Math.floor((s.lanes - labelSpan) / 2);
 
-    // a week's, month's or year's name on the floor of the dark band in front of it
+    // a month's or year's name on the floor of the dark band in front of it
     if (s.span !== "day") {
       const sp = this.spot("F", labelLane, base - 1, 1, labelSpan);
       add(this.makeTile(sp, { map: this.texture(this.drawLabel(data.title, data.sub, "", sp.w, sp.h, false), true), label: true, hoverable: false }));
@@ -1143,26 +1143,17 @@ export class Passage {
     );
   }
 
-  // week / month: a row a day — its label on the floor, its tasks on the walls, its photos around
+  // month: a row a day — its label on the floor, up to 4 tasks on the walls, its photos around
   private layoutDays(data: TunnelBox, b: number, g: Grid, place: (sf: Surface, a: number, r: number, len?: number, span?: number) => Spot, add: (t: Tile) => void, rand: () => number) {
     const s = this.scale;
-    const week = s.span === "week";
     const [from] = s.dayRange(b);
     const media: { m: TunnelMedia; day: number; row: number }[] = [];
     for (const d of data.days) {
       const r = d.day - from;
-      const count = d.count ? ` · ${d.count}` : "";
-      if (week) {
-        const span = Math.min(3, s.lanes), lane = Math.floor((s.lanes - span) / 2);
-        const ls = place("F", lane, r, 1, span);
-        add(this.makeTile(ls, { map: this.texture(this.drawLabel(String(d.dayNum), d.today ? "Today" : d.weekday, `${d.month}${count}`, ls.w, ls.h, d.today), true), label: true, pick: { kind: "day", day: d.day } }));
-      } else {
-        const lane = Math.floor(s.lanes / 2);
-        const ls = place("F", lane, r);
-        add(this.makeTile(ls, { map: this.texture(this.drawLabel(String(d.dayNum), d.weekday.slice(0, 3), count.slice(3), ls.w, ls.h, d.today, 420), true), label: true, pick: { kind: "day", day: d.day } }));
-      }
-      const cap = week ? Infinity : 4;
-      d.tasks.slice(0, cap).forEach((t, i) => {
+      const lane = Math.floor(s.lanes / 2);
+      const ls = place("F", lane, r);
+      add(this.makeTile(ls, { map: this.texture(this.drawLabel(String(d.dayNum), d.weekday.slice(0, 3), d.count ? String(d.count) : "", ls.w, ls.h, d.today, 420), true), label: true, pick: { kind: "day", day: d.day } }));
+      d.tasks.slice(0, 4).forEach((t, i) => {
         const at = this.inRow(g, r, i);
         if (at) this.addTask(t, d.day, at, 1, place, add);
       });

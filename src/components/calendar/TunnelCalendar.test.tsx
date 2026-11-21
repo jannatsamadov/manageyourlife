@@ -14,7 +14,7 @@ vi.mock("./tunnel/passage", () => ({
   Passage: class {
     span = "year";
     constructor(_host: HTMLElement, events: PassageEvents, opts: { today: number }) {
-      for (const span of ["day", "week", "month", "year"] as const) boxes.push(events.getBox(new Scale(span, opts.today), 0));
+      for (const span of ["day", "month", "year"] as const) boxes.push(events.getBox(new Scale(span, opts.today), 0));
       // as the real engine does once it moves: a new range of days → the page renders again with the engine there
       setTimeout(() => events.onRange(opts.today - 400, opts.today + 400));
     }
@@ -26,6 +26,7 @@ vi.mock("./tunnel/passage", () => ({
 }));
 vi.mock("@/context/AuthContext", () => ({ useAuth: () => ({ user: null }) }));
 vi.mock("@/features/items/ItemDrawer", () => ({ useItemDrawer: () => ({ open: () => undefined }) }));
+vi.mock("@/hooks/useVault", () => ({ useVault: () => ({ files: [], resolve: () => null }) }));
 
 const { default: TunnelCalendar } = await import("./TunnelCalendar");
 
@@ -58,10 +59,10 @@ describe("TunnelCalendar", () => {
       await new Promise((r) => setTimeout(r, 50)); // the engine's first range → the second render
     });
     // still on screen after the second render (a render error unmounts it) and nothing reported
-    expect(view!.container.textContent).toContain("Year");
+    expect(view!.container.querySelector('[aria-roledescription="tunnel"]')).not.toBeNull();
     expect(errors.mock.calls.filter((c) => !String(c[0]).includes("act("))).toEqual([]);
     errors.mockRestore();
-    expect(boxes.map((b) => b.days.length)).toEqual([1, 7, expect.any(Number), expect.any(Number)]);
+    expect(boxes.map((b) => b.days.length)).toEqual([1, expect.any(Number), expect.any(Number)]);
     expect(boxes[0].days[0].tasks.map((t) => t.title)).toContain("Write the lesson");
     expect(boxes[0].long.map((l) => l.task.title)).toEqual(["Long one"]);
   });

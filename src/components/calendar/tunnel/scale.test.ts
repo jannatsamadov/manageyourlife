@@ -15,14 +15,6 @@ describe("tunnel scale", () => {
     expect(s.at(s.rowOf(today + 1, 3 * 60)).day).toBe(today + 1);
   });
 
-  it("week: Monday is the first row, a day a row", () => {
-    const s = new Scale("week", today);
-    expect(s.dayRange(0)[0]).toBe(day("2026-11-16"));
-    expect(s.rowOf(today)).toBe(5);
-    expect(s.rowOf(day("2026-11-23"))).toBe(9); // next Monday after 7 rows + a band of 2
-    expect(s.boxAt(s.rowOf(day("2026-11-09")))).toBe(-1);
-  });
-
   it("month: rows are the month's days, boxes follow each other", () => {
     const s = new Scale("month", today);
     expect(s.rows(0)).toBe(30);

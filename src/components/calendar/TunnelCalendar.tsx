@@ -1,19 +1,24 @@
 // Tunnel view (P-62: T-94 2026-11-21, scope B #191): the days as a passage you glide through. The owner's reference is
 // React Bits Pro "Passage Gallery" ("same quality, about one-to-one"); its behaviour is matched, the code is our own —
-// the engine is tunnel/passage.ts, the spans tunnel/scale.ts. A box is a day, a week, a month or a year (zoom with the
-// buttons, ctrl + wheel / a pinch, or a click on a day); tasks, memory photos and videos (Memories/<date>.md + what was
-// sent to the bot, as in the Depth view), long tasks as rails, accent tiles in the goal colours. Gallery mode: only
-// the photos and videos. Click a task → it flies out → Open = the item drawer; click an empty cell → a task there.
+// the engine is tunnel/passage.ts, the spans tunnel/scale.ts. A box is a day, a month or a year (zoom with the
+// magnifier buttons, ctrl + wheel / a pinch, +/−, or a click on a day — no Day/Month/Year switch: the page has its own
+// views switch and two looked alike, owner 2026-11-21); tasks, memory photos and videos (Memories/<date>.md + what
+// was sent to the bot, as in the Depth view), long tasks as rails, accent tiles in the goal colours. Gallery mode:
+// only the photos and videos. Click a task → it flies out → Open = the item drawer; click an empty cell → a task
+// there; a day's memory note opens in the side sheet, as notes do on the Notes page.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { BookHeart, ChevronDown, ChevronUp, Crosshair, Images, PanelRightOpen, Pause, Play, X } from "lucide-react";
+import { BookHeart, ChevronDown, ChevronUp, Crosshair, Images, PanelRightOpen, Pause, Play, X, ZoomIn, ZoomOut } from "lucide-react";
 import type { Task } from "@/core/tasks";
 import type { TreeNode } from "@/lib/strategy";
 import { useAuth } from "@/context/AuthContext";
 import { localDay } from "@/hooks/useGoogleEvents";
 import { toast } from "@/hooks/use-toast";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
+import NotePanel from "@/components/vault/NotePanel";
+import { useVault } from "@/hooks/useVault";
 import { useItemDrawer } from "@/features/items/ItemDrawer";
 import { ensureMemory, loadMemories } from "@/lib/memories";
 import { vault } from "@/lib/vault";
@@ -25,9 +30,8 @@ const DAY = 86400000;
 const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-const SPAN_LABEL: Record<Span, string> = { day: "Day", week: "Week", month: "Month", year: "Year" };
 // Photos and videos shown per day ([tasks mode, gallery mode]); in the year per week.
-const MEDIA_CAP: Record<Span, [number, number]> = { day: [24, 40], week: [3, 8], month: [1, 3], year: [1, 4] };
+const MEDIA_CAP: Record<Span, [number, number]> = { day: [24, 40], month: [1, 3], year: [1, 4] };
 
 const dayOf = (iso: string) => Math.floor(Date.parse(`${iso.slice(0, 10)}T00:00:00Z`) / DAY);
 const isoOf = (n: number) => new Date(n * DAY).toISOString().slice(0, 10);
@@ -94,6 +98,7 @@ export default function TunnelCalendar({ tasks, byId, onOpenDay, onAddTask }: {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const drawer = useItemDrawer();
+  const notes = useVault();
   const today = useMemo(() => dayOf(localDay(new Date())), []);
 
   const hostRef = useRef<HTMLDivElement>(null);
@@ -108,6 +113,7 @@ export default function TunnelCalendar({ tasks, byId, onOpenDay, onAddTask }: {
   const [paused, setPaused] = useState(() => remember.get("tunnel.autoplay") === "off");
   const [ask, setAsk] = useState<{ day: number; minutes: number | null; x: number; y: number } | null>(null);
   const [draft, setDraft] = useState("");
+  const [note, setNote] = useState<string | null>(null); // a memory note open in the side sheet
 
   const byDay = useMemo(() => {
     const m = new Map<number, Task[]>();
@@ -211,8 +217,7 @@ export default function TunnelCalendar({ tasks, byId, onOpenDay, onAddTask }: {
     const first = new Date(from * DAY);
     const last = new Date((to - 1) * DAY);
     const [title, sub] =
-      scale.span === "week" ? [`${first.getUTCDate()}–${last.getUTCDate()} ${MONTHS[last.getUTCMonth()]}`, `Week ${isoWeek(from)}`]
-      : scale.span === "month" ? [MONTH_NAMES[first.getUTCMonth()], String(first.getUTCFullYear())]
+      scale.span === "month" ? [MONTH_NAMES[first.getUTCMonth()], String(last.getUTCFullYear())]
       : scale.span === "year" ? [String(first.getUTCFullYear()), ""]
       : ["", ""];
     return {
@@ -271,7 +276,6 @@ export default function TunnelCalendar({ tasks, byId, onOpenDay, onAddTask }: {
           onEmpty: (cell) => {
             setDraft("");
             setAsk(cell);
-            engineRef.current?.setHeld(true);
           },
           onZoom: (dir, day) => {
             const s = engineRef.current?.span ?? "day";
@@ -312,10 +316,14 @@ export default function TunnelCalendar({ tasks, byId, onOpenDay, onAddTask }: {
     remember.set("tunnel.mode", gallery ? "gallery" : "tasks");
   }, [gallery]);
 
+  // the passage stands still while a question or a note is open over it
+  useEffect(() => {
+    engineRef.current?.setHeld(!!ask || !!note);
+  }, [ask, note]);
+
   const closeAsk = () => {
     setAsk(null);
     setDraft("");
-    engineRef.current?.setHeld(false);
     hostRef.current?.focus();
   };
   const submitAsk = async () => {
@@ -332,7 +340,7 @@ export default function TunnelCalendar({ tasks, byId, onOpenDay, onAddTask }: {
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     const engine = engineRef.current;
-    if (!engine || ask) return;
+    if (!engine || ask || note) return;
     const keys: Record<string, () => void> = {
       ArrowUp: () => engine.travel(1),
       ArrowRight: () => engine.travel(1),
@@ -361,11 +369,13 @@ export default function TunnelCalendar({ tasks, byId, onOpenDay, onAddTask }: {
     el.style.transform = `translate(${e.clientX - r.left + 14}px, ${e.clientY - r.top + 16}px)`;
   };
 
+  // a day's memory note (made if missing) in the side sheet
   const openMemory = async (day: number) => {
     try {
       const path = await ensureMemory(isoOf(day), fmt(day));
       qc.invalidateQueries({ queryKey: ["memories", user?.id] });
-      navigate(`/notes?open=${encodeURIComponent(path)}`);
+      engineRef.current?.close();
+      setNote(path);
     } catch (e) {
       toast({ title: "Not opened", description: (e as Error).message, variant: "destructive" });
     }
@@ -399,18 +409,7 @@ export default function TunnelCalendar({ tasks, byId, onOpenDay, onAddTask }: {
 
       <div className="pointer-events-none absolute left-4 top-3 z-10 text-sm font-semibold tabular-nums text-foreground drop-shadow">{where}</div>
       <div className="absolute right-3 top-2 z-10 flex items-center gap-1">
-        <div className="mr-1 flex overflow-hidden rounded-md border border-border/60 bg-background/40 backdrop-blur">
-          {SPANS.map((s) => (
-            <button
-              key={s}
-              type="button"
-              onClick={() => zoomTo(s, place.day)}
-              className={cn("px-2 py-1 text-xs font-medium transition-colors", span === s ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground")}
-            >
-              {SPAN_LABEL[s]}
-            </button>
-          ))}
-        </div>
+        <Icon label="Memory" onClick={() => openMemory(place.day)}><BookHeart className="h-4 w-4" /></Icon>
         <Icon label="Gallery" onClick={() => setGallery((g) => !g)} active={gallery}><Images className="h-4 w-4" /></Icon>
         <Icon label={paused ? "Play" : "Pause"} onClick={() => setPaused((p) => !p)} active={!paused}>
           {paused ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}
@@ -418,6 +417,12 @@ export default function TunnelCalendar({ tasks, byId, onOpenDay, onAddTask }: {
         <Icon label="Today" onClick={() => engineRef.current?.goHome()}><Crosshair className="h-4 w-4" /></Icon>
       </div>
       <div className="absolute bottom-4 right-3 z-10 flex flex-col gap-1">
+        {SPANS[SPANS.indexOf(span) - 1] && (
+          <Icon label="Zoom in" onClick={() => zoomTo(SPANS[SPANS.indexOf(span) - 1], place.day)}><ZoomIn className="h-4 w-4" /></Icon>
+        )}
+        {SPANS[SPANS.indexOf(span) + 1] && (
+          <Icon label="Zoom out" onClick={() => zoomTo(SPANS[SPANS.indexOf(span) + 1], place.day)}><ZoomOut className="h-4 w-4" /></Icon>
+        )}
         <Icon label="Next" onClick={() => engineRef.current?.jumpBoxes(1)}><ChevronUp className="h-4 w-4" /></Icon>
         <Icon label="Previous" onClick={() => engineRef.current?.jumpBoxes(-1)}><ChevronDown className="h-4 w-4" /></Icon>
       </div>
@@ -487,6 +492,25 @@ export default function TunnelCalendar({ tasks, byId, onOpenDay, onAddTask }: {
           </div>
         </div>
       )}
+
+      {/* a memory note at the side, as on the Notes page */}
+      <Sheet open={!!note} onOpenChange={(o) => !o && setNote(null)}>
+        <SheetContent side="right" className="flex w-full flex-col p-0 sm:max-w-2xl">
+          <SheetTitle className="sr-only">Memory</SheetTitle>
+          {note && (
+            <NotePanel
+              key={note}
+              path={note}
+              file={notes.files.find((f) => f.path === note)}
+              inSheet
+              resolve={notes.resolve}
+              onOpen={setNote}
+              onClose={() => setNote(null)}
+              onAction={(_a, f) => navigate(`/notes?open=${encodeURIComponent(f.path)}`)}
+            />
+          )}
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

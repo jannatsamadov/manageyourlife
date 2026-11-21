@@ -1,17 +1,17 @@
 // The tunnel's spans (P-62 scope B, #191): the passage stays a passage, only what a row and a box mean changes.
 //   day   — a box = a day,   a row = an hour (06:00 → 24:00), a dark band of 4 rows (the night)
-//   week  — a box = a week (Mon → Sun), a row = a day, a band of 2 rows
 //   month — a box = a month, a row = a day, a band of 3 rows
 //   year  — a box = a year,  a row = a week, the 7 days across the floor (a 3-D GitHub activity year), a band of 4
+// (A week span existed for a day; the owner dropped it, 2026-11-21 — it is on the local branch `tunnel-week`.)
 // Days are epoch day numbers (UTC days since 1970-01-01, the way the calendar views count them). Box 0 holds today.
-export type Span = "day" | "week" | "month" | "year";
-export const SPANS: Span[] = ["day", "week", "month", "year"];
+export type Span = "day" | "month" | "year";
+export const SPANS: Span[] = ["day", "month", "year"];
 
 export const HOUR_FROM = 6; // a day's box starts at 06:00 …
 export const HOURS = 18; // … and runs to 24:00, a row per hour
 
-const BAND: Record<Span, number> = { day: 4, week: 2, month: 3, year: 4 };
-const LANES: Record<Span, number> = { day: 5, week: 5, month: 5, year: 7 };
+const BAND: Record<Span, number> = { day: 4, month: 3, year: 4 };
+const LANES: Record<Span, number> = { day: 5, month: 5, year: 7 };
 
 const weekday = (day: number) => (day + 3) % 7; // Monday = 0 (1970-01-01 was a Thursday)
 const ymd = (day: number) => {
@@ -35,11 +35,7 @@ export class Scale {
     this.band = BAND[span];
     this.lanes = LANES[span];
     const t = ymd(today);
-    this.first =
-      span === "day" ? today
-      : span === "week" ? today - weekday(today)
-      : span === "month" ? dayOfYmd(t.y, t.m)
-      : dayOfYmd(t.y, 0);
+    this.first = span === "day" ? today : span === "month" ? dayOfYmd(t.y, t.m) : dayOfYmd(t.y, 0);
   }
 
   // The first day of box b and the day after its last one.
@@ -47,7 +43,6 @@ export class Scale {
     const t = ymd(this.first);
     switch (this.span) {
       case "day": return [this.first + b, this.first + b + 1];
-      case "week": return [this.first + 7 * b, this.first + 7 * b + 7];
       case "month": return [dayOfYmd(t.y, t.m + b), dayOfYmd(t.y, t.m + b + 1)];
       case "year": return [dayOfYmd(t.y + b, 0), dayOfYmd(t.y + b + 1, 0)];
     }
@@ -58,7 +53,6 @@ export class Scale {
     const [from, to] = this.dayRange(b);
     switch (this.span) {
       case "day": return HOURS;
-      case "week":
       case "month": return to - from;
       case "year": return floorDiv(to - 1 - this.weekStart(from), 7) + 1;
     }
@@ -70,7 +64,7 @@ export class Scale {
 
   // The first row of box b (box 0 starts at row 0; a band follows every box).
   start(b: number): number {
-    if (this.span === "day" || this.span === "week") return b * (this.rows(0) + this.band);
+    if (this.span === "day") return b * (HOURS + this.band);
     const hit = this.starts.get(b);
     if (hit !== undefined) return hit;
     let row = 0;
@@ -82,7 +76,7 @@ export class Scale {
 
   // The box a row is in (the band after a box belongs to it).
   boxAt(row: number) {
-    if (this.span === "day" || this.span === "week") return Math.floor(row / (this.rows(0) + this.band));
+    if (this.span === "day") return Math.floor(row / (HOURS + this.band));
     const avg = this.span === "month" ? 30.44 + this.band : 52.6 + this.band;
     let b = Math.floor(row / avg);
     while (this.start(b) > row) b--;
@@ -101,7 +95,6 @@ export class Scale {
         if (m >= HOUR_FROM * 60) return this.start(b) + Math.min(m - HOUR_FROM * 60, HOURS * 60) / 60;
         return this.start(b - 1) + HOURS + (m / (HOUR_FROM * 60)) * this.band;
       }
-      case "week":
       case "month": return this.start(b) + (day - from);
       case "year": return this.start(b) + floorDiv(day - this.weekStart(from), 7);
     }
@@ -113,7 +106,6 @@ export class Scale {
   boxOfDay(day: number) {
     switch (this.span) {
       case "day": return day - this.first;
-      case "week": return floorDiv(day - this.first, 7);
       case "month": {
         const a = ymd(this.first), d = ymd(day);
         return (d.y - a.y) * 12 + (d.m - a.m);
