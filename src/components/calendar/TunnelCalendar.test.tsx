@@ -25,7 +25,7 @@ vi.mock("./tunnel/passage", () => ({
   },
 }));
 vi.mock("@/context/AuthContext", () => ({ useAuth: () => ({ user: null }) }));
-vi.mock("@/features/items/ItemDrawer", () => ({ useItemDrawer: () => ({ open: () => undefined }) }));
+vi.mock("@/features/items/ItemDrawer", () => ({ useItemDrawer: () => ({ id: null, fresh: false, open: () => undefined }) }));
 vi.mock("@/hooks/useVault", () => ({ useVault: () => ({ files: [], resolve: () => null }) }));
 
 const { default: TunnelCalendar } = await import("./TunnelCalendar");
@@ -48,7 +48,7 @@ describe("TunnelCalendar", () => {
         <MemoryRouter>
           <QueryClientProvider client={new QueryClient()}>
             <TooltipProvider>
-              <TunnelCalendar tasks={tasks} byId={new Map()} onOpenDay={() => {}} onAddTask={async () => {}} />
+              <TunnelCalendar tasks={tasks} byId={new Map()} onOpenDay={() => {}} onAddTask={async () => undefined} onDeleteTask={() => undefined} />
             </TooltipProvider>
           </QueryClientProvider>
         </MemoryRouter>,

@@ -5,7 +5,8 @@
 // views switch and two looked alike, owner 2026-11-21); tasks, memory photos and videos (Memories/<date>.md + what
 // was sent to the bot, as in the Depth view), long tasks as rails, accent tiles in the goal colours. Gallery mode:
 // only the photos and videos. Click a task → it flies out → Open = the item drawer; click an empty cell → a task
-// there; a day's memory note opens in the side sheet, as notes do on the Notes page.
+// made there and opened in the item drawer, its title selected (closed unnamed → it goes to the trash again); a
+// day's memory note opens in the side sheet, as notes do on the Notes page.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -88,11 +89,14 @@ function Icon({ label, onClick, active, children }: { label: string; onClick: ()
   );
 }
 
-export default function TunnelCalendar({ tasks, byId, onOpenDay, onAddTask }: {
+const NEW_TITLE = "New task";
+
+export default function TunnelCalendar({ tasks, byId, onOpenDay, onAddTask, onDeleteTask }: {
   tasks: Task[];
   byId: Map<string, TreeNode>;
   onOpenDay: (day: string) => void;
-  onAddTask: (t: { title: string; date: string; time: string | null }) => Promise<unknown>;
+  onAddTask: (t: { title: string; date: string; time: string | null }) => Promise<{ id: string } | undefined>;
+  onDeleteTask: (id: string) => unknown;
 }) {
   const { user } = useAuth();
   const qc = useQueryClient();
@@ -111,8 +115,8 @@ export default function TunnelCalendar({ tasks, byId, onOpenDay, onAddTask }: {
   const [place, setPlace] = useState<TunnelPlace>({ day: today, minutes: 6 * 60, band: false });
   const [range, setRange] = useState<[number, number]>([today - 1, today + 2]);
   const [paused, setPaused] = useState(() => remember.get("tunnel.autoplay") === "off");
-  const [ask, setAsk] = useState<{ day: number; minutes: number | null; x: number; y: number } | null>(null);
-  const [draft, setDraft] = useState("");
+  const [making, setMaking] = useState(false); // a task for an empty cell is being made
+  const freshRef = useRef<{ id: string; seen: boolean } | null>(null); // that task, until its drawer closes
   const [note, setNote] = useState<string | null>(null); // a memory note open in the side sheet
 
   const byDay = useMemo(() => {
@@ -241,7 +245,6 @@ export default function TunnelCalendar({ tasks, byId, onOpenDay, onAddTask }: {
     if (!engine || next === engine.span) return;
     setSpanState(next);
     remember.set("tunnel.span", next);
-    setAsk(null);
     engine.setSpan(next, day, next === "day" && day === today ? nowMinutes() : null);
   };
   const zoomRef = useRef(zoomTo);
@@ -273,10 +276,7 @@ export default function TunnelCalendar({ tasks, byId, onOpenDay, onAddTask }: {
               else zoomRef.current(SPANS[SPANS.indexOf(s) - 1], pick.day);
             }
           },
-          onEmpty: (cell) => {
-            setDraft("");
-            setAsk(cell);
-          },
+          onEmpty: (cell) => makeAtRef.current(cell.day, cell.minutes),
           onZoom: (dir, day) => {
             const s = engineRef.current?.span ?? "day";
             const next = SPANS[SPANS.indexOf(s) + dir];
@@ -316,31 +316,48 @@ export default function TunnelCalendar({ tasks, byId, onOpenDay, onAddTask }: {
     remember.set("tunnel.mode", gallery ? "gallery" : "tasks");
   }, [gallery]);
 
-  // the passage stands still while a question or a note is open over it
+  // the passage stands still while a drawer or a note is open over it
   useEffect(() => {
-    engineRef.current?.setHeld(!!ask || !!note);
-  }, [ask, note]);
+    engineRef.current?.setHeld(making || !!note || !!drawer.id);
+  }, [making, note, drawer.id]);
 
-  const closeAsk = () => {
-    setAsk(null);
-    setDraft("");
-    hostRef.current?.focus();
-  };
-  const submitAsk = async () => {
-    const title = draft.trim();
-    const cell = ask;
-    closeAsk();
-    if (!title || !cell) return;
+  // An empty cell → a task there, opened in the drawer with its title selected.
+  const makeAt = async (day: number, minutes: number | null) => {
+    if (making) return;
+    setMaking(true);
     try {
-      await onAddTask({ title, date: isoOf(cell.day), time: cell.minutes === null ? null : hhmm(cell.minutes) });
+      const saved = await onAddTask({ title: NEW_TITLE, date: isoOf(day), time: minutes === null ? null : hhmm(minutes) });
+      if (saved) {
+        freshRef.current = { id: saved.id, seen: false };
+        drawer.open(saved.id, { fresh: true });
+      }
     } catch (e) {
       toast({ title: "Not saved", description: (e as Error).message, variant: "destructive" });
+    } finally {
+      setMaking(false);
     }
   };
+  const makeAtRef = useRef(makeAt);
+  makeAtRef.current = makeAt;
+
+  // its drawer closed with nothing written: it goes to the trash again
+  useEffect(() => {
+    const fresh = freshRef.current;
+    if (!fresh) return;
+    if (drawer.id === fresh.id) {
+      fresh.seen = true;
+      return;
+    }
+    if (!fresh.seen) return;
+    freshRef.current = null;
+    const t = tasks.find((x) => x.id === fresh.id);
+    if (t && t.title === NEW_TITLE && !t.description && !t.nodeId) onDeleteTask(t.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drawer.id]);
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     const engine = engineRef.current;
-    if (!engine || ask || note) return;
+    if (!engine || note) return;
     const keys: Record<string, () => void> = {
       ArrowUp: () => engine.travel(1),
       ArrowRight: () => engine.travel(1),
@@ -391,8 +408,6 @@ export default function TunnelCalendar({ tasks, byId, onOpenDay, onAddTask }: {
     span === "day" ? `${dayText(place.day)} · ${hhmm(Math.floor((place.minutes ?? 0) / 60) * 60)}`
     : span === "year" ? `${dayText(place.day, false)} · Week ${isoWeek(place.day - ((place.day + 3) % 7))}`
     : dayText(place.day);
-  const askLeft = ask ? Math.min(Math.max(ask.x - 120, 8), (hostRef.current?.clientWidth ?? 400) - 248) : 0;
-  const askTop = ask ? Math.min(Math.max(ask.y - 22, 8), (hostRef.current?.clientHeight ?? 400) - 72) : 0;
 
   return (
     <div className="glass-card relative h-[calc(100vh-12rem)] min-h-[420px] overflow-hidden">
@@ -429,7 +444,7 @@ export default function TunnelCalendar({ tasks, byId, onOpenDay, onAddTask }: {
 
       {/* the task under the pointer, readable */}
       <div ref={hoverRef} className="pointer-events-none absolute left-0 top-0 z-10">
-        {hover && !focus && !ask && (
+        {hover && !focus && (
           <div className="max-w-[260px] rounded-md border border-border bg-popover/90 px-2.5 py-1.5 text-xs text-popover-foreground shadow-md backdrop-blur">
             <div className="font-medium leading-snug">{hover.title}</div>
             {(hover.time || hover.goal) && (
@@ -438,31 +453,6 @@ export default function TunnelCalendar({ tasks, byId, onOpenDay, onAddTask }: {
           </div>
         )}
       </div>
-
-      {/* a new task in the empty cell that was clicked */}
-      {ask && (
-        <form
-          className="absolute z-20 w-60 rounded-lg border border-border bg-popover/95 p-2 shadow-lg backdrop-blur animate-in fade-in zoom-in-95 duration-150"
-          style={{ left: askLeft, top: askTop }}
-          onSubmit={(e) => {
-            e.preventDefault();
-            submitAsk();
-          }}
-        >
-          <div className="mb-1 px-1 text-xs text-muted-foreground tabular-nums">
-            {dayText(ask.day)}{ask.minutes !== null && ` · ${hhmm(ask.minutes)}`}
-          </div>
-          <input
-            autoFocus
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => e.key === "Escape" && (e.preventDefault(), closeAsk())}
-            onBlur={() => !draft.trim() && closeAsk()}
-            placeholder="New task"
-            className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm outline-none focus:ring-1 focus:ring-ring"
-          />
-        </form>
-      )}
 
       {/* the opened tile's caption */}
       {focus && (focus.kind === "task" || focus.kind === "media") && (

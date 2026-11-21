@@ -843,6 +843,7 @@ export default function SchedulePlanning() {
                     title: t.title, description: "", estimatedTime: null, status: "idle", startTime: null, endTime: null,
                     date: t.date, deadline: "", position: 0, link: "", priority: "medium", isEvent: false, time: t.time, deadlineTime: null,
                   })}
+                  onDeleteTask={deleteTask}
                 />
               </Suspense>
             }
