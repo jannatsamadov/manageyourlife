@@ -93,8 +93,9 @@ function formatTime(ts: number): string {
 }
 
 function formatDayLabel(dateStr: string): string {
-  const today = new Date().toISOString().slice(0, 10);
-  const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+  const now = new Date();
+  const today = localDay(now);
+  const tomorrow = localDay(new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1));
   if (dateStr === today) return "Today";
   if (dateStr === tomorrow) return "Tomorrow";
   return new Date(dateStr + "T12:00:00").toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" });
@@ -102,7 +103,7 @@ function formatDayLabel(dateStr: string): string {
 
 function isTaskOverdue(task: Task): boolean {
   if (!task.deadline) return false;
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localDay(new Date());
   return task.deadline < today && task.status !== "complete";
 }
 
@@ -113,9 +114,10 @@ const priorityColors: Record<TaskPriority, string> = {
 };
 
 function calendarEventColor(status: Task["status"], deadline: string): string {
+  if (status === "abandoned") return "bg-muted/40 text-muted-foreground line-through"; // dropped: crossed out (owner, #204)
   if (status === "complete") return "bg-primary/15 text-primary";
   if (status === "active") return "bg-primary/20 text-primary animate-pulse";
-  if (deadline && deadline < new Date().toISOString().slice(0, 10)) return "bg-destructive/15 text-destructive";
+  if (deadline && deadline < localDay(new Date())) return "bg-destructive/15 text-destructive";
   return "bg-primary/10 text-primary";
 }
 
@@ -123,7 +125,7 @@ function getTaskProgress(task: Task): number {
   if (!task.estimatedTime) return 0;
   if (!task.deadline) return 0;
   const dl = task.deadline;
-  const todayDate = new Date(new Date().toISOString().slice(0, 10));
+  const todayDate = new Date(localDay(new Date()));
   const deadline = new Date(dl);
   const daysUntil = Math.ceil((deadline.getTime() - todayDate.getTime()) / 86400000);
   const fullTime = task.estimatedTime / 60 * 100;
@@ -132,9 +134,11 @@ function getTaskProgress(task: Task): number {
   return Math.min(1, (fullTime - remaining) / fullTime);
 }
 
-const today = new Date().toISOString().slice(0, 10);
+// Dates here are local days (YYYY-MM-DD in the user's time zone); toISOString() would give the UTC day, which is
+// yesterday just after local midnight east of Greenwich (#204).
 
 export default function SchedulePlanning() {
+  const today = localDay(new Date());
   const { tasks, updateTask, addTask, deleteTask, permanentDeleteTask, reorderTasks } = useTasks();
   const [view, setView] = useState<View>("tunnel"); // owner, 2026-11-23: the Tunnel first (before: the spiral, 2026-10-25)
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -180,7 +184,7 @@ export default function SchedulePlanning() {
     if (hiddenProjects.size && hiddenProjects.has(projectOf(t.nodeId))) return false;
     if (priorityFilter !== "all" && (t.priority || "medium") !== priorityFilter) return false;
 
-    const todayDate = new Date(new Date().toISOString().slice(0, 10));
+    const todayDate = new Date(localDay(new Date()));
     const dueDays = t.deadline ? Math.ceil((new Date(t.deadline).getTime() - todayDate.getTime()) / 86400000) : null;
     if (deadlineFilter === "noDeadline" && t.deadline) return false;
     if (deadlineFilter !== "any" && deadlineFilter !== "noDeadline") {
@@ -194,7 +198,7 @@ export default function SchedulePlanning() {
     if (!normalizedTaskQuery) return true;
     const hay = `${t.title ?? ""}\n${t.description ?? ""}\n${t.link ?? ""}`.toLowerCase();
     return hay.includes(normalizedTaskQuery);
-  }, [deadlineFilter, normalizedTaskQuery, priorityFilter, hiddenProjects, projectOf]);
+  }, [deadlineFilter, normalizedTaskQuery, priorityFilter, hiddenProjects, projectOf, today]);
 
   const visibleTasks = useMemo(() => tasks.filter(taskMatchesQuery), [tasks, taskMatchesQuery]);
 
@@ -250,7 +254,7 @@ export default function SchedulePlanning() {
     return Array.from({ length: 60 }, (_, i) => {
       const d = new Date();
       d.setDate(d.getDate() + i);
-      return d.toISOString().slice(0, 10);
+      return localDay(d);
     });
   }, []);
 
@@ -272,7 +276,7 @@ export default function SchedulePlanning() {
     return Array.from({ length: 60 }, (_, i) => {
       const d = new Date();
       d.setDate(d.getDate() - (i + 1));
-      return d.toISOString().slice(0, 10);
+      return localDay(d);
     });
   }, []);
 
@@ -785,7 +789,7 @@ export default function SchedulePlanning() {
                 </div>
                 <div className="grid grid-cols-7">
                   {getWeekDates(currentDate).map((date) => {
-                  const dateStr = date.toISOString().slice(0, 10);
+                  const dateStr = localDay(date);
                   const dayEvents = calendarEvents[dateStr] || [];
                   const isToday = dateStr === today;
                   return (
@@ -837,7 +841,6 @@ export default function SchedulePlanning() {
                     title: t.title, description: "", estimatedTime: null, status: "idle", startTime: null, endTime: null,
                     date: t.date, deadline: "", position: 0, link: "", priority: "medium", isEvent: false, time: t.time, deadlineTime: null,
                   })}
-                  onDeleteTask={deleteTask}
                 />
               </Suspense>
             }

@@ -4,13 +4,14 @@
 // magnifier buttons, ctrl + wheel / a pinch, +/−, or a click on a day — no Day/Month/Year switch: the page has its own
 // views switch and two looked alike, owner 2026-11-21); tasks, memory photos and videos (Memories/<date>.md + what
 // was sent to the bot, lib/memories.ts), long tasks as rails, accent tiles in the goal colours. Gallery mode:
-// only the photos and videos. Click a task → it flies out → Open = the item drawer; click an empty cell → a task
-// made there and opened in the item drawer, its title selected (closed unnamed → it goes to the trash again); a
-// day's memory note opens in the side sheet, as notes do on the Notes page.
+// only the photos and videos. Click a task → it flies out → Open = the item drawer; click an empty cell → a small
+// box asks for the task's name there, and only a named task is saved (owner, 2026-11-23, #204: "save etməmiş
+// yaranmasın. adsız save etmək olmasın taskı"; before, a click made a "New task" at once); a day's memory note opens
+// in the side sheet, as notes do on the Notes page.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { BookHeart, ChevronDown, ChevronUp, Crosshair, Images, PanelRightOpen, Pause, Play, X, ZoomIn, ZoomOut } from "lucide-react";
+import { BookHeart, Check, ChevronDown, ChevronUp, Crosshair, Images, PanelRightOpen, Pause, Play, X, ZoomIn, ZoomOut } from "lucide-react";
 import type { Task } from "@/core/tasks";
 import type { TreeNode } from "@/lib/strategy";
 import { useAuth } from "@/context/AuthContext";
@@ -73,14 +74,15 @@ function readTheme(): TunnelTheme {
   };
 }
 
-function Icon({ label, onClick, active, children }: { label: string; onClick: () => void; active?: boolean; children: React.ReactNode }) {
+function Icon({ label, onClick, active, disabled, children }: { label: string; onClick: () => void; active?: boolean; disabled?: boolean; children: React.ReactNode }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <button
           type="button"
           onClick={onClick}
-          className={cn("rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground", active && "text-primary")}
+          disabled={disabled}
+          className={cn("rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground disabled:pointer-events-none disabled:opacity-40", active && "text-primary")}
         >
           {children}
         </button>
@@ -90,14 +92,54 @@ function Icon({ label, onClick, active, children }: { label: string; onClick: ()
   );
 }
 
-const NEW_TITLE = "New task";
+type Draft = { day: number; minutes: number | null; x: number; y: number };
 
-export default function TunnelCalendar({ tasks, byId, onOpenDay, onAddTask, onDeleteTask }: {
+// The box an empty cell opens: a name, then Enter (or ✓) saves it there; ✓ stays off while the name is empty;
+// Escape or × closes it and nothing is made.
+function NewTask({ draft, label, bounds, onSave, onCancel }: {
+  draft: Draft; label: string; bounds: { w: number; h: number };
+  onSave: (title: string, open: boolean) => Promise<void>; onCancel: () => void;
+}) {
+  const [title, setTitle] = useState("");
+  const [busy, setBusy] = useState(false);
+  const name = title.trim();
+  const save = async (open: boolean) => {
+    if (!name || busy) return;
+    setBusy(true);
+    await onSave(name, open);
+    setBusy(false);
+  };
+  const left = Math.max(8, Math.min(draft.x - 12, bounds.w - 300));
+  const top = Math.max(8, Math.min(draft.y + 12, bounds.h - 96));
+  return (
+    <div className="absolute z-20 w-[290px] rounded-lg border border-border bg-popover/95 p-2 shadow-lg backdrop-blur animate-in fade-in zoom-in-95 duration-150" style={{ left, top }}>
+      <div className="mb-1.5 px-1 text-[11px] text-muted-foreground">{label}</div>
+      <div className="flex items-center gap-0.5">
+        <input
+          autoFocus
+          value={title}
+          placeholder="Task name"
+          maxLength={500}
+          onChange={(e) => setTitle(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") { e.preventDefault(); save(e.shiftKey); }
+            if (e.key === "Escape") { e.preventDefault(); onCancel(); }
+          }}
+          className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-sm outline-none focus:border-primary/50"
+        />
+        <Icon label="Save (Enter)" onClick={() => save(false)} disabled={!name || busy}><Check className="h-4 w-4" /></Icon>
+        <Icon label="Save and open (Shift+Enter)" onClick={() => save(true)} disabled={!name || busy}><PanelRightOpen className="h-4 w-4" /></Icon>
+        <Icon label="Cancel (Esc)" onClick={onCancel}><X className="h-4 w-4" /></Icon>
+      </div>
+    </div>
+  );
+}
+
+export default function TunnelCalendar({ tasks, byId, onOpenDay, onAddTask }: {
   tasks: Task[];
   byId: Map<string, TreeNode>;
   onOpenDay: (day: string) => void;
   onAddTask: (t: { title: string; date: string; time: string | null }) => Promise<{ id: string } | undefined>;
-  onDeleteTask: (id: string) => unknown;
 }) {
   const { user } = useAuth();
   const qc = useQueryClient();
@@ -117,8 +159,7 @@ export default function TunnelCalendar({ tasks, byId, onOpenDay, onAddTask, onDe
   const [range, setRange] = useState<[number, number]>([today - 1, today + 2]);
   // time flows unless stopped (a new key: "off" under the old one meant the old fast cruise was stopped)
   const [paused, setPaused] = useState(() => remember.get("tunnel.flow") === "off");
-  const [making, setMaking] = useState(false); // a task for an empty cell is being made
-  const freshRef = useRef<{ id: string; seen: boolean } | null>(null); // that task, until its drawer closes
+  const [draft, setDraft] = useState<Draft | null>(null); // an empty cell asking for a task's name
   const [note, setNote] = useState<string | null>(null); // a memory note open in the side sheet
 
   const byDay = useMemo(() => {
@@ -287,7 +328,7 @@ export default function TunnelCalendar({ tasks, byId, onOpenDay, onAddTask, onDe
               else zoomRef.current(SPANS[SPANS.indexOf(s) - 1], pick.day);
             }
           },
-          onEmpty: (cell) => makeAtRef.current(cell.day, cell.minutes),
+          onEmpty: (cell) => setDraft({ day: cell.day, minutes: cell.minutes, x: cell.x, y: cell.y }),
           onZoom: (dir, day) => {
             const s = engineRef.current?.span ?? "day";
             const next = SPANS[SPANS.indexOf(s) + dir];
@@ -309,7 +350,6 @@ export default function TunnelCalendar({ tasks, byId, onOpenDay, onAddTask, onDe
       engineRef.current?.dispose();
       engineRef.current = null;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [today]);
 
   useEffect(() => {
@@ -326,44 +366,23 @@ export default function TunnelCalendar({ tasks, byId, onOpenDay, onAddTask, onDe
     remember.set("tunnel.mode", gallery ? "gallery" : "tasks");
   }, [gallery]);
 
-  // the passage stands still while a drawer or a note is open over it
+  // the passage stands still while a name is asked for, or a drawer or a note is open over it
   useEffect(() => {
-    engineRef.current?.setHeld(making || !!note || !!drawer.id);
-  }, [making, note, drawer.id]);
+    engineRef.current?.setHeld(!!draft || !!note || !!drawer.id);
+  }, [draft, note, drawer.id]);
 
-  // An empty cell → a task there, opened in the drawer with its title selected.
-  const makeAt = async (day: number, minutes: number | null) => {
-    if (making) return;
-    setMaking(true);
+  // The named task of an empty cell: saved there (and opened in the drawer when asked); a refusal keeps the box.
+  const saveDraft = async (title: string, open: boolean) => {
+    if (!draft) return;
     try {
-      const saved = await onAddTask({ title: NEW_TITLE, date: isoOf(day), time: minutes === null ? null : hhmm(minutes) });
-      if (saved) {
-        freshRef.current = { id: saved.id, seen: false };
-        drawer.open(saved.id, { fresh: true });
-      }
+      const saved = await onAddTask({ title, date: isoOf(draft.day), time: draft.minutes === null ? null : hhmm(draft.minutes) });
+      if (!saved) return;
+      setDraft(null);
+      if (open) drawer.open(saved.id);
     } catch (e) {
       toast({ title: "Not saved", description: (e as Error).message, variant: "destructive" });
-    } finally {
-      setMaking(false);
     }
   };
-  const makeAtRef = useRef(makeAt);
-  makeAtRef.current = makeAt;
-
-  // its drawer closed with nothing written: it goes to the trash again
-  useEffect(() => {
-    const fresh = freshRef.current;
-    if (!fresh) return;
-    if (drawer.id === fresh.id) {
-      fresh.seen = true;
-      return;
-    }
-    if (!fresh.seen) return;
-    freshRef.current = null;
-    const t = tasks.find((x) => x.id === fresh.id);
-    if (t && t.title === NEW_TITLE && !t.description && !t.nodeId) onDeleteTask(t.id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [drawer.id]);
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     const engine = engineRef.current;
@@ -453,6 +472,16 @@ export default function TunnelCalendar({ tasks, byId, onOpenDay, onAddTask, onDe
         <Icon label="Next" onClick={() => engineRef.current?.jumpBoxes(1)}><ChevronUp className="h-4 w-4" /></Icon>
         <Icon label="Previous" onClick={() => engineRef.current?.jumpBoxes(-1)}><ChevronDown className="h-4 w-4" /></Icon>
       </div>
+
+      {draft && (
+        <NewTask
+          draft={draft}
+          label={`${dayText(draft.day)}${draft.minutes === null ? "" : ` · ${hhmm(draft.minutes)}`}`}
+          bounds={{ w: hostRef.current?.clientWidth ?? 600, h: hostRef.current?.clientHeight ?? 400 }}
+          onSave={saveDraft}
+          onCancel={() => setDraft(null)}
+        />
+      )}
 
       {/* the task under the pointer, readable */}
       <div ref={hoverRef} className="pointer-events-none absolute left-0 top-0 z-10">
