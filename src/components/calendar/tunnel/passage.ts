@@ -2,8 +2,9 @@
 // reference is React Bits Pro "Passage Gallery" (paid — its behaviour is matched here, the code is our own). Time runs
 // along the passage (scale.ts): a box is a day, a month or a year, a dark band between two boxes. The tiles on
 // the walls, floor and ceiling are the tasks, the memory photos and videos, long tasks as rails on the ceiling and
-// accent tiles in the goal colours. The camera cruises; hold to boost, wheel / drag to travel, ctrl + wheel (a pinch)
-// to zoom between the spans, the view turns toward the pointer, the tile under it lifts, a click flies a tile out to
+// accent tiles in the goal colours. Time flows in real time (owner, 2026-11-23: "tunneldə vaxt realtime axsın və
+// tunnel cari saatdan başlasın"): the camera starts just before now and rides along with the clock (Pause stops it);
+// hold to boost, wheel / drag to travel, ctrl + wheel (a pinch) to zoom between the spans, the view turns toward the pointer, the tile under it lifts, a click flies a tile out to
 // full view (click again or Escape puts it back), a click on an empty cell asks for a task there. "Glass" (owner,
 // 2026-11-21: "boş glass view … rəng olmasa"): the walls have no colour, only the hairline grid on the card behind.
 import * as THREE from "three";
@@ -18,7 +19,8 @@ const SHELL = AHEAD + BEHIND + 12; // the walls' length, moved along with the ca
 const FOG_NEAR = 3, FOG_FAR = 30 / FOG;
 const LIFT = 0.006; // tiles sit this far off their wall
 const FOCUS_DIST = 1.25;
-const WRAP_BOXES = 14; // cruising this many days (half as many weeks in a year) beyond where the owner went fades back to today
+const RIDE_EVERY = 1; // s: how often the camera moves along with the clock (an hour is a row in the day span)
+const WRAP_BOXES = 14; // boosting this many days (half as many weeks in a year) beyond where the owner went fades back to today
 const BOOST_AFTER = 300, CLICK_WITHIN = 450; // ms: holding longer boosts; let go sooner and it is still a click
 const MAX_BANDS = 8;
 const PLAYING = 3; // videos playing at once
@@ -349,7 +351,9 @@ export class Passage {
   private boosting = false;
   private lookX = 0;
   private lookY = 0;
-  private home = -2;
+  private home = -2; // just before now; it moves with the clock
+  private lastNow = 0; // the row of "now" when the camera last rode along
+  private rideFor = 0;
   private anchor = -2; // where the owner last moved to; cruising WRAP_BOXES beyond it fades back home
   private wrapping = false;
   private zoomAcc = 0;
@@ -409,7 +413,7 @@ export class Passage {
     this.measure();
     this.buildShell();
     this.buildRing();
-    this.placeAtToday();
+    this.placeAtNow();
 
     this.canvas.addEventListener("pointerdown", this.onDown);
     this.canvas.addEventListener("pointermove", this.onMovePointer);
@@ -465,8 +469,15 @@ export class Passage {
   setNow(today: number, minutes: number) {
     this.nowMinutes = minutes;
     if (today !== this.today) {
+      // rows count from the box that holds today: shift everything by what that box moved, so nothing jumps
+      const old = this.scale;
       this.today = today;
-      this.scale = new Scale(this.scale.span, today);
+      this.scale = new Scale(old.span, today);
+      const shift = this.scale.rowOf(today) - old.rowOf(today);
+      this.pos += shift;
+      this.home += shift;
+      this.anchor += shift;
+      this.lastNow += shift;
       this.rebuildAll();
     }
     this.placeRing();
@@ -501,7 +512,7 @@ export class Passage {
       this.scale = new Scale(span, this.today);
       this.measure();
       this.buildShell();
-      this.placeAtToday();
+      this.placeAtNow();
       const row = span === "day" ? this.scale.rowOf(day, minutes ?? HOUR_FROM * 60) : this.scale.rowOf(day);
       this.pos = row - 2;
       this.anchor = this.pos;
@@ -614,12 +625,35 @@ export class Passage {
     this.dirty = true;
   }
 
-  private placeAtToday() {
-    const s = this.scale;
-    const start = s.span === "day" ? s.start(0) : s.rowOf(this.today);
-    this.home = start - 2;
+  // Where "now" is: the time of day in the day span; in the others today's row plus the part of the day gone (month)
+  // or this week's row plus the part of the week gone (year).
+  private nowRow() {
+    const s = this.scale, m = this.nowMinutes;
+    if (s.span === "day") return s.rowOf(this.today, m);
+    if (s.span === "month") return s.rowOf(this.today) + m / 1440;
+    return s.rowOf(this.today) + (s.laneOf(this.today) + m / 1440) / 7;
+  }
+
+  private placeAtNow() {
+    this.lastNow = this.nowRow();
+    this.home = this.lastNow - 2;
     this.pos = this.home;
     this.anchor = this.home;
+  }
+
+  // The clock moved on: "now" and home move with it; the camera too, unless paused or something is open.
+  private ride(still: boolean) {
+    const d = new Date();
+    const day = Math.floor(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86400000);
+    this.setNow(day, d.getHours() * 60 + d.getMinutes() + d.getSeconds() / 60);
+    const now = this.nowRow();
+    const move = now - this.lastNow;
+    this.lastNow = now;
+    this.home += move;
+    if (!this.paused && !still && !this.press && !this.wrapping) {
+      this.pos += move;
+      this.anchor += move;
+    }
   }
 
   private buildShell() {
@@ -1603,9 +1637,15 @@ export class Passage {
     let busy = false;
     const still = !!this.focus || this.held;
 
-    // speed: cruise (not when paused, opened, asked or for reduced motion), ×BOOST while held
-    const cruise = this.paused || this.reduced || still ? 0 : SPEED;
-    const target = this.boosting && !still ? SPEED * BOOST : cruise;
+    // time flows: once a second the camera rides along with the clock
+    this.rideFor += dt;
+    if (this.rideFor >= RIDE_EVERY) {
+      this.rideFor = 0;
+      this.ride(still);
+    }
+
+    // speed: none of its own (the clock moves it); ×BOOST while held
+    const target = this.boosting && !still ? SPEED * BOOST : 0;
     this.vel = damp(this.vel, target, this.boosting ? 2.2 : 3, dt);
     if (Math.abs(this.vel - target) < 1e-4) this.vel = target;
     let move = this.vel * dt + this.dragMove;
@@ -1645,7 +1685,7 @@ export class Passage {
       this.renderer.setClearColor(fog, 1);
     }
 
-    // cruising far ahead fades back to today
+    // boosting far ahead fades back to now
     const far = WRAP_BOXES * (this.scale.span === "day" ? HOURS + 4 : 1) * (this.scale.span === "year" ? 0.5 : 1);
     if (!this.paused && !this.wrapping && !still && !this.press && this.pos > Math.max(this.home, this.anchor) + far) {
       this.anchor = this.home;

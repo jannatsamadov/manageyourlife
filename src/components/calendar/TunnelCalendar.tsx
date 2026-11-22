@@ -115,7 +115,8 @@ export default function TunnelCalendar({ tasks, byId, onOpenDay, onAddTask, onDe
   const [hover, setHover] = useState<{ kind: "task"; task: TunnelTask } | { kind: "day"; day: number } | null>(null);
   const [place, setPlace] = useState<TunnelPlace>({ day: today, minutes: 6 * 60, band: false });
   const [range, setRange] = useState<[number, number]>([today - 1, today + 2]);
-  const [paused, setPaused] = useState(() => remember.get("tunnel.autoplay") === "off");
+  // time flows unless stopped (a new key: "off" under the old one meant the old fast cruise was stopped)
+  const [paused, setPaused] = useState(() => remember.get("tunnel.flow") === "off");
   const [making, setMaking] = useState(false); // a task for an empty cell is being made
   const freshRef = useRef<{ id: string; seen: boolean } | null>(null); // that task, until its drawer closes
   const [note, setNote] = useState<string | null>(null); // a memory note open in the side sheet
@@ -301,11 +302,10 @@ export default function TunnelCalendar({ tasks, byId, onOpenDay, onAddTask, onDe
     // the theme can change while the view is open
     const mo = new MutationObserver(() => engineRef.current?.setTheme(readTheme()));
     mo.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "style", "data-theme"] });
-    const tick = window.setInterval(() => engineRef.current?.setNow(dayOf(localDay(new Date())), nowMinutes()), 60_000);
+    // (the engine reads the clock itself: time flows in it, 2026-11-23)
     return () => {
       cancelled = true;
       mo.disconnect();
-      window.clearInterval(tick);
       engineRef.current?.dispose();
       engineRef.current = null;
     };
@@ -318,7 +318,7 @@ export default function TunnelCalendar({ tasks, byId, onOpenDay, onAddTask, onDe
 
   useEffect(() => {
     engineRef.current?.setPaused(paused);
-    remember.set("tunnel.autoplay", paused ? "off" : "on");
+    remember.set("tunnel.flow", paused ? "off" : "on");
   }, [paused]);
 
   useEffect(() => {
@@ -438,10 +438,10 @@ export default function TunnelCalendar({ tasks, byId, onOpenDay, onAddTask, onDe
       <div className="absolute right-3 top-2 z-10 flex items-center gap-1">
         <Icon label="Memory" onClick={() => openMemory(place.day)}><BookHeart className="h-4 w-4" /></Icon>
         <Icon label="Gallery" onClick={() => setGallery((g) => !g)} active={gallery}><Images className="h-4 w-4" /></Icon>
-        <Icon label={paused ? "Play" : "Pause"} onClick={() => setPaused((p) => !p)} active={!paused}>
+        <Icon label={paused ? "Let time flow" : "Stop here"} onClick={() => setPaused((p) => !p)} active={!paused}>
           {paused ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}
         </Icon>
-        <Icon label="Today" onClick={() => engineRef.current?.goHome()}><Crosshair className="h-4 w-4" /></Icon>
+        <Icon label="Now" onClick={() => engineRef.current?.goHome()}><Crosshair className="h-4 w-4" /></Icon>
       </div>
       <div className="absolute bottom-4 right-3 z-10 flex flex-col gap-1">
         {SPANS[SPANS.indexOf(span) - 1] && (

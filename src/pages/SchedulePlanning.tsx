@@ -136,7 +136,7 @@ const today = new Date().toISOString().slice(0, 10);
 
 export default function SchedulePlanning() {
   const { tasks, updateTask, addTask, deleteTask, permanentDeleteTask, reorderTasks } = useTasks();
-  const [view, setView] = useState<View>("spiral"); // owner, 2026-10-25: the spiral calendar first
+  const [view, setView] = useState<View>("tunnel"); // owner, 2026-11-23: the Tunnel first (before: the spiral, 2026-10-25)
   const [currentDate, setCurrentDate] = useState(new Date());
   const [showForm, setShowForm] = useState(false);
   const drawer = useItemDrawer(); // a task opens in the item drawer, as on every page (#190)

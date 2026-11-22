@@ -6,6 +6,7 @@ import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type { Task } from "@/core/tasks";
+import { localDay } from "@/hooks/useGoogleEvents";
 import { Scale } from "./tunnel/scale";
 import type { PassageEvents, TunnelBox } from "./tunnel/passage";
 
@@ -30,7 +31,8 @@ vi.mock("@/hooks/useVault", () => ({ useVault: () => ({ files: [], resolve: () =
 
 const { default: TunnelCalendar } = await import("./TunnelCalendar");
 
-const today = new Date().toISOString().slice(0, 10);
+// the local day, as the view counts it (the UTC one is yesterday just after local midnight east of Greenwich)
+const today = localDay(new Date());
 const task = (over: Partial<Task>): Task => ({
   id: "t1", title: "Write the lesson", description: "", estimatedTime: 60, status: "idle", startTime: null, endTime: null,
   date: today, deadline: "", position: 0, link: "", priority: "medium", time: "09:00", ...over,
