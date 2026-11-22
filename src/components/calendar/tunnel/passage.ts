@@ -617,6 +617,10 @@ export class Passage {
   private resize() {
     const oldRows = this.wallRows, oldH = this.H;
     this.measure();
+    // the screen's shape moved the place that frames the now ring
+    const home = this.lastNow - this.fit();
+    if (Math.abs(this.pos - this.home) < 1e-3 && !this.glide) this.pos = home;
+    this.home = home;
     if (oldRows !== this.wallRows || Math.abs(oldH - this.H) > 1e-3) {
       this.buildShell();
       this.placeRing();
@@ -634,9 +638,16 @@ export class Passage {
     return s.rowOf(this.today) + (s.laneOf(this.today) + m / 1440) / 7;
   }
 
+  // How far before "now" the camera stands: just far enough that the now ring frames the screen, as if looking at now
+  // from a moment before it (owner, 2026-11-23: "aralarında məsafə qalmasın … elə tam kənarları tutsun").
+  private fit() {
+    const t = Math.tan(THREE.MathUtils.degToRad(FOV / 2));
+    return Math.max(this.H / 2 / t, this.W / 2 / (t * this.camera.aspect)) * 1.02;
+  }
+
   private placeAtNow() {
     this.lastNow = this.nowRow();
-    this.home = this.lastNow - 2;
+    this.home = this.lastNow - this.fit();
     this.pos = this.home;
     this.anchor = this.home;
   }
@@ -1352,7 +1363,7 @@ export class Passage {
     return want.some(({ m }) => !m.video!.paused);
   }
 
-  // the "now" ring around the passage (the time in the day span, today's row in the others)
+  // the "now" ring around the passage: a hairline (owner, 2026-11-23: "çooox nazik") at now in every span
   private buildRing() {
     for (let i = 0; i < 4; i++) {
       const t = this.makeTile({ pos: new THREE.Vector3(), quat: new THREE.Quaternion(), normal: new THREE.Vector3(), w: 1, h: 1 }, { colA: this.c.primary, hoverable: false });
@@ -1363,9 +1374,8 @@ export class Passage {
 
   private placeRing() {
     const { W, H } = this;
-    const s = this.scale;
-    const z = -(s.span === "day" ? s.rowOf(this.today, this.nowMinutes) : s.rowOf(this.today));
-    const th = 0.035;
+    const z = -this.nowRow();
+    const th = 0.006; // about a pixel when the ring frames the screen
     const faces: [Surface, number, number][] = [["F", W, th], ["C", W, th], ["L", th, H], ["R", th, H]];
     faces.forEach(([sf, w, h], i) => {
       const t = this.ring[i];
