@@ -123,7 +123,8 @@ async function handle(msg: any, auth: Auth) {
           "(Me / With AI / AI): `tasks_list` with fields {\"Who\": \"AI\"} lists the work meant for an AI. " +
           "The strategy is a tree: areas of life → goals → missions → steps (steps nest); daily tasks can serve a goal, mission or step (node_id). " +
           "Read `strategy_tree` before changing it. Projects, ideas, routines, milestones and every other kind of item: " +
-          "`items_query` finds them, `item_update` changes them.",
+          "`items_query` finds them, `item_update` changes them. Every item has a number (#45) the user may name: pass it as the id. " +
+          "Comments are an item's history: `items_query` with an id shows them, `item_comment` adds one (a decision, a result, why it stopped).",
       });
     }
     case "ping":

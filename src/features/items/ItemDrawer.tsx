@@ -1,6 +1,6 @@
 // The item drawer (P-70 §10, like GitHub's issue side panel): any item, opened from any page by `?item=<id>` in the
-// URL (so a link opens it too). Properties by type, the path to the root, sub-items, linked notes with their to-dos,
-// where it came from, the timer.
+// URL (so a link opens it too). Its #number, properties by type, the path to the root, sub-items, linked notes with
+// their to-dos, comments (#200), where it came from, the timer.
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -18,6 +18,7 @@ import {
   CustomPicker, DatePicker, dayLabel, MinutesPicker, ParentPicker, pathOf, PriorityPicker, StatusPicker, Tip, TypeIcon, TypePicker,
 } from "@/views/fields";
 import { AddRow } from "@/views/layouts/AddRow";
+import { Comments } from "./Comments";
 
 // `fresh`: an item just made (e.g. a click on an empty cell of the Tunnel view) — the drawer opens with its title
 // selected, ready to type over (?new=1).
@@ -113,8 +114,13 @@ function Body({ item }: { item: Item }) {
 
   return (
     <div className="space-y-5">
-      {path.length > 0 && (
+      {(path.length > 0 || item.number > 0) && (
         <div className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
+          {item.number > 0 && (
+            <Tip label="Its number: type #N in a search, or ask the AI about it">
+              <span className="mr-1.5 font-medium text-foreground/70">#{item.number}</span>
+            </Tip>
+          )}
           {path.map((p, k) => (
             <span key={p.id} className="flex items-center gap-1">
               {k > 0 && <ChevronRight className="h-3 w-3" />}
@@ -225,6 +231,8 @@ function Body({ item }: { item: Item }) {
       )}
 
       <Notes item={item} />
+
+      <Comments itemId={item.id} today={ctx.today} />
 
       <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3 text-[11px] text-muted-foreground">
         {(sources.data ?? []).map((s) => <span key={s} className="rounded bg-muted px-1.5 py-0.5">{SOURCE_NAME[s] ?? s}</span>)}

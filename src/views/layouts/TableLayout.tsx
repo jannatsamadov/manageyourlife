@@ -12,7 +12,7 @@ import { GroupHeader } from "./GroupHeader";
 import { AddRow } from "./AddRow";
 import type { LayoutProps } from "./common";
 
-const WIDTH: Record<string, number> = { parent: 200, url: 180, type: 110, status: 115, priority: 105, estimate_min: 90, spent_min: 80 };
+const WIDTH: Record<string, number> = { number: 60, parent: 200, url: 180, type: 110, status: 115, priority: 105, estimate_min: 90, spent_min: 80 };
 const KIND_WIDTH: Record<string, number> = { select: 130, text: 170, checkbox: 80, number: 95, date: 105 };
 const SELECT_W = 52; // tick box + grip
 
@@ -26,6 +26,7 @@ export function TitleCell({ item, kids, onOpen, onChange, showType = true }: Pic
       <button type="button" onClick={() => onOpen(item.id)} className={cn("min-w-0 truncate text-left text-sm hover:underline", closed && "text-muted-foreground line-through")}>
         {item.title}
       </button>
+      {item.number > 0 && <span className="shrink-0 text-[10px] text-muted-foreground/60">#{item.number}</span>}
       {k && (
         <Tip label={`${k.total - k.open} of ${k.total} sub-items done`}>
           <span className="shrink-0 rounded bg-muted px-1 text-[10px] text-muted-foreground">{k.total - k.open}/{k.total}</span>

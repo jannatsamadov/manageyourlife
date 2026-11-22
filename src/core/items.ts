@@ -10,8 +10,9 @@ import { toast } from "@/hooks/use-toast";
 import type { Tables, TablesInsert, TablesUpdate } from "@/integrations/supabase/types";
 
 export type Item = Tables<"items">;
-export type ItemPatch = Omit<TablesUpdate<"items">, "id" | "workspace_id" | "created_at" | "updated_at" | "done_at" | "spent_min">;
-export type NewItem = Omit<TablesInsert<"items">, "workspace_id" | "created_by" | "created_at" | "updated_at" | "done_at" | "spent_min"> & { type: string; title: string };
+// The DB sets these itself: number (the item's #N in its workspace, #200), done_at, spent_min, the stamps.
+export type ItemPatch = Omit<TablesUpdate<"items">, "id" | "workspace_id" | "number" | "created_at" | "updated_at" | "done_at" | "spent_min">;
+export type NewItem = Omit<TablesInsert<"items">, "workspace_id" | "number" | "created_by" | "created_at" | "updated_at" | "done_at" | "spent_min"> & { type: string; title: string };
 export type TimeLog = Tables<"time_logs">;
 
 const PAGE = 1000; // PostgREST's row limit per request
@@ -108,7 +109,7 @@ export function useItemActions() {
     if (!ws || !user) return null;
     const now = new Date().toISOString();
     const draft = settle({
-      id: crypto.randomUUID(), workspace_id: ws.id, body: "", status: "todo", parent_id: null, position: 0, url: null, color: null,
+      id: crypto.randomUUID(), workspace_id: ws.id, number: 0 /* the server's row brings it */, body: "", status: "todo", parent_id: null, position: 0, url: null, color: null,
       planned_on: null, planned_time: null, is_event: false, start_on: null, due_on: null, due_time: null, done_at: null,
       archived_at: null, deleted_at: null, priority: null, estimate_min: null, spent_min: 0, cost_planned: null, cost_spent: null,
       weight: 1, target_count: null, progress: null, props: {}, created_by: user.id, created_at: now, updated_at: now,

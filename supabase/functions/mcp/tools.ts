@@ -48,7 +48,7 @@ const STATUSES = ["idle", "active", "waiting", "someday", "complete", "abandoned
 const PRIORITIES = ["urgent", "high", "medium", "low"];
 const KINDS = ["idea", "question", "todo", "resource"];
 const TASK_COLS =
-  "id, workspace_id, title, body, status, parent_id, planned_on, planned_time, is_event, due_on, due_time, priority, estimate_min, " +
+  "id, number, workspace_id, title, body, status, parent_id, planned_on, planned_time, is_event, due_on, due_time, priority, estimate_min, " +
   "spent_min, url, props, created_at";
 const isTime = (v: unknown) => typeof v === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(v);
 const NODE_STATUSES = ["open", "done", "dropped"];
@@ -59,6 +59,7 @@ const ID = { type: "string", description: "uuid" };
 // it is a step of.
 const taskOut = (i: any) => ({
   id: i.id,
+  number: i.number,
   title: i.title,
   description: i.body,
   status: V1_STATUS[i.status] ?? i.status,
@@ -263,13 +264,17 @@ const notePath = (folder: unknown, title: string) => {
 //    never go in or out, and neither do the cost columns. Field names are the item's own (v2) ones. ──
 const V2_STATUSES = ["todo", "doing", "waiting", "someday", "done", "dropped"];
 const ITEM_COLS =
-  "id, workspace_id, type, title, body, status, parent_id, position, url, color, planned_on, planned_time, is_event, start_on, " +
+  "id, number, workspace_id, type, title, body, status, parent_id, position, url, color, planned_on, planned_time, is_event, start_on, " +
   "due_on, due_time, done_at, priority, estimate_min, spent_min, weight, target_count, progress, props, created_at, updated_at";
 const ORDERS: Record<string, [string, boolean]> = {
   updated: ["updated_at", false], created: ["created_at", false], planned: ["planned_on", true], due: ["due_on", true],
   priority: ["priority", true], position: ["position", true],
 };
 const EXCERPT = 280;
+const COMMENTS_SHOWN = 30; // the latest ones in an item's full view
+// An item by its uuid or its number in the user's own workspace (#200: "#45", like a GitHub issue).
+const ITEM_REF = { type: "string", description: "The item's uuid, or its number as \"#45\"" };
+const numberOf = (v: unknown) => (typeof v === "string" && /^#?\d{1,9}$/.test(v.trim()) ? Number(v.trim().replace("#", "")) : null);
 
 // The types an AI may see, from the registry.
 async function publicTypes(db: SupabaseClient) {
@@ -279,7 +284,7 @@ async function publicTypes(db: SupabaseClient) {
 
 // An item in its own field names; empty values left out (fewer tokens); the text cut in lists.
 function itemOut(i: any, parent: any, fields: Field[], full: boolean) {
-  const out: Record<string, unknown> = { id: i.id, type: i.type, title: i.title, status: i.status };
+  const out: Record<string, unknown> = { id: i.id, number: i.number, type: i.type, title: i.title, status: i.status };
   const text: string = i.body ?? "";
   if (text) out[full ? "description" : "excerpt"] = full || text.length <= EXCERPT ? text : `${text.slice(0, EXCERPT)}…`;
   if (parent) out.parent = { id: parent.id, type: parent.type, title: parent.title };
@@ -303,9 +308,10 @@ async function itemsOut(ctx: Ctx, rows: any[], types: string[], full = false) {
 }
 
 async function ownItem(ctx: Ctx, id: unknown, types: string[]) {
-  need(isUuid(id), "id: uuid");
-  const item = check(await ctx.db.from("items").select(ITEM_COLS).in("workspace_id", ctx.scope.workspaces).in("type", types)
-    .is("deleted_at", null).eq("id", id).maybeSingle());
+  const num = numberOf(id);
+  need(num !== null || isUuid(id), "id: uuid or \"#number\"");
+  const q = ctx.db.from("items").select(ITEM_COLS).in("workspace_id", ctx.scope.workspaces).in("type", types).is("deleted_at", null);
+  const item = check(await (num !== null ? q.eq("workspace_id", ctx.scope.home).eq("number", num) : q.eq("id", id)).maybeSingle());
   need(item, "item not found");
   return item as any;
 }
@@ -889,14 +895,15 @@ export const TOOLS: Tool[] = [
     title: "Find any items",
     description:
       `Every kind of item, not only tasks: ${ITEM_TYPES_TEXT}. Filter by type, status, parent, dates, text, custom fields; ` +
-      "pass id for one item in full with its path and what is inside it. Field names are the items' own (status todo / doing / " +
+      "pass id (uuid or \"#45\") for one item in full with its path, what is inside it and its latest comments (its history: " +
+      "decisions, results, why it stopped). Every item has a number (#45) the user may name. Field names are the items' own (status todo / doing / " +
       "waiting / someday / done / dropped; planned_on = the day it is planned for; due_on = deadline). Trashed items never show. " +
       "For tasks the task tools give the same data in their own field names.",
     scope: "read",
     inputSchema: {
       type: "object",
       properties: {
-        id: { ...ID, description: "One item in full: its text, its path to the top, the items inside it" },
+        id: { ...ITEM_REF, description: "One item in full (uuid or \"#45\"): its text, its path to the top, the items inside it, its comments" },
         types: { type: "array", items: { type: "string" }, description: `Only these types: ${ITEM_TYPES_TEXT}` },
         status: { type: "array", items: { type: "string", enum: V2_STATUSES } },
         open: { type: "boolean", description: "Only items not done and not dropped" },
@@ -914,16 +921,21 @@ export const TOOLS: Tool[] = [
       const types = await publicTypes(db);
       if (a.id !== undefined) {
         const item = await ownItem(ctx, a.id, types);
-        const inside = check(await db.from("items").select("id, type, title, status").eq("parent_id", item.id).in("type", types)
+        const inside = check(await db.from("items").select("id, number, type, title, status").eq("parent_id", item.id).in("type", types)
           .is("deleted_at", null).order("position").limit(200)) as any[];
-        const path: { id: string; type: string; title: string }[] = [];
+        const path: { id: string; number: number; type: string; title: string }[] = [];
         for (let up = item.parent_id, n = 0; up && n < 20; n++) {
-          const p = check(await db.from("items").select("id, type, title, parent_id").eq("id", up).in("type", types).maybeSingle()) as any;
+          const p = check(await db.from("items").select("id, number, type, title, parent_id").eq("id", up).in("type", types).maybeSingle()) as any;
           if (!p) break;
-          path.unshift({ id: p.id, type: p.type, title: p.title });
+          path.unshift({ id: p.id, number: p.number, type: p.type, title: p.title });
           up = p.parent_id;
         }
-        return { ...(await itemsOut(ctx, [item], types, true))[0], path, inside };
+        const latest = check(await db.from("item_comments").select("body, via, created_at, updated_at").eq("item_id", item.id)
+          .order("created_at", { ascending: false }).limit(COMMENTS_SHOWN)) as any[];
+        const comments = latest.reverse().map((c) => ({
+          at: c.created_at, text: c.body, ...(c.via !== "app" ? { via: c.via } : {}), ...(c.updated_at !== c.created_at ? { edited_at: c.updated_at } : {}),
+        }));
+        return { ...(await itemsOut(ctx, [item], types, true))[0], path, inside, ...(comments.length ? { comments } : {}) };
       }
       let wanted = types;
       if (a.types !== undefined) {
@@ -969,7 +981,7 @@ export const TOOLS: Tool[] = [
     inputSchema: {
       type: "object",
       properties: {
-        id: ID,
+        id: ITEM_REF,
         title: { type: "string" },
         description: { type: "string" },
         type: { type: "string", description: ITEM_TYPES_TEXT },
@@ -1016,6 +1028,28 @@ export const TOOLS: Tool[] = [
       }
       const saved = checkWrite(await db.from("items").update(row).eq("id", item.id).select(ITEM_COLS).single());
       return (await itemsOut(ctx, [saved], types, true))[0];
+    },
+  },
+  {
+    name: "item_comment",
+    title: "Comment on an item",
+    description:
+      "Add a dated comment to any item found with items_query (id = uuid or \"#45\"): a decision and its reason, a result, what " +
+      "was tried, why it stopped. Comments are the item's history; items_query with id shows the latest ones. Markdown.",
+    scope: "write",
+    inputSchema: {
+      type: "object",
+      properties: { id: ITEM_REF, text: { type: "string", description: "The comment (Markdown), up to 20000 characters" } },
+      required: ["id", "text"],
+    },
+    annotations: WRITE,
+    run: async ({ id, text }, ctx) => {
+      need(isText(text, 20000), "text: 1–20000 characters");
+      const item = await ownItem(ctx, id, await publicTypes(ctx.db));
+      const saved = checkWrite(await ctx.db.from("item_comments")
+        .insert({ item_id: item.id, workspace_id: item.workspace_id, body: text.trim(), via: "mcp", created_by: ctx.userId })
+        .select("id, created_at").single()) as any;
+      return { id: saved.id, at: saved.created_at, item: { id: item.id, number: item.number, title: item.title } };
     },
   },
 ];

@@ -7,7 +7,7 @@ import type { Item, ItemPatch } from "@/core/items";
 import { CLOSED_STATUSES, ITEM_TYPES, PRIORITIES, STATUSES, TYPE_ORDER, type ItemType } from "@/core/types";
 
 export type BuiltinField =
-  | "title" | "type" | "status" | "priority" | "parent" | "when" | "planned_on" | "due_on" | "start_on"
+  | "number" | "title" | "type" | "status" | "priority" | "parent" | "when" | "planned_on" | "due_on" | "start_on"
   | "estimate_min" | "spent_min" | "created_at" | "updated_at" | "done_at" | "url";
 export type FieldKey = BuiltinField | `props.${string}`;
 export type Layout = "table" | "board" | "timeline";
@@ -61,6 +61,7 @@ export type FieldDef = {
 };
 
 export const FIELDS: Record<BuiltinField, FieldDef> = {
+  number: { key: "number", label: "#", kind: "number", tip: "The item's number: type #45 to find it", get: (i) => i.number || null },
   title: { key: "title", label: "Title", kind: "text", get: (i) => i.title },
   type: { key: "type", label: "Type", kind: "type", get: (i) => i.type },
   status: { key: "status", label: "Status", kind: "status", get: (i) => i.status },
@@ -107,7 +108,7 @@ export const optionOf = (d: FieldDef | null, id: unknown) => d?.custom?.options.
 
 // ── filter: a small GitHub-style language ──
 // type:task,idea  -status:done  priority:urgent,high  in:thesis  due:<@today  day:@today..@today+7  is:open  no:due
-// has:estimate  estimate:>60  "exact words"  free words (title + text).
+// has:estimate  estimate:>60  #45 (the item's number)  number:>200  "exact words"  free words (title + text).
 type Pred = (i: Item, c: Ctx) => boolean;
 export type Filter = { test: (i: Item, c: Ctx) => boolean; trashed: boolean };
 
@@ -119,7 +120,7 @@ const DATE_KEYS: Record<string, (i: Item) => string | null> = {
   created: (i) => dayOfStamp(i.created_at), updated: (i) => dayOfStamp(i.updated_at), done: (i) => dayOfStamp(i.done_at),
 };
 const NUM_KEYS: Record<string, (i: Item) => number | null> = {
-  estimate: (i) => i.estimate_min, spent: (i) => i.spent_min, priority: (i) => i.priority,
+  estimate: (i) => i.estimate_min, spent: (i) => i.spent_min, priority: (i) => i.priority, number: (i) => i.number,
 };
 const PRESENT: Record<string, (i: Item) => unknown> = {
   due: (i) => i.due_on, day: (i) => i.planned_on, start: (i) => i.start_on, parent: (i) => i.parent_id, estimate: (i) => i.estimate_min,
@@ -251,6 +252,12 @@ export function parseFilter(q: string): Filter {
     const words = lower(m[4] ?? m[0]).replace(/^-/, "");
     const neg = !m[4] && m[0].startsWith("-");
     if (!words) continue;
+    const hash = m[4] === undefined ? words.match(/^#(\d+)$/) : null;
+    if (hash) {
+      const n = Number(hash[1]);
+      preds.push(neg ? (i) => i.number !== n : (i) => i.number === n);
+      continue;
+    }
     const p: Pred = (i) => lower(i.title).includes(words) || lower(i.body).includes(words);
     preds.push(neg ? (i, c) => !p(i, c) : p);
   }

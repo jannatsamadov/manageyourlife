@@ -7,7 +7,7 @@ import { captureParts } from "../../supabase/functions/_shared/capture-text";
 
 let n = 0;
 const item = (p: Partial<Item>): Item => ({
-  id: `i${++n}`, workspace_id: "w", type: "task", title: "t", body: "", status: "todo", parent_id: null, position: n, url: null,
+  id: `i${++n}`, workspace_id: "w", number: n, type: "task", title: "t", body: "", status: "todo", parent_id: null, position: n, url: null,
   color: null, planned_on: null, planned_time: null, is_event: false, start_on: null, due_on: null, due_time: null, done_at: null,
   archived_at: null, deleted_at: null, priority: null, estimate_min: null, spent_min: 0, cost_planned: null, cost_spent: null,
   weight: 1, target_count: null, progress: null, props: {}, created_by: "u", created_at: "2026-11-01T10:00:00Z",
@@ -52,6 +52,12 @@ describe("filter", () => {
   });
   it("unknown keys are words, not errors", () => {
     expect(titles("foo:bar")).toEqual([]);
+  });
+  it("an item's #number (#200)", () => {
+    expect(titles(`#${a.number}`)).toEqual(["Write chapter 2"]);
+    expect(titles(`-#${a.number} type:task`)).toEqual(["Call bank"]);
+    expect(titles(`number:>=${d.number}`)).toEqual(["App idea"]);
+    expect(titles('"#2"')).toEqual([]); // quoted: plain words
   });
 });
 

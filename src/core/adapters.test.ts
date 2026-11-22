@@ -5,7 +5,7 @@ import { itemToNode, nodeChangeToItem } from "./strategy";
 import { todosOf } from "./notes";
 
 const item = (over: Partial<Item> = {}): Item => ({
-  id: "i1", workspace_id: "w", type: "task", title: "T", body: "b", status: "todo", parent_id: null, position: 2, url: null, color: null,
+  id: "i1", workspace_id: "w", number: 1, type: "task", title: "T", body: "b", status: "todo", parent_id: null, position: 2, url: null, color: null,
   planned_on: null, planned_time: null, is_event: false, start_on: null, due_on: null, due_time: null, done_at: null, archived_at: null,
   deleted_at: null, priority: 3, estimate_min: 30, spent_min: 0, cost_planned: null, cost_spent: null, weight: 1, target_count: null,
   progress: null, props: {}, created_by: null, created_at: "2026-11-17T00:00:00Z", updated_at: "2026-11-17T00:00:00Z", ...over,

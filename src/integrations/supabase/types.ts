@@ -252,6 +252,47 @@ export type Database = {
         }
         Relationships: []
       }
+      item_comments: {
+        Row: {
+          body: string
+          created_at: string
+          created_by: string | null
+          id: string
+          item_id: string
+          updated_at: string
+          via: string
+          workspace_id: string
+        }
+        Insert: {
+          body: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          item_id: string
+          updated_at?: string
+          via?: string
+          workspace_id: string
+        }
+        Update: {
+          body?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          item_id?: string
+          updated_at?: string
+          via?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "item_comments_item_fkey"
+            columns: ["item_id", "workspace_id"]
+            isOneToOne: false
+            referencedRelation: "items"
+            referencedColumns: ["id", "workspace_id"]
+          },
+        ]
+      }
       item_links: {
         Row: {
           created_at: string
@@ -391,6 +432,7 @@ export type Database = {
           estimate_min: number | null
           id: string
           is_event: boolean
+          number: number
           parent_id: string | null
           planned_on: string | null
           planned_time: string | null
@@ -424,6 +466,7 @@ export type Database = {
           estimate_min?: number | null
           id?: string
           is_event?: boolean
+          number?: number
           parent_id?: string | null
           planned_on?: string | null
           planned_time?: string | null
@@ -457,6 +500,7 @@ export type Database = {
           estimate_min?: number | null
           id?: string
           is_event?: boolean
+          number?: number
           parent_id?: string | null
           planned_on?: string | null
           planned_time?: string | null
@@ -1348,6 +1392,7 @@ export type Database = {
         Row: {
           created_at: string
           id: string
+          last_number: number
           name: string
           personal_of: string | null
           updated_at: string
@@ -1355,6 +1400,7 @@ export type Database = {
         Insert: {
           created_at?: string
           id?: string
+          last_number?: number
           name: string
           personal_of?: string | null
           updated_at?: string
@@ -1362,6 +1408,7 @@ export type Database = {
         Update: {
           created_at?: string
           id?: string
+          last_number?: number
           name?: string
           personal_of?: string | null
           updated_at?: string
