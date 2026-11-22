@@ -29,10 +29,10 @@ import { useStrategyNodes } from "@/core/strategy";
 import { buildForest } from "@/lib/strategy";
 
 const SpiralCalendar = lazy(() => import("@/components/calendar/SpiralCalendar"));
-const DepthCalendar = lazy(() => import("@/components/calendar/DepthCalendar"));
 const TunnelCalendar = lazy(() => import("@/components/calendar/TunnelCalendar"));
 
-type View = "month" | "week" | "daily" | "spiral" | "depth" | "tunnel";
+// The Depth view (a road of day cards to the horizon) left main on 2026-11-22 (owner); it is in the git history.
+type View = "month" | "week" | "daily" | "spiral" | "tunnel";
 
 // Projects hidden on the calendar (P-55), remembered in this browser only.
 const HIDDEN_KEY = "schedule.hiddenProjects";
@@ -306,7 +306,7 @@ export default function SchedulePlanning() {
   // Google Calendar events for the days on screen (T-9).
   const [eventsFrom, eventsTo] = useMemo(() => {
     const dayAfter = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
-    if (view === "spiral" || view === "depth" || view === "tunnel") return selectedDay ? [selectedDay, localDay(dayAfter(new Date(`${selectedDay}T00:00:00`)))] : ["", ""];
+    if (view === "spiral" || view === "tunnel") return selectedDay ? [selectedDay, localDay(dayAfter(new Date(`${selectedDay}T00:00:00`)))] : ["", ""];
     if (view === "month") return [localDay(new Date(year, month, 1)), localDay(new Date(year, month + 1, 1))];
     if (view === "week") {
       const week = getWeekDates(currentDate);
@@ -644,7 +644,7 @@ export default function SchedulePlanning() {
 
               {/* View Toggle */}
               <div className="flex rounded-lg border border-border overflow-hidden">
-                {(["month", "week", "daily", "spiral", "depth", "tunnel"] as View[]).map((v) => (
+                {(["month", "week", "daily", "spiral", "tunnel"] as View[]).map((v) => (
                   <button
                     key={v}
                     onClick={() => setView(v)}
@@ -824,12 +824,6 @@ export default function SchedulePlanning() {
             {view === "spiral" &&
             <Suspense fallback={<div className="glass-card h-[calc(100vh-12rem)] min-h-[420px]" />}>
                 <SpiralCalendar tasks={visibleTasks} roots={forest.roots} byId={forest.byId} hidden={hiddenProjects} onOpenDay={setSelectedDay} />
-              </Suspense>
-            }
-
-            {view === "depth" &&
-            <Suspense fallback={<div className="glass-card h-[calc(100vh-12rem)] min-h-[420px]" />}>
-                <DepthCalendar tasks={visibleTasks} byId={forest.byId} onOpenDay={setSelectedDay} />
               </Suspense>
             }
 

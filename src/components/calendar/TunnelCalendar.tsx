@@ -3,7 +3,7 @@
 // the engine is tunnel/passage.ts, the spans tunnel/scale.ts. A box is a day, a month or a year (zoom with the
 // magnifier buttons, ctrl + wheel / a pinch, +/−, or a click on a day — no Day/Month/Year switch: the page has its own
 // views switch and two looked alike, owner 2026-11-21); tasks, memory photos and videos (Memories/<date>.md + what
-// was sent to the bot, as in the Depth view), long tasks as rails, accent tiles in the goal colours. Gallery mode:
+// was sent to the bot, lib/memories.ts), long tasks as rails, accent tiles in the goal colours. Gallery mode:
 // only the photos and videos. Click a task → it flies out → Open = the item drawer; click an empty cell → a task
 // made there and opened in the item drawer, its title selected (closed unnamed → it goes to the trash again); a
 // day's memory note opens in the side sheet, as notes do on the Notes page.
@@ -164,7 +164,7 @@ export default function TunnelCalendar({ tasks, byId, onOpenDay, onAddTask, onDe
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tasks, byId]);
 
-  // Memories (shared with the Depth view): the photos and videos of a day, capped for the span.
+  // Memories: the photos and videos of a day, capped for the span.
   const memories = useQuery({ queryKey: ["memories", user?.id], queryFn: loadMemories, enabled: !!user, staleTime: 60_000 });
   const mediaOf = (d: number): Omit<TunnelMedia, "url">[] => {
     const m = memories.data?.get(isoOf(d));

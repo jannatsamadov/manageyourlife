@@ -1,6 +1,6 @@
 // Memories of the days (owner, 2026-10-25): a note Memories/<YYYY-MM-DD>….md, and the photos sent to the Telegram bot
 // that day (Inbox/files/<YYYY-MM-DD>-…). The first picture of a day — an image in its note, else a photo — is the
-// picture of its card in the Depth calendar.
+// picture of its day in the Tunnel calendar.
 import { supabase } from "@/integrations/supabase/client";
 import { fileName, isImage, isVideo, loadIndex, resolver, targetsOf, vault } from "@/lib/vault";
 
